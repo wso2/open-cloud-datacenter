@@ -4,7 +4,7 @@ We are excited that you are interested in contributing to Open Cloud Data Center
 
 ## Code of Conduct
 
-All contributors are expected to follow our [Code of Conduct](https://github.com/wso2/open-cloud-datacenter/blob/main/docs/CODE_OF_CONDUCT.md). Please be respectful and professional in all interactions.
+All contributors are expected to follow our [Code of Conduct](https://github.com/wso2/open-cloud-datacenter/blob/main/CODE_OF_CONDUCT.md). Please be respectful and professional in all interactions.
 
 ## How to Contribute
 
