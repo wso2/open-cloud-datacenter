@@ -2,19 +2,19 @@
 
 The Open Cloud Data Center initiative is focused on providing a standardized, scalable, and customizable cloud datacenter infrastructure.
 
-## What is and Why Open Cloud Data Center?
+## Overview
 
-Open Cloud Data Center aims to simplify the deployment and management of cloud data centers by providing a modular and open-source architecture. 
+The Open Cloud Data Center simplifies the deployment and management of cloud infrastructure through a modular, open-source architecture. 
 
 **Why choose Open Cloud Data Center?**
 - **Sovereignty**: Complete control over your data and infrastructure.
-- **Portability**: Move workloads across different cloud providers or on-premise hardware.
+- **Portability**: Move workloads across cloud providers or on-premises hardware.
 - **Cost-Efficiency**: Optimize resource usage and avoid vendor lock-in.
 - **Community-Driven**: Built on open standards and collaborative development.
 
 ---
 
-### Quick Start
+## Quick Start
 ```bash
 git clone https://github.com/wso2/open-cloud-datacenter.git
 cd open-cloud-datacenter
