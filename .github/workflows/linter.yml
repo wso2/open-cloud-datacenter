@@ -1,6 +1,8 @@
 name: Lint Code Base
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   pull_request_review:
     types: [submitted]
 
@@ -9,7 +11,7 @@ permissions:
 
 jobs:
   lint:
-    if: github.event.review.state == 'approved'
+    if: github.event_name == 'pull_request' || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved')
     name: Lint Code Base
     runs-on: ubuntu-latest
     steps:
