@@ -1,0 +1,35 @@
+name: Terraform Security Scan
+
+on:
+  pull_request:
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+      - '**/*.hcl'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  trivy-terraform-scan:
+    name: Run Trivy IaC scan on PR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Run Trivy IaC scan
+        uses: aquasecurity/trivy-action@v0
+        with:
+          scan-type: 'fs'
+          scanners: 'misconfig'
+          format: 'sarif'
+          output: 'trivy.sarif'
+
+      - name: Upload Trivy SARIF
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
+        uses: github/codeql-action/upload-sarif@c4a7bc332abaec03596ff2803dd7f3ca3a238975 # v3
+        with:
+          sarif_file: trivy.sarif
