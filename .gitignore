@@ -26,5 +26,5 @@ replay_pid*
 # Infrastructure Tools
 .terraform/
 *.tfstate*
-*.retry
+*.tfvars
 .env
