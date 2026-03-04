@@ -93,4 +93,3 @@ runcmd:
       fi
       echo "--- Deployment Script Finished ---"
     ) > /var/log/rancher-install.log 2>&1 &
-    
