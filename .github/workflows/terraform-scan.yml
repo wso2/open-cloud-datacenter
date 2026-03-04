@@ -19,14 +19,23 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Trivy
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.5
+        with:
+          version: v0.69.3
 
       - name: Run Trivy IaC scan
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # 0.28.0
+        uses: aquasecurity/trivy-action@97e0b3872f55f89b95b2f65b3dbab56962816478 # 0.34.2
         with:
           scan-type: 'fs'
+          scan-ref: '.'
           scanners: 'misconfig'
           format: 'sarif'
           output: 'trivy.sarif'
+          skip-setup-trivy: true
 
       - name: Upload Trivy SARIF
         if: always() && github.event.pull_request.head.repo.full_name == github.repository
