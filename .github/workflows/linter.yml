@@ -18,7 +18,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ github.head_ref }}
+          ref: refs/pull/${{ github.event.pull_request.number }}/head
           fetch-depth: 0
           persist-credentials: false
 
@@ -34,5 +34,5 @@ jobs:
         env:
           VALIDATE_ALL_CODEBASE: false
           DEFAULT_BRANCH: ${{ github.event.pull_request.base.ref }}
-          GITHUB_HEAD_REF: ${{ github.head_ref }}
+          GITHUB_SHA: ${{ steps.set_lint_sha.outputs.sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
