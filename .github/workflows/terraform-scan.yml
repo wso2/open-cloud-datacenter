@@ -9,7 +9,7 @@ on:
 
 permissions:
   contents: read
-  security-events: write
+  pull-requests: write
 
 jobs:
   trivy-terraform-scan:
@@ -28,16 +28,41 @@ jobs:
           version: v0.69.3
 
       - name: Run Trivy IaC scan
+        id: trivy
         uses: aquasecurity/trivy-action@97e0b3872f55f89b95b2f65b3dbab56962816478 # 0.34.2
         with:
           scan-type: 'fs'
           scan-ref: '.'
           scanners: 'misconfig'
-          format: 'sarif'
-          output: 'trivy.sarif'
+          format: 'table'
+          output: 'trivy-results.txt'
+          exit-code: '1'
+        continue-on-error: true
 
-      - name: Upload Trivy SARIF
+      - name: Post Trivy results to PR
         if: always() && github.event.pull_request.head.repo.full_name == github.repository
-        uses: github/codeql-action/upload-sarif@c4a7bc332abaec03596ff2803dd7f3ca3a238975 # v3
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         with:
-          sarif_file: trivy.sarif
+          script: |
+            const fs = require('fs');
+            const trivyOutput = fs.existsSync('trivy-results.txt') 
+              ? fs.readFileSync('trivy-results.txt', 'utf8') 
+              : 'No results found';
+            const status = '${{ steps.trivy.outcome }}' === 'success' ? '✅ Passed' : '❌ Issues Found';
+            const body = `## Trivy IaC Scan Results ${status}
+
+            <details>
+            <summary>Click to expand scan results</summary>
+
+            \`\`\`
+            ${trivyOutput}
+            \`\`\`
+
+            </details>`;
+            
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
