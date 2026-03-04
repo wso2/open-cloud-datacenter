@@ -25,6 +25,13 @@ jobs:
       - name: Fetch base branch for diff
         run: git fetch --no-tags --prune origin "+refs/heads/${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
 
+      - name: Debug SHA values
+        run: |
+          echo "PR Head SHA: ${{ github.event.pull_request.head.sha }}"
+          echo "System GITHUB_SHA: $GITHUB_SHA"
+          echo "Checked out commit:"
+          git rev-parse HEAD
+
       - name: Lint Code Base
         uses: super-linter/super-linter@12150456a73e248bdc94d0794898f94e23127c88 # v7
         env:
