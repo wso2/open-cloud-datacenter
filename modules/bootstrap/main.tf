@@ -2,11 +2,11 @@ terraform {
   required_providers {
     harvester = {
       source  = "harvester/harvester"
-      version = "~> 0.6.0"
+      version = "~> 1.7"
     }
     helm = {
       source  = "hashicorp/helm"
-      version = "~> 2.0"
+      version = "~> 3.1"
     }
     rancher2 = {
       source  = "rancher/rancher2"

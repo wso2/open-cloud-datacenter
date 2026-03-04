@@ -19,15 +19,15 @@ terraform {
   required_providers {
     rancher2 = {
       source  = "rancher/rancher2"
-      version = "~> 8.0.0"
+      version = "~> 13.1"
     }
     harvester = {
       source  = "harvester/harvester"
-      version = "~> 0.6.0"
+      version = "~> 1.7"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
-      version = "~> 2.30.0"
+      version = "~> 3.0"
     }
   }
 }
