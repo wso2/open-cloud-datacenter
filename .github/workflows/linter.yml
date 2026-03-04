@@ -1,8 +1,6 @@
 name: Lint Code Base
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
   pull_request_review:
     types: [submitted]
 
@@ -31,6 +29,7 @@ jobs:
           echo "System GITHUB_SHA: $GITHUB_SHA"
           echo "Checked out commit:"
           git rev-parse HEAD
+          echo "GITHUB_SHA=${{ github.event.pull_request.head.sha }}" >> $GITHUB_ENV
 
       - name: Lint Code Base
         uses: super-linter/super-linter@12150456a73e248bdc94d0794898f94e23127c88 # v7
@@ -38,4 +37,3 @@ jobs:
           VALIDATE_ALL_CODEBASE: false
           DEFAULT_BRANCH: ${{ github.event.pull_request.base.ref }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_SHA: ${{ github.event.pull_request.head.sha }}
