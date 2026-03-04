@@ -22,10 +22,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Set lint SHA from checked-out HEAD
-        id: set_lint_sha
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
       - name: Fetch base branch for diff
         run: git fetch --no-tags --prune origin "+refs/heads/${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
 
@@ -34,5 +30,4 @@ jobs:
         env:
           VALIDATE_ALL_CODEBASE: false
           DEFAULT_BRANCH: ${{ github.event.pull_request.base.ref }}
-          GITHUB_SHA: ${{ steps.set_lint_sha.outputs.sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

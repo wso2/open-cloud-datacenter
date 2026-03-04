@@ -35,7 +35,6 @@ jobs:
           scanners: 'misconfig'
           format: 'sarif'
           output: 'trivy.sarif'
-          skip-setup-trivy: true
 
       - name: Upload Trivy SARIF
         if: always() && github.event.pull_request.head.repo.full_name == github.repository
