@@ -24,19 +24,19 @@ terraform {
 }
 
 provider "rancher2" {
-  api_url  = "https://rancher.example.internal"
+  api_url = "https://rancher.example.internal"
   # Provide credentials via CATTLE_ACCESS_KEY / CATTLE_SECRET_KEY env vars
-  insecure = true
+  # insecure = true # Only enable if using self-signed certs without pinning CA certs (Bootstrap only)
 }
 
 module "tenant_cluster" {
   source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/workloads/k8s-cluster?ref=v0.1.0"
 
-  cluster_name           = "tenant-alpha"
-  k8s_version            = "v1.27.6+rke2r1"
-  node_count             = 3
-  cloud_credential_name  = "harvester-local-creds"
-  harvester_namespace    = "default"
+  cluster_name          = "tenant-alpha"
+  k8s_version           = "v1.27.6+rke2r1"
+  node_count            = 3
+  cloud_credential_name = "harvester-local-creds"
+  harvester_namespace   = "default"
 
   # Reference the image and network created by the storage and networking modules
   harvester_image_name   = "default/ubuntu-22-04"

@@ -41,7 +41,7 @@ resource "harvester_cloudinit_secret" "cloudinit" {
   user_data = templatefile("${path.module}/templates/cloud-init.yaml.tpl", {
     password         = var.vm_password,
     cluster_dns      = var.rancher_hostname,
-    rancher_password = var.rancher_admin_password,
+    rancher_password = var.bootstrap_password,
     ssh_public_key   = tls_private_key.bootstrap_key.public_key_openssh,
     node_index       = count.index,
     node_count       = var.node_count,

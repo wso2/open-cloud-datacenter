@@ -4,7 +4,7 @@
 
 The Open Cloud Data Center (OCDC) Terraform framework deploys and manages a full cloud-datacenter stack on top of [Harvester HCI](https://harvesterhci.io/). Harvester provides the hypervisor layer (based on KubeVirt), while Rancher provides the Kubernetes management plane. Tenant workload clusters are provisioned as RKE2 clusters running as virtual machines inside Harvester.
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Physical Nodes                           │
 │  ┌───────────────────────────────────────────────────────────┐  │
@@ -149,7 +149,7 @@ This phase configures the `asgardeo` provider (or equivalent OIDC configuration 
 
 ## Module Dependency Graph
 
-```
+```text
                     ┌─────────────┐
                     │  bootstrap  │
                     │  (Phase 0)  │
