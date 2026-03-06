@@ -28,7 +28,7 @@ framework:
   - terraform
 
 skip-check:
-  - CKV_TF_1   # Ensure Terraform module sources use a commit hash
+  - CKV_TF_1 # Ensure Terraform module sources use a commit hash
   - CKV_AWS_18 # Ensure S3 bucket has access logging enabled
 
 skip-path:
@@ -57,6 +57,7 @@ resource "aws_instance" "example" {
 ```
 
 ### Documentation
+
 - [Checkov CLI Reference](https://www.checkov.io/2.Basics/CLI%20Command%20Reference.html)
 - [Checkov Suppressions](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html)
 
@@ -64,7 +65,7 @@ resource "aws_instance" "example" {
 
 ## TFLint (Terraform Linting)
 
-**Config file:** `.github/linters/.tflint.hcl` or `.tflint.hcl` in repo root
+**Config file:** `.github/linters/.tflint.hcl` or `.tflint.hcl` in repository root
 
 ### Global suppressions (config file)
 
@@ -110,6 +111,7 @@ resource "aws_instance" "example" {
 ```
 
 ### Documentation
+
 - [TFLint Configuration](https://github.com/terraform-linters/tflint/blob/master/docs/user-guide/config.md)
 - [TFLint Annotations](https://github.com/terraform-linters/tflint/blob/master/docs/user-guide/annotations.md)
 
@@ -147,6 +149,7 @@ resource "aws_s3_bucket" "example" {
 ```
 
 ### Documentation
+
 - [Terrascan Config](https://runterrascan.io/docs/usage/config_options/)
 - [Terrascan Skip Rules](https://runterrascan.io/docs/usage/in_file_instrumentation/)
 
@@ -159,6 +162,7 @@ resource "aws_s3_bucket" "example" {
 ### Handling format issues
 
 1. Run locally before committing:
+
    ```bash
    terraform fmt -recursive
    ```
@@ -186,13 +190,13 @@ rules:
   line-length:
     max: 120
     level: warning
-  
+
   comments:
     min-spaces-from-content: 1
-  
+
   truthy:
     check-keys: false
-  
+
   # Disable specific rules
   document-start: disable
   indentation:
@@ -223,6 +227,7 @@ another_key: no
 ```
 
 ### Documentation
+
 - [yamllint Configuration](https://yamllint.readthedocs.io/en/stable/configuration.html)
 - [yamllint Rules](https://yamllint.readthedocs.io/en/stable/rules.html)
 
@@ -230,7 +235,7 @@ another_key: no
 
 ## ShellCheck (Bash/Shell)
 
-**Config file:** `.github/linters/.shellcheckrc` or `.shellcheckrc` in repo root
+**Config file:** `.github/linters/.shellcheckrc` or `.shellcheckrc` in repository root
 
 ### Global suppressions (config file)
 
@@ -279,6 +284,7 @@ another_unused="value"
 ```
 
 ### Documentation
+
 - [ShellCheck Wiki](https://www.shellcheck.net/wiki/)
 - [ShellCheck Directives](https://www.shellcheck.net/wiki/Directive)
 
@@ -318,6 +324,7 @@ steps:
 ```
 
 ### Documentation
+
 - [actionlint Configuration](https://github.com/rhysd/actionlint/blob/main/docs/config.md)
 
 ---
@@ -347,19 +354,22 @@ Or YAML format:
 ```yaml
 # .github/linters/.markdownlint.yaml
 default: true
-MD013: false          # Line length
-MD033: false          # Inline HTML
-MD041: false          # First line heading
+MD013: false # Line length
+MD033: false # Inline HTML
+MD041: false # First line heading
 ```
 
 ### Inline suppressions
 
 ```markdown
 <!-- markdownlint-disable MD013 -->
+
 This is a very long line that would normally trigger the line length warning but we want to allow it here.
+
 <!-- markdownlint-enable MD013 -->
 
 <!-- markdownlint-disable-next-line MD041 -->
+
 This paragraph doesn't start with a heading.
 ```
 
@@ -367,6 +377,7 @@ This paragraph doesn't start with a heading.
 
 ```markdown
 <!-- markdownlint-disable -->
+
 (Entire file content ignored)
 
 <!-- Or at top of file: -->
@@ -374,6 +385,7 @@ This paragraph doesn't start with a heading.
 ```
 
 ### Documentation
+
 - [markdownlint Rules](https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md)
 - [markdownlint Configuration](https://github.com/DavidAnson/markdownlint#configuration)
 
@@ -392,10 +404,10 @@ In your workflow file:
     VALIDATE_ALL_CODEBASE: false
     DEFAULT_BRANCH: main
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
+
     # Exclude paths (regex)
     FILTER_REGEX_EXCLUDE: .*examples/.*|.*vendor/.*|.*node_modules/.*
-    
+
     # Or include only specific paths
     FILTER_REGEX_INCLUDE: .*modules/.*|.*\.github/.*
 ```
@@ -418,14 +430,14 @@ Super-linter respects `.gitignore` by default. Files in `.gitignore` are not lin
 
 ## Quick Reference
 
-| Linter | Config File | Inline Suppression |
-|--------|-------------|-------------------|
-| Checkov | `.checkov.yaml` | `# checkov:skip=CKV_XXX:reason` |
-| TFLint | `.tflint.hcl` | `# tflint-ignore: rule_name` |
-| Terrascan | `.terrascan.toml` | `#ts:skip=AC_XXX reason` |
-| yamllint | `.yamllint.yml` | `# yamllint disable-line rule:name` |
-| ShellCheck | `.shellcheckrc` | `# shellcheck disable=SCXXXX` |
+| Linter       | Config File          | Inline Suppression                    |
+| ------------ | -------------------- | ------------------------------------- |
+| Checkov      | `.checkov.yaml`      | `# checkov:skip=CKV_XXX:reason`       |
+| TFLint       | `.tflint.hcl`        | `# tflint-ignore: rule_name`          |
+| Terrascan    | `.terrascan.toml`    | `#ts:skip=AC_XXX reason`              |
+| yamllint     | `.yamllint.yml`      | `# yamllint disable-line rule:name`   |
+| ShellCheck   | `.shellcheckrc`      | `# shellcheck disable=SCXXXX`         |
 | markdownlint | `.markdownlint.json` | `<!-- markdownlint-disable MDXXX -->` |
-| actionlint | `.actionlint.yaml` | Limited support |
+| actionlint   | `.actionlint.yaml`   | Limited support                       |
 
 All config files go in `.github/linters/` for super-linter to auto-detect them.
