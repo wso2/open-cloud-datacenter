@@ -94,9 +94,10 @@ resource "null_resource" "apply_harvester_registration" {
 
   provisioner "local-exec" {
     command = <<EOT
-      echo "$KUBECONFIG_CONTENT" > harvester_kubeconfig.yaml
-      ${rancher2_cluster.harvester_hci.cluster_registration_token[0].command} --kubeconfig harvester_kubeconfig.yaml
-      rm harvester_kubeconfig.yaml
+      tmpkubeconfig=$(mktemp)
+      trap "rm -f $tmpkubeconfig" EXIT
+      printf '%s' "$KUBECONFIG_CONTENT" > "$tmpkubeconfig"
+      ${rancher2_cluster.harvester_hci.cluster_registration_token[0].command} --kubeconfig "$tmpkubeconfig"
     EOT
 
     environment = {
@@ -108,10 +109,11 @@ resource "null_resource" "apply_harvester_registration" {
   provisioner "local-exec" {
     when    = destroy
     command = <<EOT
-      echo "$KUBECONFIG_CONTENT" > harvester_kubeconfig.yaml
-      kubectl --kubeconfig harvester_kubeconfig.yaml -n cattle-system delete deployment cattle-cluster-agent --ignore-not-found
-      kubectl --kubeconfig harvester_kubeconfig.yaml -n cattle-system delete secret cattle-credentials --ignore-not-found || true
-      rm harvester_kubeconfig.yaml
+      tmpkubeconfig=$(mktemp)
+      trap "rm -f $tmpkubeconfig" EXIT
+      printf '%s' "$KUBECONFIG_CONTENT" > "$tmpkubeconfig"
+      kubectl --kubeconfig "$tmpkubeconfig" -n cattle-system delete deployment cattle-cluster-agent --ignore-not-found
+      kubectl --kubeconfig "$tmpkubeconfig" -n cattle-system delete secret cattle-credentials --ignore-not-found || true
     EOT
 
     environment = {

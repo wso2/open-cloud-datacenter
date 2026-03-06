@@ -5,10 +5,6 @@ terraform {
       source  = "harvester/harvester"
       version = "~> 1.7"
     }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 3.1"
-    }
     rancher2 = {
       source  = "rancher/rancher2"
       version = "~> 13.1"
@@ -86,18 +82,8 @@ resource "harvester_virtualmachine" "rancher_server" {
     network_data          = ""
   }
 
-  # Note: Since the VM is on a masquerade network, Terraform cannot reach it directly on port 22 via IP.
-  # We instead use the K3s/RKE2 approach of installing inside cloud-init and waiting locally, OR
-  # we must use a nodeport/forwarding trick if the Kubernetes cluster exposes ssh. 
-  # However, wait... The previous user's config successfully used `masquerade` but ran Helm IN the cloud-init script!
-  # If we must run Terraform Helm, Harvester doesn't natively expose the Masquerade IP to the external network.
-  # Let's switch to the local-exec polling approach against the Harvester API.
-
-  # Copy the kubeconfig back to the terraform runner securely
-  # Wait... actually, Harvester's SSH is inaccessible on masquerade from the outside without a LoadBalancer or floating IP.
-  # Let's pivot to the user's working K3s cloud-init script approach for the Phase 0 bootstrap, 
-  # returning the Rancher URL and relying on that for Phase 1!
-
+  # Rancher is installed entirely by cloud-init inside the VM (RKE2 + cert-manager + Helm).
+  # The VM uses a masquerade network so Terraform cannot SSH into it directly.
   provisioner "local-exec" {
     command = "echo 'Please wait for cloud-init to finish installing RKE2/K3s and Rancher internally!'"
   }

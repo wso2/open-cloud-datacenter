@@ -54,7 +54,7 @@ runcmd:
 
       # 5. Wait for Node Readiness
       echo "Waiting for nodes to be Ready..."
-      until /usr/local/bin/kubectl get nodes | grep -q "Ready"; do sleep 10; done
+      until /usr/local/bin/kubectl get nodes | grep -v "NotReady" | grep -q "Ready"; do sleep 10; done
 
       if [ "${node_index}" -eq "0" ]; then
         echo "Initializing Rancher..."
