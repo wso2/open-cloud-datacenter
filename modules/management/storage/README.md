@@ -45,6 +45,37 @@ module "storage" {
 }
 ```
 
+## How Consumers Reference Images
+
+The storage module is applied by operators in the management phase. Consumers (workload
+provisioning) reference the images via Terraform remote state — using the same key they were
+registered under:
+
+```hcl
+# In the management phase (operator)
+module "storage" {
+  source = "..."
+  managed_images = {
+    "ubuntu-22-04" = { ... }
+    "rocky-9"      = { ... }
+  }
+}
+
+# In a workload/tenant phase (consumer) — pulls image ID from management state
+data "terraform_remote_state" "management" {
+  backend = "local"
+  config  = { path = "../02-management/terraform.tfstate" }
+}
+
+module "tenant_vm_cluster" {
+  source              = "..."
+  harvester_image_name = data.terraform_remote_state.management.outputs.image_ids["ubuntu-22-04"]
+}
+```
+
+The value of `image_ids["ubuntu-22-04"]` is the Harvester image resource path
+(`namespace/name`) that VM and cluster provisioning resources accept directly.
+
 ## Inputs
 
 | Name | Description | Type | Default | Required |
@@ -57,7 +88,9 @@ The map key becomes the image resource name in Harvester. Use lowercase, hyphen-
 
 ## Outputs
 
-This module does not expose outputs. Images are referenced by name in VM provisioning configs.
+| Name | Description |
+|------|-------------|
+| `image_ids` | Map of image key → Harvester image ID (`namespace/name`). Keys match `managed_images` input. |
 
 ## Notes
 
