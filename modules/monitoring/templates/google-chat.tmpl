@@ -1,0 +1,98 @@
+{{/* google-chat.tmpl — Alertmanager Go template for Google Chat card v2 format.
+ *
+ * This template is provided as a reference for the intended Google Chat card v2
+ * payload format. The inline message templates in the AlertmanagerConfig resource
+ * are derived from the patterns defined here.
+ *
+ * To load this template into Alertmanager for use with a relay service:
+ *   1. Create a Secret in cattle-monitoring-system containing this file content.
+ *   2. Reference it in alertmanagerSpec.configSecret via Helm values.
+ *   3. Call {{ template "google_chat.card" . }} from your relay's template.
+ *
+ * Google Chat card v2 API reference:
+ *   https://developers.google.com/chat/api/guides/message-formats/cards
+ */}}
+
+{{/* ── Severity emoji helper ─────────────────────────────────────────────── */}}
+{{ define "google_chat.severity_emoji" -}}
+  {{- if eq .Labels.severity "critical" }}🔴{{ else if eq .Labels.severity "warning" }}🟡{{ else }}🔵{{ end -}}
+{{ end }}
+
+{{/* ── Single alert section widget ─────────────────────────────────────── */}}
+{{ define "google_chat.alert_section" -}}
+{
+  "header": "{{ template "google_chat.severity_emoji" . }} {{ .Labels.alertname }}",
+  "widgets": [
+    {{- if .Labels.node }}
+    { "decoratedText": { "topLabel": "Node", "text": "{{ .Labels.node }}" } },
+    {{- end }}
+    {{- if .Labels.namespace }}
+    { "decoratedText": { "topLabel": "Namespace", "text": "{{ .Labels.namespace }}" } },
+    {{- end }}
+    {{- if .Labels.volume }}
+    { "decoratedText": { "topLabel": "Volume", "text": "{{ .Labels.volume }}" } },
+    {{- end }}
+    {{- if .Annotations.description }}
+    { "textParagraph": { "text": "{{ .Annotations.description | reReplaceAll "(.{500}).*" "${1}…" }}" } },
+    {{- end }}
+    {{- if .Value }}
+    { "decoratedText": { "topLabel": "Value", "text": "{{ .Value }}" } },
+    {{- end }}
+    { "decoratedText": { "topLabel": "Firing since", "text": "{{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}" } }
+    {{- if .Annotations.runbook_url }},
+    { "buttonList": { "buttons": [ { "text": "📖 Runbook", "onClick": { "openLink": { "url": "{{ .Annotations.runbook_url }}" } } } ] } }
+    {{- end }}
+  ]
+}
+{{- end }}
+
+{{/* ── Full card v2 payload (for grouped alerts) ────────────────────────── */}}
+{{ define "google_chat.card" -}}
+{
+  "cardsV2": [
+    {
+      "cardId": "{{ .GroupLabels.alertname }}-{{ .GroupLabels.severity }}",
+      "card": {
+        "header": {
+          "title": "{{ if eq .GroupLabels.severity "critical" }}🔴 CRITICAL{{ else if eq .GroupLabels.severity "warning" }}🟡 WARNING{{ else }}🔵 ALERT{{ end }}: {{ .GroupLabels.alertname }}",
+          "subtitle": "{{ len .Alerts.Firing }} firing{{ if gt (len .Alerts.Resolved) 0 }}, {{ len .Alerts.Resolved }} resolved{{ end }}",
+          "imageUrl": "https://prometheus.io/assets/prometheus_logo_grey.svg",
+          "imageType": "CIRCLE"
+        },
+        "sections": [
+          {{ range $i, $alert := .Alerts.Firing -}}
+          {{ if gt $i 0 }},{{ end }}
+          {{ template "google_chat.alert_section" $alert }}
+          {{- end }}
+          {{ if gt (len .Alerts.Resolved) 0 }},
+          {
+            "header": "✅ Resolved",
+            "widgets": [
+              {{ range $i, $alert := .Alerts.Resolved -}}
+              {{ if gt $i 0 }},{{ end }}
+              { "decoratedText": { "topLabel": "{{ $alert.Labels.alertname }}", "text": "Resolved at {{ $alert.EndsAt.Format "2006-01-02 15:04:05 UTC" }}" } }
+              {{- end }}
+            ]
+          }
+          {{ end }}
+        ]
+      }
+    }
+  ]
+}
+{{- end }}
+
+{{/* ── Plain-text message (used inline in AlertmanagerConfig.message field) */}}
+{{ define "google_chat.message" -}}
+{{ if eq .GroupLabels.severity "critical" }}🔴 *CRITICAL*{{ else if eq .GroupLabels.severity "warning" }}🟡 *WARNING*{{ else }}🔵 *ALERT*{{ end }} — *{{ .GroupLabels.alertname }}*
+
+{{ range .Alerts.Firing -}}
+• *{{ .Labels.alertname }}*{{ if .Labels.node }} | node: `{{ .Labels.node }}`{{ end }}{{ if .Labels.namespace }} | ns: `{{ .Labels.namespace }}`{{ end }}{{ if .Labels.volume }} | vol: `{{ .Labels.volume }}`{{ end }}
+  {{ if .Annotations.description }}{{ .Annotations.description | reReplaceAll "(.{300}).*" "${1}…" }}{{ end }}
+  Firing since: {{ .StartsAt.Format "2006-01-02 15:04 UTC" }}{{ if .Annotations.runbook_url }} | <{{ .Annotations.runbook_url }}|Runbook>{{ end }}
+
+{{ end -}}
+{{ if gt (len .Alerts.Resolved) 0 -}}
+✅ *Resolved:* {{ range .Alerts.Resolved }}{{ .Labels.alertname }} {{ end }}
+{{ end -}}
+{{- end }}
