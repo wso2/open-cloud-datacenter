@@ -15,6 +15,15 @@ locals {
   # AlertmanagerConfig and template resources go in the monitoring namespace.
   ns  = var.monitoring_namespace
   dns = var.dashboards_namespace
+
+  # Rancher-authenticated proxy base for this Harvester cluster.
+  # e.g. https://rancher.example.com/k8s/clusters/c-v7gvt
+  # Both button URLs are derived from this so they pass through Rancher auth
+  # rather than hitting the Harvester IP directly (which returns 403 to users
+  # who are not separately authenticated to Harvester).
+  rancher_proxy_base    = (var.rancher_url != "" && var.harvester_cluster_id != "") ? "${var.rancher_url}/k8s/clusters/${var.harvester_cluster_id}" : ""
+  alertmanager_base_url = local.rancher_proxy_base != "" ? "${local.rancher_proxy_base}/api/v1/namespaces/${var.monitoring_namespace}/services/http:rancher-monitoring-alertmanager:9093/proxy" : ""
+  prometheus_base_url   = local.rancher_proxy_base != "" ? "${local.rancher_proxy_base}/api/v1/namespaces/${var.monitoring_namespace}/services/http:rancher-monitoring-prometheus:9090/proxy" : ""
 }
 
 # ── Alertmanager config + calert (Google Chat webhook forwarder) ──────────────
@@ -63,9 +72,10 @@ locals {
   # Section-level headers (strings) only — card-level header objects are not
   # supported by Google Chat webhooks and produce blank cards.
   # Available functions: toUpper, Title, SortedPairs (calert v2.3.0)
-  # var.alertmanager_url is a Terraform interpolation — baked in at apply time as
-  # a literal string. {{.GeneratorURL}} is a Go template variable — resolved at
-  # runtime per alert. Both coexist safely in the same heredoc.
+  # local.alertmanager_base_url / local.prometheus_base_url are Terraform
+  # interpolations — baked in at apply time as literal strings. The Go template
+  # vars ({{.Labels.alertname}} etc.) are resolved at runtime per alert.
+  # Both coexist safely in the same heredoc.
   calert_message_tmpl = <<-TMPL
     {{- define "cardsV2" -}}
     {
@@ -78,20 +88,12 @@ locals {
               {{- if ne $i 0 -}},{{- end -}}
               {"decoratedText": {"text": "{{ $pair.Name | Title }}: {{ $pair.Value }}"}}
               {{- end -}}
-              %{~if var.alertmanager_url != ""~}
+              %{~ if local.rancher_proxy_base != "" ~}
               ,{"buttonList": {"buttons": [
-                {"text": "View Alert", "onClick": {"openLink": {"url": "${var.alertmanager_url}/#/alerts?filter=%7Balertname%3D%22{{.Labels.alertname}}%22%7D"}}}
-                {{- if .GeneratorURL -}}
-                ,{"text": "View in Prometheus", "onClick": {"openLink": {"url": "{{.GeneratorURL}}"}}}
-                {{- end -}}
+                {"text": "View Alert", "onClick": {"openLink": {"url": "${local.alertmanager_base_url}/#/alerts?filter=%7Balertname%3D%22{{.Labels.alertname}}%22%7D"}}},
+                {"text": "View in Prometheus", "onClick": {"openLink": {"url": "${local.prometheus_base_url}/alerts?search={{.Labels.alertname}}"}}}
               ]}}
-              %{~else~}
-              {{- if .GeneratorURL -}}
-              ,{"buttonList": {"buttons": [
-                {"text": "View in Prometheus", "onClick": {"openLink": {"url": "{{.GeneratorURL}}"}}}
-              ]}}
-              {{- end -}}
-              %{~endif~}
+              %{~ endif ~}
             ]
           },
           {

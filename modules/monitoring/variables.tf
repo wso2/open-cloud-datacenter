@@ -21,10 +21,16 @@ variable "google_chat_webhook_url" {
   description = "Google Chat incoming webhook URL for alert notifications."
 }
 
-variable "alertmanager_url" {
+variable "rancher_url" {
   type        = string
   default     = ""
-  description = "Base URL of the Alertmanager UI (e.g. https://<rancher>/api/v1/namespaces/cattle-monitoring-system/services/http:rancher-monitoring-alertmanager:9093/proxy). Used for the 'View Alert' button in Google Chat cards. Leave empty to omit the button."
+  description = "Base URL of the Rancher server (e.g. https://rancher.example.com). Combined with harvester_cluster_id to build Rancher-authenticated proxy URLs for the 'View Alert' and 'View in Prometheus' buttons. Leave empty to omit both buttons."
+}
+
+variable "harvester_cluster_id" {
+  type        = string
+  default     = ""
+  description = "Rancher cluster ID for the Harvester cluster (e.g. c-v7gvt). Found in Rancher UI → Cluster Management → cluster row. Required when rancher_url is set."
 }
 
 # ── Optional (monitoring namespaces) ─────────────────────────────────────────
