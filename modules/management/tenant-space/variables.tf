@@ -33,7 +33,7 @@ variable "cpu_limit" {
   description = "Total CPU limit for the project (e.g. \"8\", \"500m\"). Null skips quota entirely."
   default     = null
   validation {
-    condition     = var.cpu_limit == null || trimspace(var.cpu_limit) != ""
+    condition     = var.cpu_limit == null ? true : trimspace(var.cpu_limit) != ""
     error_message = "cpu_limit must be null or a non-empty quantity string."
   }
 }
@@ -43,7 +43,7 @@ variable "memory_limit" {
   description = "Total memory limit for the project (e.g. \"16Gi\", \"4096Mi\"). Only applied when cpu_limit is set."
   default     = null
   validation {
-    condition     = var.memory_limit == null || trimspace(var.memory_limit) != ""
+    condition     = var.memory_limit == null ? true : trimspace(var.memory_limit) != ""
     error_message = "memory_limit must be null or a non-empty quantity string."
   }
 }
@@ -53,7 +53,7 @@ variable "storage_limit" {
   description = "Total persistent storage request limit for the project (e.g. \"200Gi\"). Only applied when cpu_limit is set."
   default     = null
   validation {
-    condition     = var.storage_limit == null || trimspace(var.storage_limit) != ""
+    condition     = var.storage_limit == null ? true : trimspace(var.storage_limit) != ""
     error_message = "storage_limit must be null or a non-empty quantity string."
   }
 }
@@ -63,7 +63,7 @@ variable "namespace_cpu_limit" {
   description = "Per-namespace default CPU limit. Defaults to cpu_limit."
   default     = null
   validation {
-    condition     = var.namespace_cpu_limit == null || trimspace(var.namespace_cpu_limit) != ""
+    condition     = var.namespace_cpu_limit == null ? true : trimspace(var.namespace_cpu_limit) != ""
     error_message = "namespace_cpu_limit must be null or a non-empty quantity string."
   }
 }
@@ -73,7 +73,7 @@ variable "namespace_memory_limit" {
   description = "Per-namespace default memory limit. Defaults to memory_limit."
   default     = null
   validation {
-    condition     = var.namespace_memory_limit == null || trimspace(var.namespace_memory_limit) != ""
+    condition     = var.namespace_memory_limit == null ? true : trimspace(var.namespace_memory_limit) != ""
     error_message = "namespace_memory_limit must be null or a non-empty quantity string."
   }
 }
@@ -83,7 +83,7 @@ variable "namespace_storage_limit" {
   description = "Per-namespace default storage limit. Defaults to storage_limit."
   default     = null
   validation {
-    condition     = var.namespace_storage_limit == null || trimspace(var.namespace_storage_limit) != ""
+    condition     = var.namespace_storage_limit == null ? true : trimspace(var.namespace_storage_limit) != ""
     error_message = "namespace_storage_limit must be null or a non-empty quantity string."
   }
 }
@@ -107,7 +107,7 @@ variable "group_role_bindings" {
     Example:
       group_role_bindings = [
         { group_principal_id = "openid://my-oidc-group", role_template_id = "project-member" },
-        { group_principal_id = "openid://my-oidc-group", role_template_id = module.cluster_roles.vm_manager_role_id },
+        { group_principal_id = "openid://my-oidc-group", role_template_id = module.cluster_roles.vm_metrics_observer_role_id },
       ]
   EOT
   default     = []
