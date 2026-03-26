@@ -103,8 +103,9 @@ variable "etcd_s3" {
       trimspace(var.etcd_s3.region) != "" &&
       trimspace(var.etcd_s3.cloud_credential_id) != "" &&
       try(var.etcd_s3.snapshot_retention, 3) > 0 &&
+      floor(try(var.etcd_s3.snapshot_retention, 3)) == try(var.etcd_s3.snapshot_retention, 3) &&
       trimspace(try(var.etcd_s3.snapshot_schedule, "")) != ""
     )
-    error_message = "When etcd_s3 is set, bucket/region/cloud_credential_id must be non-empty, snapshot_retention must be > 0, and snapshot_schedule must be non-empty."
+    error_message = "When etcd_s3 is set, bucket/region/cloud_credential_id must be non-empty, snapshot_retention must be a positive integer, and snapshot_schedule must be non-empty."
   }
 }

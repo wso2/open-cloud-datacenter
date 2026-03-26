@@ -15,9 +15,12 @@ variable "namespaces" {
     condition = (
       length(var.namespaces) > 0 &&
       length(var.namespaces) == length(toset(var.namespaces)) &&
-      alltrue([for ns in var.namespaces : trimspace(ns) != ""])
+      alltrue([for ns in var.namespaces :
+        length(ns) <= 63 &&
+        can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", ns))
+      ])
     )
-    error_message = "At least one non-empty namespace must be specified, and all namespace names must be unique."
+    error_message = "All namespace names must be unique, non-empty, at most 63 characters, and match RFC 1123 DNS label format (lowercase alphanumeric and hyphens, must start and end with alphanumeric)."
   }
 }
 
