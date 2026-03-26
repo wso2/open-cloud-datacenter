@@ -38,6 +38,10 @@ variable "machine_pools" {
     etcd          = bool
     worker        = bool
   }))
+  # Defaults to empty for brownfield callers (manage_rke_config = false).
+  # A precondition on the cluster resource enforces at least one pool when
+  # manage_rke_config = true.
+  default = []
 }
 
 # ── Node cloud-init ───────────────────────────────────────────────────────────
