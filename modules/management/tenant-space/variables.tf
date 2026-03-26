@@ -10,8 +10,11 @@ variable "project_name" {
 
 variable "namespaces" {
   type        = list(string)
-  description = "Namespaces to create within the project."
-  default     = []
+  description = "One or more Kubernetes namespace names to create within the project. Must contain at least one entry."
+  validation {
+    condition     = length(var.namespaces) > 0
+    error_message = "At least one namespace must be specified."
+  }
 }
 
 # Resource quotas — all optional. Omit entirely for projects with no quota enforcement.
@@ -26,13 +29,13 @@ variable "cpu_limit" {
 
 variable "memory_limit" {
   type        = string
-  description = "Total memory limit for the project (e.g. \"16Gi\", \"4096Mi\")."
+  description = "Total memory limit for the project (e.g. \"16Gi\", \"4096Mi\"). Only applied when cpu_limit is set."
   default     = null
 }
 
 variable "storage_limit" {
   type        = string
-  description = "Total persistent storage request limit for the project (e.g. \"200Gi\")."
+  description = "Total persistent storage request limit for the project (e.g. \"200Gi\"). Only applied when cpu_limit is set."
   default     = null
 }
 

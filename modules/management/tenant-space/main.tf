@@ -31,6 +31,10 @@ resource "rancher2_project" "this" {
   # Ignoring it prevents spurious diffs on brownfield-imported projects.
   lifecycle {
     ignore_changes = [container_resource_limit]
+    precondition {
+      condition     = var.cpu_limit != null || (var.memory_limit == null && var.storage_limit == null)
+      error_message = "memory_limit and storage_limit are only applied when cpu_limit is set. Either set cpu_limit or remove the other quota variables."
+    }
   }
 }
 

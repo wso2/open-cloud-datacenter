@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.3"
+  required_version = ">= 1.7"
   required_providers {
     rancher2 = {
       source  = "rancher/rancher2"
@@ -62,6 +62,10 @@ resource "rancher2_cluster_v2" "this" {
       cluster_agent_deployment_customization,
       fleet_agent_deployment_customization,
     ]
+    precondition {
+      condition     = !var.manage_rke_config || length(var.machine_pools) > 0
+      error_message = "machine_pools must contain at least one entry when manage_rke_config is true."
+    }
   }
 
   dynamic "rke_config" {
@@ -123,5 +127,30 @@ resource "rancher2_cluster_v2" "this" {
         worker_concurrency        = "1"
       }
     }
+  }
+}
+
+# ── State migrations from v0.1.0 ──────────────────────────────────────────────
+# The cluster resource was renamed from tenant_cluster → this.
+moved {
+  from = rancher2_cluster_v2.tenant_cluster
+  to   = rancher2_cluster_v2.this
+}
+
+# The machine config was a single resource (harvester_nodes) in v0.1.0.
+# In v0.2.0 it is a per-pool map (pool[*]) created only when manage_rke_config = true.
+#
+# Brownfield callers (manage_rke_config = false): the old resource is removed
+# from state without destroying the underlying object in Harvester/Rancher.
+#
+# Greenfield callers upgrading to v0.2.0 (manage_rke_config = true): run the
+# following state mv before applying to avoid recreating the machine config:
+#   terraform state mv \
+#     'module.<name>.rancher2_machine_config_v2.harvester_nodes' \
+#     'module.<name>.rancher2_machine_config_v2.pool["<pool-name>"]'
+removed {
+  from = rancher2_machine_config_v2.harvester_nodes
+  lifecycle {
+    destroy = false
   }
 }
