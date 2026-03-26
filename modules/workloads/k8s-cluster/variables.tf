@@ -42,6 +42,14 @@ variable "machine_pools" {
   # A precondition on the cluster resource enforces at least one pool when
   # manage_rke_config = true.
   default = []
+
+  validation {
+    condition = length(var.machine_pools) == length(distinct([for p in var.machine_pools : p.name])) && alltrue([
+      for p in var.machine_pools :
+      p.quantity > 0 && (p.control_plane || p.etcd || p.worker)
+    ])
+    error_message = "Each machine pool must have a unique name, a positive quantity, and at least one role (control_plane, etcd, or worker) enabled."
+  }
 }
 
 # ── Node cloud-init ───────────────────────────────────────────────────────────

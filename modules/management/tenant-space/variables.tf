@@ -10,10 +10,10 @@ variable "project_name" {
 
 variable "namespaces" {
   type        = list(string)
-  description = "One or more Kubernetes namespace names to create within the project. Must contain at least one entry."
+  description = "One or more Kubernetes namespace names to create within the project. Must contain at least one unique entry."
   validation {
-    condition     = length(var.namespaces) > 0
-    error_message = "At least one namespace must be specified."
+    condition     = length(var.namespaces) > 0 && length(var.namespaces) == length(toset(var.namespaces))
+    error_message = "At least one namespace must be specified, and all namespace names must be unique."
   }
 }
 
