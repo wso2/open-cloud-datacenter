@@ -24,9 +24,11 @@ module "monitoring" {
   kubeconfig_context      = "local"
   google_chat_webhook_url = var.google_chat_webhook_url
 
-  # Optional — show a "View Alert" deep-link button in each notification card.
-  # Find this URL: Harvester UI → Add-ons → rancher-monitoring → alert-manager
-  # alertmanager_url = "https://<harvester-ip>/api/v1/namespaces/cattle-monitoring-system/services/http:rancher-monitoring-alertmanager:9093/proxy"
+  # Optional — adds "View Alert" and "View in Prometheus" buttons to each card.
+  # Both URLs are routed through Rancher's authenticated proxy so users don't
+  # need a separate session directly on the Harvester IP.
+  # rancher_url          = "https://rancher.example.com"
+  # harvester_cluster_id = "c-xxxxx"   # Rancher UI → Cluster Management → cluster row
 }
 ```
 
@@ -267,15 +269,14 @@ stored in the `calert-config` Secret and rendered by calert at runtime.
 └─────────────────────────────────────────────────────┘
 ```
 
-**"View Alert" button** is only rendered when `alertmanager_url` is set. It
-links to:
-```text
-<alertmanager_url>/#/alerts?filter={alertname="<name>"}
-```
+Both buttons are rendered only when `rancher_url` and `harvester_cluster_id`
+are set. URLs are constructed at `terraform apply` time and routed through
+Rancher's authenticated proxy — no separate Harvester session required.
 
-**"View in Prometheus" button** is only rendered when the alert carries a
-`GeneratorURL` (set automatically by Prometheus when a rule fires for real;
-absent in synthetic test-fires).
+```text
+View Alert    → <rancher_url>/k8s/clusters/<id>/…/rancher-monitoring-alertmanager:9093/proxy/#/alerts?filter={alertname="<name>"}
+View in Prometheus → <rancher_url>/k8s/clusters/<id>/…/rancher-monitoring-prometheus:9090/proxy/alerts?search=<name>
+```
 
 ### Template evaluation: Terraform vs Go
 
@@ -312,7 +313,8 @@ calert ignores `${ }` delimiters.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `alertmanager_url` | string | `""` | Alertmanager UI base URL — enables "View Alert" button. Leave empty to omit. |
+| `rancher_url` | string | `""` | Base URL of the Rancher server (e.g. `https://rancher.example.com`). Combined with `harvester_cluster_id` to build Rancher-authenticated proxy URLs for both buttons. Leave empty to omit buttons. |
+| `harvester_cluster_id` | string | `""` | Rancher cluster ID for the Harvester cluster (e.g. `c-v7gvt`). Found in Rancher UI → Cluster Management. Required when `rancher_url` is set. |
 | `monitoring_namespace` | string | `cattle-monitoring-system` | Namespace where rancher-monitoring runs |
 | `dashboards_namespace` | string | `cattle-dashboards` | Namespace where Grafana picks up dashboard ConfigMaps |
 | `runbook_base_url` | string | `https://wiki.internal/runbooks/harvester` | Base URL prepended to each alert's `runbook_url` annotation |
