@@ -52,9 +52,16 @@ resource "rancher2_cluster_v2" "this" {
   kubernetes_version           = var.kubernetes_version
   cloud_credential_secret_name = var.cloud_credential_id
 
-  # rke_config and cloud_credential_secret_name are applied on CREATE but never
-  # modified by TF after that. This prevents provider-normalization diffs on
-  # brownfield-imported clusters and lets Rancher manage pool lifecycle directly.
+  # rke_config is applied on CREATE (when manage_rke_config = true) but is
+  # intentionally ignored on subsequent applies for both managed and brownfield
+  # clusters. Reasons:
+  #   1. Brownfield (manage_rke_config = false): no rke_config block is emitted;
+  #      without ignore_changes TF would try to remove the server-side config.
+  #   2. Managed (manage_rke_config = true): Rancher owns pool-member lifecycle
+  #      after provisioning, so re-applying rke_config fields triggers rolling
+  #      upgrades unnecessarily. Use Rancher UI/API for post-create pool changes.
+  # Note: Terraform lifecycle blocks do not support conditional expressions, so
+  # ignore_changes cannot be scoped to manage_rke_config = false only.
   lifecycle {
     ignore_changes = [
       rke_config,

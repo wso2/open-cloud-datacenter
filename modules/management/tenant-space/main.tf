@@ -32,8 +32,14 @@ resource "rancher2_project" "this" {
   lifecycle {
     ignore_changes = [container_resource_limit]
     precondition {
-      condition     = var.cpu_limit != null || (var.memory_limit == null && var.storage_limit == null)
-      error_message = "memory_limit and storage_limit are only applied when cpu_limit is set. Either set cpu_limit or remove the other quota variables."
+      condition = var.cpu_limit != null || alltrue([
+        var.memory_limit == null,
+        var.storage_limit == null,
+        var.namespace_cpu_limit == null,
+        var.namespace_memory_limit == null,
+        var.namespace_storage_limit == null,
+      ])
+      error_message = "Quota variables (memory_limit, storage_limit, namespace_*_limit) are only applied when cpu_limit is set. Either set cpu_limit or remove the other quota variables."
     }
   }
 }
