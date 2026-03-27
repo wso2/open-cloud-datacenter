@@ -16,7 +16,23 @@ module is not required.
 
 | Role Name | Context | Purpose |
 |-----------|---------|---------|
-| `vm-metrics-observer` | project | Read-only access to VM status and metrics for the Harvester dashboard. No mutating verbs. |
+| `vm-manager` | project | Full lifecycle management of VMs: create, configure, start/stop/restart, console, and delete. |
+| `vm-metrics-observer` | project | Read-only access to VM status and metrics. No mutating verbs. |
+
+### `vm-manager` Permissions
+
+| API Group | Resources | Verbs |
+|-----------|-----------|-------|
+| `kubevirt.io` | `virtualmachines`, `virtualmachineinstances`, `virtualmachineinstancepresets`, `virtualmachineinstancereplicasets` | `get`, `list`, `watch`, `create`, `update`, `patch`, `delete` |
+| `subresources.kubevirt.io` | `virtualmachines/start`, `virtualmachines/stop`, `virtualmachines/restart`, `virtualmachines/migrate`, `virtualmachineinstances/vnc`, `virtualmachineinstances/console`, `virtualmachineinstances/portforward`, `virtualmachineinstances/pause`, `virtualmachineinstances/unpause` | `get`, `update` |
+| `subresources.kubevirt.io` | `virtualmachineinstances/metrics` | `get` |
+| `cdi.kubevirt.io` | `datavolumes` | `get`, `list`, `watch`, `create`, `update`, `patch`, `delete` |
+| `harvesterhci.io` | `virtualmachineimages`, `keypairs` | `get`, `list`, `watch` |
+| `""` (core) | `secrets`, `configmaps` | `get`, `list`, `watch`, `create`, `update`, `patch`, `delete` |
+| `""` (core) | `services/proxy` | `get` |
+
+This role is intended for product team members who own their VMs end-to-end within the
+quota and namespace boundaries imposed by the `tenant-space` module.
 
 ### `vm-metrics-observer` Permissions
 
@@ -27,7 +43,8 @@ module is not required.
 | `""` (core) | `services/proxy` | `get` |
 
 This role intentionally **excludes** `update`, `patch`, `delete`, and subresources that
-control VM power state (`start`, `stop`, `restart`, `migrate`).
+control VM power state (`start`, `stop`, `restart`, `migrate`). Use it for users who
+need Harvester dashboard visibility only (e.g. on-call monitoring access).
 
 ## Requirements
 
@@ -43,13 +60,29 @@ module "cluster_roles" {
   source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/management/cluster-roles?ref=v0.1.x"
 }
 
-# Pass the output to tenant-space modules
-module "tenant_space_example" {
+# Bind a team group to the vm-manager role in their tenant space
+module "tenant_space_iam" {
   source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/management/tenant-space?ref=v0.1.x"
   ...
   group_role_bindings = [
     {
-      group_principal_id = var.team_group_id
+      group_principal_id = var.iam_team_group_id
+      role_template_id   = "project-member"
+    },
+    {
+      group_principal_id = var.iam_team_group_id
+      role_template_id   = module.cluster_roles.vm_manager_role_id
+    },
+  ]
+}
+
+# Bind a read-only observer (e.g. SRE) to metrics-only access
+module "tenant_space_iam_observer" {
+  source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/management/tenant-space?ref=v0.1.x"
+  ...
+  group_role_bindings = [
+    {
+      group_principal_id = var.sre_group_id
       role_template_id   = module.cluster_roles.vm_metrics_observer_role_id
     },
   ]
@@ -60,6 +93,7 @@ module "tenant_space_example" {
 
 | Name | Description |
 |------|-------------|
+| `vm_manager_role_id` | Role template ID for `vm-manager`. Pass to `tenant-space` `group_role_bindings`. |
 | `vm_metrics_observer_role_id` | Role template ID for `vm-metrics-observer`. Pass to `tenant-space` `group_role_bindings`. |
 
 ## Notes

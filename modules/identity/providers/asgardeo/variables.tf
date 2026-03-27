@@ -39,3 +39,29 @@ variable "skip_consent" {
   description = "Skip login and logout consent screens for seamless SSO."
   default     = true
 }
+
+variable "requested_claims" {
+  type = list(object({
+    uri       = string
+    mandatory = optional(bool, false)
+  }))
+  description = <<-EOT
+    Local claim URIs to include in the OIDC token. Controls which user attributes
+    the relying party (e.g. Rancher) can read from the ID token.
+
+    Common Asgardeo claim URIs:
+      - "http://wso2.org/claims/emailaddress"  → email
+      - "http://wso2.org/claims/username"      → username (shown as display name)
+      - "http://wso2.org/claims/groups"        → group memberships (required for Rancher RBAC)
+      - "http://wso2.org/claims/givenname"     → first name
+      - "http://wso2.org/claims/lastname"      → last name
+
+    Defaults to email + username + groups, which is the minimum needed for readable
+    display names and group-based RBAC in Rancher.
+  EOT
+  default = [
+    { uri = "http://wso2.org/claims/emailaddress", mandatory = false },
+    { uri = "http://wso2.org/claims/username", mandatory = false },
+    { uri = "http://wso2.org/claims/groups", mandatory = true },
+  ]
+}

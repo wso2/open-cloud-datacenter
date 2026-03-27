@@ -1,0 +1,66 @@
+variable "name" {
+  type        = string
+  description = "Name for the virtual machine."
+}
+
+variable "namespace" {
+  type        = string
+  description = "Harvester namespace (tenant project namespace) to create the VM in."
+}
+
+variable "cpu" {
+  type        = number
+  description = "Number of vCPUs."
+  default     = 2
+}
+
+variable "memory" {
+  type        = string
+  description = "RAM in Gi (e.g. \"4Gi\")."
+  default     = "4Gi"
+}
+
+variable "disk_size" {
+  type        = string
+  description = "Root disk size (e.g. \"40Gi\")."
+  default     = "40Gi"
+}
+
+variable "image_name" {
+  type        = string
+  description = "Harvester image reference in namespace/name format (e.g. \"default/ubuntu-22-04\"). Use the image_ids output from the management/storage module."
+}
+
+variable "network_name" {
+  type        = string
+  description = "Harvester network attachment name (e.g. \"iam-team-vlan\"). Must exist in the same namespace or cluster."
+}
+
+variable "run_strategy" {
+  type        = string
+  description = "VM run strategy: RerunOnFailure, Always, Halted, or Manual."
+  default     = "RerunOnFailure"
+}
+
+# --- SSH access ---
+
+variable "ssh_public_key" {
+  type        = string
+  description = "SSH public key content to inject into the VM. When set, a harvester_ssh_key resource is created and attached. Leave null to omit."
+  default     = null
+  sensitive   = true
+}
+
+# --- Cloud-init ---
+
+variable "user_data" {
+  type        = string
+  description = "Cloud-init user-data script (plain YAML, not base64). When set, a cloud-init secret is created and attached. Leave null for no cloud-init."
+  default     = null
+}
+
+variable "network_data" {
+  type        = string
+  description = "Cloud-init network-data config. Ignored if user_data is null."
+  default     = ""
+}

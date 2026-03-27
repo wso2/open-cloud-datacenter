@@ -1,15 +1,18 @@
+locals {
+  rancher_lb_ip = var.create_lb ? harvester_loadbalancer.rancher_lb[0].ip_address : var.static_rancher_ip
+}
+
 output "rancher_hostname" {
   value       = var.rancher_hostname
-  description = "The FQDN of the bootstrapped Rancher server"
+  description = "FQDN of the Rancher server"
 }
 
 output "rancher_lb_ip" {
-  value       = harvester_loadbalancer.rancher_lb.ip_address
-  description = "The IP address of the LoadBalancer exposing Rancher"
+  value       = local.rancher_lb_ip
+  description = "IP used to reach Rancher: LoadBalancer IP (greenfield) or bridge VM IP (brownfield)"
 }
 
-output "admin_token" {
-  value       = rancher2_bootstrap.admin.token
-  description = "Rancher admin API token for use by downstream phases"
-  sensitive   = true
+output "vm_id" {
+  value       = harvester_virtualmachine.rancher_server[0].id
+  description = "Harvester resource ID of the Rancher server VM (namespace/name)"
 }

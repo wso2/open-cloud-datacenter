@@ -50,6 +50,12 @@ variable "group_search_enabled" {
   default     = true
 }
 
+variable "groups_field" {
+  type        = string
+  description = "JWT claim name that contains the user's group memberships (e.g. \"groups\")."
+  default     = "groups"
+}
+
 variable "access_mode" {
   type        = string
   description = "Rancher access mode: 'unrestricted', 'restricted', or 'required'."

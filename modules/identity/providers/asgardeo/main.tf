@@ -38,4 +38,14 @@ resource "asgardeo_application" "this" {
     skip_login_consent  = var.skip_consent
     skip_logout_consent = var.skip_consent
   }
+
+  claim_configuration {
+    dynamic "requested_claims" {
+      for_each = var.requested_claims
+      content {
+        uri       = requested_claims.value.uri
+        mandatory = requested_claims.value.mandatory
+      }
+    }
+  }
 }

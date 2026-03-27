@@ -8,6 +8,7 @@ resource "rancher2_auth_config_generic_oidc" "this" {
   jwks_url             = var.jwks_url
   scopes               = var.scopes
   group_search_enabled = var.group_search_enabled
+  groups_field         = var.groups_field
   access_mode          = var.access_mode
   enabled              = var.enabled
 }
