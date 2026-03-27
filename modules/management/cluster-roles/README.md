@@ -17,6 +17,7 @@ module is not required.
 | Role Name | Context | Purpose |
 |-----------|---------|---------|
 | `vm-manager` | project | Full lifecycle management of VMs: create, configure, start/stop/restart, console, and delete. |
+| `network-manager` | cluster | Manage Harvester VLAN infrastructure and NetworkAttachmentDefinitions. Bind only via `rancher2_cluster_role_template_binding`. |
 | `vm-metrics-observer` | project | Read-only access to VM status and metrics. No mutating verbs. |
 
 ### `vm-manager` Permissions
@@ -27,7 +28,8 @@ module is not required.
 | `subresources.kubevirt.io` | `virtualmachines/start`, `virtualmachines/stop`, `virtualmachines/restart`, `virtualmachines/migrate`, `virtualmachineinstances/vnc`, `virtualmachineinstances/console`, `virtualmachineinstances/portforward`, `virtualmachineinstances/pause`, `virtualmachineinstances/unpause` | `get`, `update` |
 | `subresources.kubevirt.io` | `virtualmachineinstances/metrics` | `get` |
 | `cdi.kubevirt.io` | `datavolumes` | `get`, `list`, `watch`, `create`, `update`, `patch`, `delete` |
-| `harvesterhci.io` | `virtualmachineimages`, `keypairs` | `get`, `list`, `watch` |
+| `harvesterhci.io` | `virtualmachineimages` | `get`, `list`, `watch` |
+| `harvesterhci.io` | `keypairs` | `get`, `list`, `watch`, `create`, `delete` |
 | `""` (core) | `secrets`, `configmaps` | `get`, `list`, `watch`, `create`, `update`, `patch`, `delete` |
 | `""` (core) | `services/proxy` | `get` |
 
@@ -94,6 +96,7 @@ module "tenant_space_iam_observer" {
 | Name | Description |
 |------|-------------|
 | `vm_manager_role_id` | Role template ID for `vm-manager`. Pass to `tenant-space` `group_role_bindings`. |
+| `network_manager_role_id` | Role template ID for `network-manager` (cluster-scoped). Pass to `rancher2_cluster_role_template_binding`. |
 | `vm_metrics_observer_role_id` | Role template ID for `vm-metrics-observer`. Pass to `tenant-space` `group_role_bindings`. |
 
 ## Notes

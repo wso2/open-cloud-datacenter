@@ -1,6 +1,6 @@
 # Optional SSH key — created only when ssh_public_key is provided.
 resource "harvester_ssh_key" "this" {
-  count = var.ssh_public_key != null ? 1 : 0
+  count = var.create_ssh_key ? 1 : 0
 
   name       = "${var.name}-key"
   namespace  = var.namespace
@@ -18,11 +18,11 @@ resource "harvester_virtualmachine" "this" {
   run_strategy = var.run_strategy
   machine_type = "q35"
 
-  ssh_keys = var.ssh_public_key != null ? [harvester_ssh_key.this[0].id] : []
+  ssh_keys = var.create_ssh_key ? [harvester_ssh_key.this[0].id] : []
 
   network_interface {
     name           = "nic-1"
-    wait_for_lease = true
+    wait_for_lease = var.wait_for_lease
     network_name   = var.network_name
   }
 

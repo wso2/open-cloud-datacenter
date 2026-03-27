@@ -64,3 +64,15 @@ variable "network_data" {
   description = "Cloud-init network-data config. Ignored if user_data is null."
   default     = ""
 }
+
+variable "create_ssh_key" {
+  type        = bool
+  description = "When true, create a harvester_ssh_key from ssh_public_key and attach it to the VM. Must be true for ssh_public_key to have any effect."
+  default     = false
+}
+
+variable "wait_for_lease" {
+  type        = bool
+  description = "Whether Terraform should wait for an IP lease on the primary NIC. Set to false when using static IPs via cloud-init network_data without qemu-guest-agent."
+  default     = true
+}

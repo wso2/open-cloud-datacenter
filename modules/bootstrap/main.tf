@@ -53,6 +53,25 @@ locals {
   cloudinit_secret_name = var.create_cloudinit_secret ? harvester_cloudinit_secret.cloudinit[0].name : var.existing_cloudinit_secret_name
 }
 
+# ── Input validation ──────────────────────────────────────────────────────────
+
+# The cloud-init template embeds the generated SSH public key. If create_ssh_key
+# is false the tls_private_key resource is empty, causing an invalid-index error.
+check "ssh_key_required_for_cloudinit" {
+  assert {
+    condition     = !var.create_cloudinit_secret || var.create_ssh_key
+    error_message = "create_ssh_key must be true when create_cloudinit_secret is true (the cloud-init template embeds the generated SSH public key)."
+  }
+}
+
+# When reusing an existing cloud-init secret, the name must be provided.
+check "existing_cloudinit_secret_name_required" {
+  assert {
+    condition     = var.create_cloudinit_secret || var.existing_cloudinit_secret_name != ""
+    error_message = "existing_cloudinit_secret_name is required when create_cloudinit_secret = false."
+  }
+}
+
 # ── Rancher server VM ─────────────────────────────────────────────────────────
 resource "harvester_virtualmachine" "rancher_server" {
   count                = var.node_count
