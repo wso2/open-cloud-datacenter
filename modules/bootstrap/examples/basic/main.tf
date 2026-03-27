@@ -47,7 +47,7 @@ module "bootstrap" {
 
   # Credentials – supply via tfvars or environment variables; never hardcode
   vm_password            = var.vm_password
-  rancher_admin_password = var.rancher_admin_password
+  bootstrap_password = var.bootstrap_password
 
   rancher_hostname = "rancher.example.internal"
 
@@ -63,7 +63,7 @@ variable "vm_password" {
   sensitive = true
 }
 
-variable "rancher_admin_password" {
+variable "bootstrap_password" {
   type      = string
   sensitive = true
 }

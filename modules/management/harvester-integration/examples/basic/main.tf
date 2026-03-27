@@ -2,8 +2,7 @@
 #
 # This example integrates a Harvester cluster into an existing Rancher server
 # by enabling the Harvester feature flag, installing the UI extension, creating
-# a cloud credential, patching CoreDNS so Harvester can resolve the internal
-# Rancher FQDN, and applying the registration manifest.
+# a cloud credential, and applying the registration manifest.
 #
 # Prerequisites:
 #   - Rancher deployed and accessible (e.g. via the bootstrap module)
@@ -11,7 +10,6 @@
 #   - kubectl available in PATH (used by local-exec provisioners)
 #   - The rancher2 provider configured with your Rancher URL and access key
 #   - The harvester provider configured with your Harvester kubeconfig
-#   - The kubernetes provider configured against the Harvester cluster
 
 terraform {
   required_version = ">= 1.3"
@@ -25,10 +23,6 @@ terraform {
       source  = "harvester/harvester"
       version = "~> 1.7"
     }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 3.0"
-    }
   }
 }
 
@@ -39,18 +33,14 @@ provider "rancher2" {
 }
 
 provider "harvester" {
-  kubeconfig = file("~/.kube/harvester-config")
-}
-
-provider "kubernetes" {
-  config_path = "~/.kube/harvester-config"
+  kubeconfig = file(pathexpand("~/.kube/harvester-config"))
 }
 
 module "harvester_integration" {
-  source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/management/harvester-integration?ref=v0.1.0"
+  source = "github.com/wso2/open-cloud-datacenter//modules/management/harvester-integration?ref=v0.2.0"
 
-  harvester_kubeconfig   = file("~/.kube/harvester-config")
+  harvester_kubeconfig   = file(pathexpand("~/.kube/harvester-config"))
   harvester_cluster_name = "harvester-hci"
-  rancher_hostname       = "rancher.example.internal"
-  rancher_lb_ip          = "192.168.10.10"
+  cloud_credential_name  = "harvester-local-creds"
+  cluster_labels         = {}
 }

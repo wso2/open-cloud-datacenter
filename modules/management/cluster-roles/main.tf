@@ -38,11 +38,18 @@ resource "rancher2_role_template" "vm_manager" {
     verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
   }
 
-  # Read access to VM images and SSH keypairs available in the namespace
+  # Read access to VM images available in the namespace
   rules {
     api_groups = ["harvesterhci.io"]
-    resources  = ["virtualmachineimages", "keypairs"]
+    resources  = ["virtualmachineimages"]
     verbs      = ["get", "list", "watch"]
+  }
+
+  # SSH keypairs — full CRUD so tenants can inject and remove keys via workloads/vm
+  rules {
+    api_groups = ["harvesterhci.io"]
+    resources  = ["keypairs"]
+    verbs      = ["get", "list", "watch", "create", "delete"]
   }
 
   # Cloud-init secrets and SSH key secrets

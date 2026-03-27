@@ -6,7 +6,7 @@ by product teams who have been granted a `tenant-space` with the `vm-manager` ro
 This module creates:
 - A `harvester_virtualmachine` with configurable CPU, memory, disk, and networking
 - Optionally, a `harvester_ssh_key` (when `ssh_public_key` is set)
-- Optionally, a `harvester_cloudinit_secret` (when `user_data` is set)
+- Optionally, cloud-init user-data/network-data attached through the VM resource (when `user_data` is set)
 
 ## When to Use
 
@@ -57,7 +57,7 @@ module "app_vm" {
   disk_size      = "80Gi"
   image_name     = data.terraform_remote_state.management.outputs.image_ids["ubuntu-22-04"]
   network_name   = "iam-team-vlan"
-  ssh_public_key = file("~/.ssh/id_rsa.pub")
+  ssh_public_key = file(pathexpand("~/.ssh/id_rsa.pub"))
 }
 ```
 
@@ -71,7 +71,7 @@ module "app_vm" {
   namespace      = "iam-team-ns"
   image_name     = data.terraform_remote_state.management.outputs.image_ids["ubuntu-22-04"]
   network_name   = "iam-team-vlan"
-  ssh_public_key = file("~/.ssh/id_rsa.pub")
+  ssh_public_key = file(pathexpand("~/.ssh/id_rsa.pub"))
 
   user_data = <<-EOT
     #cloud-config
@@ -112,7 +112,9 @@ locals {
 | `image_name` | Harvester image in `namespace/name` format | `string` | — | yes |
 | `network_name` | Harvester network attachment name | `string` | — | yes |
 | `run_strategy` | `RerunOnFailure`, `Always`, `Halted`, or `Manual` | `string` | `"RerunOnFailure"` | no |
-| `ssh_public_key` | SSH public key content. Creates a `harvester_ssh_key` when set. | `string` | `null` | no |
+| `ssh_public_key` | SSH public key content. Used when `create_ssh_key = true`. | `string` | `null` | no |
+| `create_ssh_key` | When true, create a `harvester_ssh_key` from `ssh_public_key`. | `bool` | `false` | no |
+| `wait_for_lease` | Wait for IP lease on primary NIC. Set false for static cloud-init IPs. | `bool` | `true` | no |
 | `user_data` | Cloud-init user-data YAML. Creates a cloud-init secret when set. | `string` | `null` | no |
 | `network_data` | Cloud-init network-data config (requires `user_data` to be set). | `string` | `""` | no |
 
@@ -132,7 +134,9 @@ locals {
 - `network_name` must match a network attachment definition in the same Harvester cluster
   (created by `management/networking`).
 - The VM's IP address is available in `network_interfaces[0].ip_address` after the
-  lease is obtained (Terraform will wait due to `wait_for_lease = true`).
+  lease is obtained (requires `wait_for_lease = true`, which is the default).
+  Set `wait_for_lease = false` when using static IPs via cloud-init `network_data`
+  without qemu-guest-agent.
 - The `vm-manager` custom role from `management/cluster-roles` must be bound to the
   team's group in their `tenant-space` before they can create VMs in the namespace.
 - Removing this module or running `terraform destroy` **deletes the VM and its disk**.
