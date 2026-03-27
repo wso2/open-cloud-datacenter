@@ -46,3 +46,9 @@ variable "manage_app" {
   description = "Create/manage the rancher2_app_v2 Harvester UI extension. Set false when the app is already installed (brownfield import)."
   default     = true
 }
+
+variable "harvester_chart_version" {
+  type        = string
+  description = "Version of the Harvester UI extension Helm chart. Check https://github.com/harvester/harvester-ui-extension/releases for latest."
+  default     = "1.7.1"
+}

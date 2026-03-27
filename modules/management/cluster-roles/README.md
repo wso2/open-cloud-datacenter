@@ -62,7 +62,6 @@ module "cluster_roles" {
   source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/management/cluster-roles?ref=v0.1.x"
 }
 
-# Bind a team group to the vm-manager role in their tenant space
 module "tenant_space_iam" {
   source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/management/tenant-space?ref=v0.1.x"
   ...
@@ -75,14 +74,8 @@ module "tenant_space_iam" {
       group_principal_id = var.iam_team_group_id
       role_template_id   = module.cluster_roles.vm_manager_role_id
     },
-  ]
-}
-
-# Bind a read-only observer (e.g. SRE) to metrics-only access
-module "tenant_space_iam_observer" {
-  source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/management/tenant-space?ref=v0.1.x"
-  ...
-  group_role_bindings = [
+    # Add the observer group to the same tenant space rather than creating a
+    # second module block — a second call would collide on project creation.
     {
       group_principal_id = var.sre_group_id
       role_template_id   = module.cluster_roles.vm_metrics_observer_role_id

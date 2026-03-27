@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.3"
+  required_version = ">= 1.5"
   required_providers {
     harvester = {
       source  = "harvester/harvester"
@@ -48,9 +48,6 @@ resource "harvester_cloudinit_secret" "cloudinit" {
 locals {
   # Resolve the SSH key IDs: either freshly generated or caller-supplied
   ssh_key_ids = var.create_ssh_key ? [harvester_ssh_key.bootstrap_key[0].id] : var.ssh_key_ids
-
-  # Resolve the cloud-init secret name: generated or pre-existing
-  cloudinit_secret_name = var.create_cloudinit_secret ? harvester_cloudinit_secret.cloudinit[0].name : var.existing_cloudinit_secret_name
 }
 
 # ── Input validation ──────────────────────────────────────────────────────────
@@ -130,8 +127,8 @@ resource "harvester_virtualmachine" "rancher_server" {
   }
 
   cloudinit {
-    user_data_secret_name    = local.cloudinit_secret_name
-    network_data_secret_name = var.create_cloudinit_secret ? null : local.cloudinit_secret_name
+    user_data_secret_name    = var.create_cloudinit_secret ? harvester_cloudinit_secret.cloudinit[count.index].name : var.existing_cloudinit_secret_name
+    network_data_secret_name = var.create_cloudinit_secret ? null : var.existing_cloudinit_secret_name
   }
 
   provisioner "local-exec" {

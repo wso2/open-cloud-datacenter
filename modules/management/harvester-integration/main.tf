@@ -53,7 +53,7 @@ resource "rancher2_app_v2" "harvester" {
   namespace     = "cattle-ui-plugin-system"
   repo_name     = rancher2_catalog_v2.harvester_extensions.name
   chart_name    = "harvester"
-  chart_version = "1.7.1"
+  chart_version = var.harvester_chart_version
   project_id    = data.rancher2_project.local_system.id
   wait          = true
 

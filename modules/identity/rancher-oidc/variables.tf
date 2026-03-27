@@ -54,6 +54,10 @@ variable "groups_field" {
   type        = string
   description = "JWT claim name that contains the user's group memberships (e.g. \"groups\")."
   default     = "groups"
+  validation {
+    condition     = length(trimspace(var.groups_field)) > 0 && length(regexall("\\s", var.groups_field)) == 0
+    error_message = "groups_field must be a non-empty JWT claim name without whitespace."
+  }
 }
 
 variable "access_mode" {

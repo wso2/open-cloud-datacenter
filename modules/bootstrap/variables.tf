@@ -81,6 +81,10 @@ variable "network_name" {
   type        = string
   description = "NetworkAttachmentDefinition name for bridge networks (e.g. 'iaas-net/vm-subnet-001'). Only used when network_type = 'bridge'."
   default     = ""
+  validation {
+    condition     = var.network_type != "bridge" || var.network_name != ""
+    error_message = "network_name is required when network_type = 'bridge'."
+  }
 }
 
 variable "network_mac_address" {
@@ -170,22 +174,38 @@ variable "ippool_subnet" {
   type        = string
   description = "Subnet CIDR for the IP pool (e.g. '192.168.10.0/24'). Required when create_lb = true."
   default     = ""
+  validation {
+    condition     = !var.create_lb || var.ippool_subnet != ""
+    error_message = "ippool_subnet is required when create_lb = true."
+  }
 }
 
 variable "ippool_gateway" {
   type        = string
   description = "Gateway for the IP pool. Required when create_lb = true."
   default     = ""
+  validation {
+    condition     = !var.create_lb || var.ippool_gateway != ""
+    error_message = "ippool_gateway is required when create_lb = true."
+  }
 }
 
 variable "ippool_start" {
   type        = string
   description = "Start of the IP range for the pool. Required when create_lb = true."
   default     = ""
+  validation {
+    condition     = !var.create_lb || var.ippool_start != ""
+    error_message = "ippool_start is required when create_lb = true."
+  }
 }
 
 variable "ippool_end" {
   type        = string
   description = "End of the IP range for the pool. Required when create_lb = true."
   default     = ""
+  validation {
+    condition     = !var.create_lb || var.ippool_end != ""
+    error_message = "ippool_end is required when create_lb = true."
+  }
 }
