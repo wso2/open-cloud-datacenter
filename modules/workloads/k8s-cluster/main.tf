@@ -115,8 +115,7 @@ resource "rancher2_cluster_v2" "this" {
           worker_role                  = machine_pools.value.worker
           quantity                     = machine_pools.value.quantity
           drain_before_delete          = true
-          labels                       = machine_pools.value.labels
-          annotations                  = machine_pools.value.annotations
+          machine_labels               = machine_pools.value.machine_labels
 
           dynamic "taints" {
             for_each = machine_pools.value.taints

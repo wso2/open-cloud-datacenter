@@ -61,8 +61,11 @@ variable "machine_pools" {
     control_plane = bool
     etcd          = bool
     worker        = bool
-    labels      = optional(map(string), {})
-    annotations = optional(map(string), {})
+    # machine_labels are applied to Kubernetes nodes (RKEMachinePool.spec.labels).
+    # Use these for node selectors and scheduling decisions (e.g. nodepool=build).
+    # Note: machine_pools.labels in rancher2 v13 targets MachineDeployment metadata,
+    # not the nodes themselves — this variable maps to machine_labels on the resource.
+    machine_labels = optional(map(string), {})
     taints = optional(list(object({
       key    = string
       value  = string
