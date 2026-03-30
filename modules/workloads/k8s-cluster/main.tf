@@ -75,6 +75,7 @@ resource "rancher2_cluster_v2" "this" {
       cluster_agent_deployment_customization,
       fleet_agent_deployment_customization,
       rke_config[0].chart_values,
+      rke_config[0].machine_selector_config,
       rke_config[0].upgrade_strategy[0].control_plane_drain_options,
       rke_config[0].upgrade_strategy[0].worker_drain_options,
     ]
@@ -89,6 +90,10 @@ resource "rancher2_cluster_v2" "this" {
       )) == 0
       error_message = "All machine_config_overrides keys must match a pool name in machine_pools."
     }
+    precondition {
+      condition     = var.cloud_provider_config_secret == "" || var.enable_harvester_cloud_provider
+      error_message = "cloud_provider_config_secret is set but enable_harvester_cloud_provider is false. Set enable_harvester_cloud_provider = true or clear cloud_provider_config_secret."
+    }
   }
 
   dynamic "rke_config" {
@@ -101,14 +106,22 @@ resource "rancher2_cluster_v2" "this" {
       YAML
 
       dynamic "machine_selector_config" {
-        for_each = var.cloud_provider_config_secret != "" ? [1] : []
+        for_each = var.enable_harvester_cloud_provider ? [1] : []
         content {
           # config is TypeString (YAML) in rancher2 v13.
-          config = yamlencode({
-            "cloud-provider-config"   = "secret://fleet-default:${var.cloud_provider_config_secret}"
-            "cloud-provider-name"     = "harvester"
-            "protect-kernel-defaults" = false
-          })
+          # cloud-provider-config is only set on brownfield clusters where the
+          # harvesterconfig* secret already exists. For new clusters Rancher's
+          # provisioner creates the secret automatically when cloud-provider-name
+          # is harvester — no explicit cloud-provider-config key needed on create.
+          config = yamlencode(merge(
+            {
+              "cloud-provider-name"     = "harvester"
+              "protect-kernel-defaults" = false
+            },
+            var.cloud_provider_config_secret != "" ? {
+              "cloud-provider-config" = "secret://fleet-default:${var.cloud_provider_config_secret}"
+            } : {}
+          ))
         }
       }
 

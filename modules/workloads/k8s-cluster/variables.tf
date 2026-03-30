@@ -114,9 +114,15 @@ variable "ssh_user" {
 }
 
 # ── Harvester cloud provider ──────────────────────────────────────────────────
+variable "enable_harvester_cloud_provider" {
+  type        = bool
+  description = "When true, deploys Harvester CSI driver via machine_selector_config and auto-creates the required ServiceAccount + RBAC + harvesterconfig secret on Harvester. Set false only for clusters not running on Harvester infrastructure."
+  default     = true
+}
+
 variable "cloud_provider_config_secret" {
   type        = string
-  description = "Secret name for Harvester cloud-provider-config, without namespace prefix (just the secret name part after 'fleet-default:'). Leave empty to skip."
+  description = "Existing harvesterconfig* secret name in fleet-default. Set this for brownfield clusters whose cloud-provider credentials were created outside Terraform (via Rancher UI or manually). Leave empty for new clusters — the module creates the secret automatically when enable_harvester_cloud_provider = true."
   default     = ""
 }
 
