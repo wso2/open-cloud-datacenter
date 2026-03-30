@@ -106,9 +106,9 @@ resource "rancher2_cluster_v2" "this" {
       }
 
       dynamic "machine_pools" {
-        for_each = local.pools_by_name
+        for_each = var.machine_pools
         content {
-          name                         = machine_pools.key
+          name                         = machine_pools.value.name
           cloud_credential_secret_name = var.cloud_credential_id
           control_plane_role           = machine_pools.value.control_plane
           etcd_role                    = machine_pools.value.etcd
@@ -127,8 +127,8 @@ resource "rancher2_cluster_v2" "this" {
           }
 
           machine_config {
-            kind = contains(keys(var.machine_config_overrides), machine_pools.key) ? var.machine_config_overrides[machine_pools.key].kind : rancher2_machine_config_v2.pool[machine_pools.key].kind
-            name = contains(keys(var.machine_config_overrides), machine_pools.key) ? var.machine_config_overrides[machine_pools.key].name : rancher2_machine_config_v2.pool[machine_pools.key].name
+            kind = contains(keys(var.machine_config_overrides), machine_pools.value.name) ? var.machine_config_overrides[machine_pools.value.name].kind : rancher2_machine_config_v2.pool[machine_pools.value.name].kind
+            name = contains(keys(var.machine_config_overrides), machine_pools.value.name) ? var.machine_config_overrides[machine_pools.value.name].name : rancher2_machine_config_v2.pool[machine_pools.value.name].name
           }
         }
       }
