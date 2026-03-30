@@ -88,6 +88,15 @@ variable "machine_pools" {
     ])
     error_message = "Each machine pool must have a unique name, integer quantity/disk_size > 0, and at least one role (control_plane, etcd, or worker) enabled."
   }
+
+  validation {
+    condition = alltrue([
+      for p in var.machine_pools : alltrue([
+        for t in p.taints : contains(["NoSchedule", "PreferNoSchedule", "NoExecute"], t.effect)
+      ])
+    ])
+    error_message = "Each taint effect must be one of: NoSchedule, PreferNoSchedule, NoExecute."
+  }
 }
 
 # ── Node cloud-init ───────────────────────────────────────────────────────────
