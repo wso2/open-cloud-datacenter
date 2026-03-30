@@ -79,6 +79,10 @@ resource "kubernetes_secret" "sa_token" {
   }
   type = "kubernetes.io/service-account-token"
 
+  # wait_for_service_account_token blocks until the token controller has
+  # populated data["token"], preventing an empty bearer token in the kubeconfig.
+  wait_for_service_account_token = true
+
   # Ensure SA exists before we request a token for it.
   depends_on = [kubernetes_service_account.csi]
 }
