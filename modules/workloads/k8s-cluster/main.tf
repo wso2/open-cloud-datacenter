@@ -82,6 +82,13 @@ resource "rancher2_cluster_v2" "this" {
       condition     = !var.manage_rke_config || length(var.machine_pools) > 0
       error_message = "machine_pools must contain at least one entry when manage_rke_config is true."
     }
+    precondition {
+      condition = length(setsubtract(
+        toset(keys(var.machine_config_overrides)),
+        toset([for p in var.machine_pools : p.name])
+      )) == 0
+      error_message = "All machine_config_overrides keys must match a pool name in machine_pools."
+    }
   }
 
   dynamic "rke_config" {
