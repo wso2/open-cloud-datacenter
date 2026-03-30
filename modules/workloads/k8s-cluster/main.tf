@@ -115,6 +115,17 @@ resource "rancher2_cluster_v2" "this" {
           worker_role                  = machine_pools.value.worker
           quantity                     = machine_pools.value.quantity
           drain_before_delete          = true
+          labels                       = machine_pools.value.labels
+          annotations                  = machine_pools.value.annotations
+
+          dynamic "taints" {
+            for_each = machine_pools.value.taints
+            content {
+              key    = taints.value.key
+              value  = taints.value.value
+              effect = taints.value.effect
+            }
+          }
 
           machine_config {
             kind = contains(keys(var.machine_config_overrides), machine_pools.key) ? var.machine_config_overrides[machine_pools.key].kind : rancher2_machine_config_v2.pool[machine_pools.key].kind

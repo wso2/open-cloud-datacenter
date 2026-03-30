@@ -61,6 +61,13 @@ variable "machine_pools" {
     control_plane = bool
     etcd          = bool
     worker        = bool
+    labels      = optional(map(string), {})
+    annotations = optional(map(string), {})
+    taints = optional(list(object({
+      key    = string
+      value  = string
+      effect = string  # NoSchedule | PreferNoSchedule | NoExecute
+    })), [])
   }))
   # Defaults to empty for brownfield callers (manage_rke_config = false).
   # A precondition on the cluster resource enforces at least one pool when
