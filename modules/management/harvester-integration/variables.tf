@@ -52,3 +52,22 @@ variable "harvester_chart_version" {
   description = "Version of the Harvester UI extension Helm chart. Check https://github.com/harvester/harvester-ui-extension/releases for latest."
   default     = "1.7.1"
 }
+
+# ── Optional: CoreDNS patching for private Rancher hostname ──────────────────
+variable "patch_coredns" {
+  type        = bool
+  description = "Patch Harvester CoreDNS to resolve a private Rancher hostname. Set true when Rancher has no public DNS record (IP-only setup). Requires rancher_lb_ip and rancher_hostname."
+  default     = false
+}
+
+variable "rancher_lb_ip" {
+  type        = string
+  description = "IP address of the Rancher server. Added to the Harvester CoreDNS hosts block when patch_coredns = true."
+  default     = ""
+}
+
+variable "rancher_hostname" {
+  type        = string
+  description = "FQDN of the Rancher server. Added to the Harvester CoreDNS hosts block when patch_coredns = true."
+  default     = ""
+}

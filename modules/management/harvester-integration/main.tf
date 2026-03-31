@@ -9,6 +9,10 @@ terraform {
       source  = "harvester/harvester"
       version = "~> 1.7"
     }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.30"
+    }
   }
 }
 
@@ -129,14 +133,69 @@ resource "null_resource" "apply_harvester_registration" {
     }
   }
 
-  depends_on = [rancher2_cluster.harvester_hci]
+  # CoreDNS must be patched before registration so Harvester nodes can resolve
+  # the Rancher hostname during the agent bootstrap.
+  depends_on = [
+    rancher2_cluster.harvester_hci,
+    kubernetes_config_map_v1_data.harvester_coredns_patch,
+  ]
 }
 
 # 10. Configure Harvester Registration URL
 # Ensures Harvester has the correct manifest URL to connect back to Rancher.
+# CoreDNS patch (if enabled) must be applied first so Harvester can reach Rancher.
 resource "harvester_setting" "registration_url" {
   name  = "cluster-registration-url"
   value = rancher2_cluster.harvester_hci.cluster_registration_token[0].manifest_url
+
+  depends_on = [
+    rancher2_cluster.harvester_hci,
+    kubernetes_config_map_v1_data.harvester_coredns_patch,
+  ]
+}
+
+# 11. (Optional) Patch Harvester CoreDNS for private Rancher hostname resolution
+# When Rancher has no public DNS record, Harvester cluster nodes cannot resolve the
+# hostname. This replaces the Corefile with one that includes a hosts entry mapping
+# rancher_lb_ip → rancher_hostname, allowing nodes to reach Rancher during bootstrap.
+# Set patch_coredns = false (default) when using a publicly resolvable domain.
+resource "kubernetes_config_map_v1_data" "harvester_coredns_patch" {
+  count = var.patch_coredns ? 1 : 0
+
+  metadata {
+    name      = "rke2-coredns-rke2-coredns"
+    namespace = "kube-system"
+  }
+
+  data = {
+    Corefile = <<-EOT
+      .:53 {
+          errors
+          health {
+              lameduck 10s
+          }
+          ready
+          hosts {
+              ${var.rancher_lb_ip} ${var.rancher_hostname}
+              fallthrough
+          }
+          kubernetes cluster.local in-addr.arpa ip6.arpa {
+              pods insecure
+              fallthrough in-addr.arpa ip6.arpa
+              ttl 30
+          }
+          prometheus 0.0.0.0:9153
+          forward . /etc/resolv.conf
+          cache 30
+          loop
+          reload
+          loadbalance
+      }
+    EOT
+  }
+
+  # Overwrite the ConfigMap data managed by the rke2-coredns Helm chart.
+  force = true
 
   depends_on = [rancher2_cluster.harvester_hci]
 }
