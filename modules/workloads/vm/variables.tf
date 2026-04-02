@@ -76,3 +76,14 @@ variable "wait_for_lease" {
   description = "Whether Terraform should wait for an IP lease on the primary NIC. Set to false when using static IPs via cloud-init network_data without qemu-guest-agent."
   default     = true
 }
+
+variable "additional_disks" {
+  type = list(object({
+    name        = string
+    size        = string
+    image       = optional(string)
+    auto_delete = optional(bool, true)
+  }))
+  description = "List of additional disks to attach to the VM."
+  default     = []
+}

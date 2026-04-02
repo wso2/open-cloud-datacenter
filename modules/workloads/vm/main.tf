@@ -36,6 +36,17 @@ resource "harvester_virtualmachine" "this" {
     auto_delete = true
   }
 
+  dynamic "disk" {
+    for_each = var.additional_disks
+    content {
+      name        = disk.value.name
+      size        = disk.value.size
+      bus         = "virtio"
+      image       = disk.value.image
+      auto_delete = disk.value.auto_delete
+    }
+  }
+
   dynamic "cloudinit" {
     for_each = var.user_data != null ? [1] : []
     content {
