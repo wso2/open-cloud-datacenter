@@ -109,19 +109,45 @@ This phase uses four modules, typically applied together:
 
 ---
 
-### Phase 3 — Tenants
+### Phase 3 — Identity & Monitoring
 
-**Purpose**: Provision on-demand Kubernetes clusters for tenant teams.
+**Purpose**: Configure external authentication and deep observability for the datacenter.
 
-**Module**: `modules/workloads/k8s-cluster`
+#### 3a. identity (`modules/identity/*`)
 
-**What it does**:
-- Fetches the Harvester cloud credential from Rancher (`data.rancher2_cloud_credential`).
-- Defines a `rancher2_machine_config_v2` describing the VM size, image, and network for cluster nodes.
-- Provisions a `rancher2_cluster_v2` RKE2 cluster using the machine config.
-- Each cluster gets a dedicated machine pool combining control-plane, etcd, and worker roles.
+- **rancher-oidc**: Configures Rancher to delegate authentication to an external OIDC provider (e.g. WSO2 Asgardeo or Azure AD).
+- **providers/asgardeo**: Presets for integrating WSO2 Asgardeo.
+
+#### 3b. monitoring (`modules/monitoring`)
+
+- Deploys `calert` and `google-chat-notifications` on top of the `rancher-monitoring` stack.
+- Configures PrometheusRules and Alertmanager to route critical alerts to Google Chat Spaces.
+- Installs curated Grafana dashboards for Harvester nodes, storage, and VMs.
+
+---
+
+### Phase 4 — Workloads
+
+**Purpose**: Provision on-demand Kubernetes clusters and standalone VMs for tenant teams.
+
+#### 4a. k8s-cluster (`modules/workloads/k8s-cluster`)
+
+- **What it does**:
+  - Fetches the Harvester cloud credential from Rancher (`data.rancher2_cloud_credential`).
+  - Defines a `rancher2_machine_config_v2` describing the VM size, image, and network for cluster nodes.
+  - Provisions a `rancher2_cluster_v2` RKE2 cluster using the machine config.
+  - Each cluster gets a dedicated machine pool combining control-plane, etcd, and worker roles.
 
 **Provider dependencies**: `rancher/rancher2 ~> 3.0`
+
+#### 4b. vm (`modules/workloads/vm`)
+
+- **What it does**:
+  - Provisions standalone virtual machines directly on Harvester HCI.
+  - Supports multiple additional disks, custom network interfaces, and cloud-init (user-data/network-data).
+  - Automatically manages SSH keys and cloud-init secrets.
+
+**Provider dependencies**: `harvester/harvester ~> 0.6.0`
 
 ---
 
@@ -141,8 +167,8 @@ This phase configures the `asgardeo` provider (or equivalent OIDC configuration 
 | `hashicorp/tls ~> 4.0` | bootstrap | Generate SSH key pairs |
 | `hashicorp/helm ~> 2.0` | bootstrap (declared, cloud-init handles install) | Helm provider declaration |
 | `rancher/rancher2 ~> 3.0` | rbac, k8s-cluster | Manage Rancher projects, namespaces, cluster provisioning |
-| `rancher/rancher2 ~> 8.0.0` | harvester-integration | Rancher settings, catalogs, apps, cloud credentials, cluster import |
-| `hashicorp/kubernetes ~> 2.30.0` | harvester-integration | Patch Harvester CoreDNS ConfigMap |
+| `rancher/rancher2 ~> 8.0.0` | harvester-integration, identity | Rancher settings, cloud credentials, cluster import, OIDC auth |
+| `hashicorp/kubernetes ~> 2.30.0` | harvester-integration, monitoring | Patch Harvester CoreDNS, deploy monitoring resources |
 | `asgardeo` | Phase 4 (future) | OIDC identity provider integration |
 
 ---
@@ -179,11 +205,25 @@ This phase configures the `asgardeo` provider (or equivalent OIDC configuration 
            │
            │ projects/namespaces ready
            ▼
-    ┌────────────────┐
-    │  k8s-cluster   │
-    │  (Phase 3)     │
-    │  (per tenant)  │
-    └────────────────┘
+    ┌───────────────────┐ 
+    │   identity        │
+    │   (Phase 3a)      │
+    └────────┬──────────┘
+             │ OIDC active
+             ▼
+    ┌───────────────────┐
+    │   monitoring      │
+    │   (Phase 3b)      │
+    └────────┬──────────┘
+             │ observability ready
+             ▼
+    ┌─────────────────────────────────┐
+    │       Workloads (Phase 4)       │
+    │  ┌─────────────┐ ┌───────────┐  │
+    │  │ k8s-cluster │ │    vm     │  │
+    │  │ (Phase 4a)  │ │ (Phase 4b)│  │
+    │  └─────────────┘ └───────────┘  │
+    └─────────────────────────────────┘
 ```
 
 ---

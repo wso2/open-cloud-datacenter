@@ -25,7 +25,7 @@ Reference any module directly from GitHub in your Terraform configuration:
 
 ```hcl
 module "bootstrap" {
-  source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/bootstrap?ref=v0.1.0"
+  source = "github.com/wso2/open-cloud-datacenter//modules/bootstrap?ref=v0.4.5"
 
   ubuntu_image_id        = "default/ubuntu-22-04"
   vm_password            = var.vm_password
@@ -50,31 +50,48 @@ The following reusable Terraform modules are available under `modules/`. See the
 |--------|-------------|
 | [modules/bootstrap](modules/bootstrap/README.md) | Provisions an RKE2-based Rancher server on Harvester HCI via cloud-init, with a Load Balancer and IP pool for external access. |
 
+### Identity
+
+| Module | Description |
+|--------|-------------|
+| [modules/identity/rancher-oidc](modules/identity/rancher-oidc/README.md) | Configures Rancher to use a generic OIDC provider for user authentication. |
+| [modules/identity/providers/asgardeo](modules/identity/providers/asgardeo/README.md) | Presets for integrating WSO2 Asgardeo as the identity provider. |
+
 ### Management
 
 | Module | Description |
 |--------|-------------|
 | [modules/management/networking](modules/management/networking/README.md) | Creates and manages VLAN-backed Harvester networks for tenant and management workloads. |
 | [modules/management/storage](modules/management/storage/README.md) | Downloads and registers OS images into Harvester HCI, making them available for VM provisioning. |
-| [modules/management/rbac](modules/management/rbac/README.md) | Creates Rancher projects and namespaces with resource quotas for multi-tenant RBAC isolation. |
+| [modules/management/cluster-roles](modules/management/cluster-roles/README.md) | Defines custom Rancher role templates (e.g. `vm-metrics-observer`) shared across tenant projects. |
+| [modules/management/tenant-space](modules/management/tenant-space/README.md) | Full team onboarding: creates a Rancher project, namespace, resource quotas, and role bindings. |
+| [modules/management/rbac](modules/management/rbac/README.md) | Lightweight module for bulk creating projects and namespaces without advanced role bindings. |
 | [modules/management/harvester-integration](modules/management/harvester-integration/README.md) | Registers the Harvester HCI cluster into Rancher, enabling the UI extension and cloud credential. |
+
+### Monitoring
+
+| Module | Description |
+|--------|-------------|
+| [modules/monitoring](modules/monitoring/README.md) | Deploys a full monitoring stack (Prometheus / Alertmanager / Calert) with Google Chat notification support. |
 
 ### Workloads
 
 | Module | Description |
 |--------|-------------|
 | [modules/workloads/k8s-cluster](modules/workloads/k8s-cluster/README.md) | Provisions a tenant RKE2 Kubernetes cluster on Harvester HCI via Rancher's machine provisioning API. |
+| [modules/workloads/vm](modules/workloads/vm/README.md) | Provisions standalone virtual machines on Harvester HCI with support for multiple disks and cloud-init. |
 
 ---
 
 ## Deployment Phases
 
-The modules are designed to be applied in sequence across four phases:
+The modules are designed to be applied in sequence across five phases:
 
 1. **Phase 0 — Bootstrap** (`modules/bootstrap`): Deploy RKE2 + Rancher inside Harvester.
-2. **Phase 1 — Rancher Auth**: Connect the Rancher provider using the bootstrapped endpoint.
-3. **Phase 2 — Management** (`modules/management/*`): Register Harvester, configure networks, images, and RBAC.
-4. **Phase 3 — Tenants** (`modules/workloads/k8s-cluster`): Provision tenant Kubernetes clusters on demand.
+2. **Phase 1 — Rancher Auth**: Connect the Rancher provider using the bootstrapped endpoint and password.
+3. **Phase 2 — Management** (`modules/management/*`): Register Harvester into Rancher and configure shared resources (networks, images, roles).
+4. **Phase 3 — Identity & Monitoring** (`modules/identity/*`, `modules/monitoring`): Configure OIDC authentication and observability.
+5. **Phase 4 — Workloads** (`modules/workloads/*`): Provision tenant Kubernetes clusters or standalone VMs on demand.
 
 See [docs/architecture.md](docs/architecture.md) for a detailed breakdown.
 
