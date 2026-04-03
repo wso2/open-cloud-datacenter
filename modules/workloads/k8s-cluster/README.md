@@ -1,23 +1,55 @@
 # Module: workloads/k8s-cluster
 
-Provisions a tenant RKE2 Kubernetes cluster on Harvester HCI via Rancher's machine provisioning API, using a Harvester cloud credential and VM machine config.
+Provisions a tenant RKE2 Kubernetes cluster on Harvester HCI via Rancher's machine provisioning API. Supports multiple machine pools, etcd S3 backups, private registry authentication, and the Harvester cloud provider (CSI + load balancer).
 
 ## Requirements
 
 | Name | Version |
 |------|---------|
-| terraform | >= 1.3 |
-| rancher/rancher2 | ~> 3.0 |
+| terraform | >= 1.7 |
+| rancher/rancher2 | ~> 13.1 |
 
 ## Usage
 
 ```hcl
-module "k8s_cluster" {
-  source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/workloads/k8s-cluster?ref=v0.1.0"
+module "my_rke2_cluster" {
+  source = "github.com/wso2/open-cloud-datacenter//modules/workloads/k8s-cluster?ref=v0.5.0"
 
-  cluster_name            = "tenant-alpha"
-  harvester_image_name    = "default/ubuntu-22-04"
-  harvester_network_name  = "default/vlan-100"
+  cluster_name        = "my-cluster"
+  kubernetes_version  = "v1.32.13+rke2r1"
+  cloud_credential_id = var.harvester_cloud_credential_id
+
+  machine_pools = [
+    {
+      name          = "control-plane"
+      vm_namespace  = "my-namespace"
+      quantity      = 3
+      cpu_count     = "4"
+      memory_size   = "8"
+      disk_size     = 50
+      image_name    = "default/image-cwl4b"
+      networks      = ["my-namespace/vm-subnet-001", "iaas/storage-network"]
+      control_plane = true
+      etcd          = true
+      worker        = false
+    },
+    {
+      name          = "worker"
+      vm_namespace  = "my-namespace"
+      quantity      = 2
+      cpu_count     = "8"
+      memory_size   = "16"
+      disk_size     = 100
+      image_name    = "default/image-cwl4b"
+      networks      = ["my-namespace/vm-subnet-001", "iaas/storage-network"]
+      control_plane = false
+      etcd          = false
+      worker        = true
+    }
+  ]
+
+  manage_rke_config = true
+  user_data         = local.node_user_data
 }
 ```
 
@@ -25,18 +57,116 @@ module "k8s_cluster" {
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|----------|
-| cluster_name | The name of the K8s cluster to provision | `string` | n/a | yes |
-| k8s_version | The RKE2 Kubernetes version (e.g., v1.27.6+rke2r1) | `string` | `"v1.27.6+rke2r1"` | no |
-| node_count | Number of control-plane/worker hybrid nodes | `number` | `3` | no |
-| cloud_credential_name | Name of the Harvester cloud credential in Rancher | `string` | `"harvester-creds"` | no |
-| harvester_namespace | Namespace in Harvester to deploy the VMs | `string` | `"default"` | no |
-| harvester_image_name | Harvester image name for the base OS (e.g., default/ubuntu-22.04) | `string` | n/a | yes |
-| harvester_network_name | Harvester network name (e.g., default/vlan-100) | `string` | n/a | yes |
-| node_cpu | CPU string (e.g., '4') | `string` | `"4"` | no |
-| node_memory | Memory string (e.g., '16Gi') | `string` | `"16"` | no |
-| node_disk_size | Disk size string (e.g., '100Gi') | `string` | `"100"` | no |
-| ssh_user | SSH username for the VM OS | `string` | `"ubuntu"` | no |
+| `cluster_name` | Name of the downstream RKE2 cluster in Rancher | `string` | — | yes |
+| `kubernetes_version` | RKE2 Kubernetes version (e.g. `v1.32.13+rke2r1`) | `string` | — | yes |
+| `cloud_credential_id` | Harvester cloud credential secret name (`cattle-global-data:cc-xxxx`) | `string` | — | yes |
+| `machine_pools` | List of machine pool definitions (see below) | `list(object)` | `[]` | yes (when `manage_rke_config = true`) |
+| `manage_rke_config` | Create/manage machine configs and `rke_config`. Set `false` for brownfield clusters. | `bool` | `true` | no |
+| `machine_config_overrides` | Existing machine config `kind`/`name` keyed by pool name, for brownfield pools that cannot be imported | `map(object)` | `{}` | no |
+| `cni` | CNI plugin for the cluster | `string` | `"cilium"` | no |
+| `machine_global_config` | Full `machine_global_config` YAML. When `null` the module generates a default from `cni`. | `string` | `null` | no |
+| `user_data` | cloud-init user-data applied to every node VM | `string` | `""` | no |
+| `ssh_user` | SSH username for the VM OS | `string` | `"ubuntu"` | no |
+| `enable_harvester_cloud_provider` | Configure `machine_selector_config` for the Harvester CSI/LB cloud provider | `bool` | `true` | no |
+| `cloud_provider_config_secret` | `harvesterconfig*` secret name in `fleet-default` for brownfield clusters | `string` | `""` | no |
+| `registries` | Private registry configuration (see below) | `object` | `null` | no |
+| `etcd_s3` | S3 etcd backup configuration (see below) | `object` | `null` | no |
+
+### `machine_pools` entries
+
+| Field | Description | Type | Required |
+|-------|-------------|------|----------|
+| `name` | Unique pool name | `string` | yes |
+| `vm_namespace` | Harvester namespace for the node VMs | `string` | yes |
+| `quantity` | Number of nodes in the pool | `number` | yes |
+| `cpu_count` | vCPU count as a string (e.g. `"4"`) | `string` | yes |
+| `memory_size` | Memory in GiB as a string (e.g. `"16"`) | `string` | yes |
+| `disk_size` | Root disk size in GiB | `number` | yes |
+| `image_name` | Harvester image (`namespace/name`) | `string` | yes |
+| `networks` | List of NAD names (`["ns/nad", ...]`) | `list(string)` | yes |
+| `control_plane` | Pool has control-plane role | `bool` | yes |
+| `etcd` | Pool has etcd role | `bool` | yes |
+| `worker` | Pool has worker role | `bool` | yes |
+| `machine_labels` | Labels applied to Kubernetes nodes | `map(string)` | no |
+| `taints` | Node taints (`key`, `value`, `effect`) | `list(object)` | no |
+
+### `registries`
+
+Configures private container registries for all nodes in the cluster.
+
+```hcl
+registries = {
+  configs = [
+    # New cluster — supply credentials directly, module creates the auth secret
+    {
+      hostname = "harbor.internal.example.com"
+      username = var.registry_username
+      password = var.registry_password
+    },
+    # Brownfield — auth secret was created outside Terraform (e.g. Rancher UI)
+    {
+      hostname                = "myregistry.azurecr.io"
+      auth_config_secret_name = "registryconfig-auth-xxxxx"
+    },
+    # Insecure / self-signed TLS registry (no auth)
+    {
+      hostname = "internal-registry.local"
+      insecure = true
+    }
+  ]
+  mirrors = [
+    {
+      hostname  = "docker.io"
+      endpoints = ["https://harbor.internal.example.com"]
+    }
+  ]
+}
+```
+
+**Credential modes per config entry (mutually exclusive):**
+
+| Mode | When to use | Fields |
+|------|------------|--------|
+| Inline credentials | New cluster, credentials managed by Terraform | `username` + `password` |
+| Pre-existing secret | Brownfield — secret already exists in `fleet-default` | `auth_config_secret_name` |
+| No auth | Public or IP-allowlisted registry | neither |
+
+When `username`/`password` are supplied the module creates a `rancher2_secret_v2` of type `kubernetes.io/basic-auth` in the `fleet-default` namespace, named `<cluster-name>-registry-<sanitized-hostname>-<6-char-hash>`.
+
+### `etcd_s3`
+
+```hcl
+etcd_s3 = {
+  bucket              = "my-etcd-backups"
+  folder              = "my-cluster"
+  region              = "ap-southeast-1"
+  cloud_credential_id = var.etcd_s3_credential_id
+  snapshot_retention  = 5       # optional, default 3
+  snapshot_schedule   = "0 2 * * *"  # optional, default "5 23 * * *"
+}
+```
 
 ## Outputs
 
-This module does not define explicit outputs. The provisioned cluster is accessible via `module.k8s_cluster.rancher2_cluster_v2.tenant_cluster`, which exposes attributes such as `cluster_registration_token` and `kube_config`.
+| Name | Description |
+|------|-------------|
+| `cluster_id` | Rancher v2 cluster ID (`fleet-default/<name>`) |
+| `cluster_name` | Name of the provisioned downstream cluster |
+| `cluster_v3_id` | Legacy v3 cluster ID (`c-m-xxxx`) for use in role bindings |
+
+## Brownfield import
+
+For clusters already running in Rancher that were not provisioned by this module:
+
+1. Set `manage_rke_config = false` — no `rancher2_machine_config_v2` resources are created and the `rke_config` block is omitted
+2. Import the cluster resource:
+   ```bash
+   terraform import module.<name>.rancher2_cluster_v2.this fleet-default/<cluster-name>
+   ```
+3. For pools with existing machine configs, use `machine_config_overrides` to reference them by `kind`/`name` without Terraform trying to recreate them
+
+## Notes
+
+- `rke_config` changes (pool sizes, node images, etc.) are ignored after cluster creation — use Rancher UI or API for post-create pool changes to avoid triggering rolling upgrades
+- Changing machine config specs on a pool causes the provider to recreate `rancher2_machine_config_v2` with a new random name. Apply in two phases: first target the machine config, then the full module
+- `rancher2_machine_config_v2` does not support `terraform import`
