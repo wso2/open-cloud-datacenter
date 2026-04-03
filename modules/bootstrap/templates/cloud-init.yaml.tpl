@@ -2,7 +2,7 @@
 ssh_pwauth: true
 chpasswd:
   list:
-    - ubuntu:${password}
+    - 'ubuntu:${password}'
   expire: False
 
 ssh_authorized_keys:
@@ -18,11 +18,15 @@ runcmd:
   - sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="console=ttyS0,115200n8 console=tty0"/' /etc/default/grub
   - update-grub
 
-  - until ping -c 1 8.8.8.8; do sleep 5; done
-
   - |
     (
-      echo "--- Starting RKE2 and Rancher Deployment ---"
+      echo "--- Waiting for internet connectivity ---" > /dev/console
+      until curl -s --connect-timeout 5 http://1.1.1.1 > /dev/null; do 
+        echo "Still waiting for internet (http://1.1.1.1)..." > /dev/console
+        sleep 5
+      done
+
+      echo "--- Starting RKE2 and Rancher Deployment ---" > /dev/console
       
       # 1. Install RKE2
       curl -sfL https://get.rke2.io | sh -
@@ -91,5 +95,5 @@ runcmd:
             --wait && break || sleep 30
         done
       fi
-      echo "--- Deployment Script Finished ---"
+      echo "--- Deployment Script Finished ---" > /dev/console
     ) > /var/log/rancher-install.log 2>&1 &
