@@ -10,6 +10,13 @@ terraform {
 
 locals {
   pools_by_name = { for p in var.machine_pools : p.name => p }
+
+  # Key order is fixed to match what Rancher stores in state. Using yamlencode
+  # sorts keys alphabetically (cloud-provider-config before cloud-provider-name)
+  # causing a perpetual no-op diff on brownfield clusters.
+  machine_selector_config = var.cloud_provider_config_secret != "" ? (
+    "cloud-provider-config: secret://fleet-default:${var.cloud_provider_config_secret}\ncloud-provider-name: harvester\nprotect-kernel-defaults: false\n"
+  ) : "cloud-provider-name: harvester\nprotect-kernel-defaults: false\n"
 }
 
 # One machine config per pool.
@@ -113,15 +120,8 @@ resource "rancher2_cluster_v2" "this" {
           # harvesterconfig* secret already exists. For new clusters Rancher's
           # provisioner creates the secret automatically when cloud-provider-name
           # is harvester — no explicit cloud-provider-config key needed on create.
-          config = yamlencode(merge(
-            {
-              "cloud-provider-name"     = "harvester"
-              "protect-kernel-defaults" = false
-            },
-            var.cloud_provider_config_secret != "" ? {
-              "cloud-provider-config" = "secret://fleet-default:${var.cloud_provider_config_secret}"
-            } : {}
-          ))
+          #
+          config = local.machine_selector_config
         }
       }
 
