@@ -33,13 +33,25 @@ resource "rancher2_secret_v2" "registry_auth" {
   for_each = local.registry_auth_configs
 
   cluster_id = "local"
-  name       = "${var.cluster_name}-registry-${replace(replace(each.key, ".", "-"), "/", "-")}"
-  namespace  = "fleet-default"
-  type       = "kubernetes.io/basic-auth"
+  # Sanitize the secret name to a valid DNS subdomain:
+  #   1. lowercase everything
+  #   2. replace any char outside [a-z0-9-] with a hyphen (covers dots, colons, slashes)
+  #   3. collapse consecutive hyphens into one
+  #   4. append a 6-char hash of the hostname for collision safety
+  name = regexreplace(
+    regexreplace(
+      lower("${var.cluster_name}-registry-${each.key}-${substr(md5(each.key), 0, 6)}"),
+      "[^a-z0-9-]", "-"
+    ),
+    "-{2,}", "-"
+  )
+  namespace = "fleet-default"
+  type      = "kubernetes.io/basic-auth"
 
+  # rancher2_secret_v2 handles base64 encoding internally — pass raw values.
   data = {
-    username = base64encode(each.value.username)
-    password = base64encode(each.value.password)
+    username = each.value.username
+    password = each.value.password
   }
 }
 

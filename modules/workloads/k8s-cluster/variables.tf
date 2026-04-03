@@ -36,8 +36,10 @@ variable "registries" {
 
       # For new clusters: provide credentials directly and the module creates
       # the auth secret in fleet-default automatically.
+      # Both username and password must be set together — neither can be omitted
+      # when the other is present. Mutually exclusive with auth_config_secret_name.
       username = optional(string)
-      password = optional(string, "")
+      password = optional(string)
 
       # For brownfield clusters whose auth secret was created outside Terraform
       # (e.g. via Rancher UI): reference the existing secret name directly.
@@ -54,10 +56,14 @@ variable "registries" {
 
   validation {
     condition = var.registries == null ? true : alltrue([
-      for c in var.registries.configs :
-      !(c.username != null && c.auth_config_secret_name != null)
+      for c in var.registries.configs : (
+        # username and password must both be set or both be null
+        (c.username != null) == (c.password != null) &&
+        # inline credentials and pre-existing secret name are mutually exclusive
+        !(c.username != null && c.auth_config_secret_name != null)
+      )
     ])
-    error_message = "Each registry config must use either username/password or auth_config_secret_name, not both."
+    error_message = "Each registry config must set both username and password together, and cannot combine username/password with auth_config_secret_name."
   }
 }
 
