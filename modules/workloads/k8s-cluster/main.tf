@@ -38,12 +38,12 @@ resource "rancher2_secret_v2" "registry_auth" {
   #   2. replace any char outside [a-z0-9-] with a hyphen (covers dots, colons, slashes)
   #   3. collapse consecutive hyphens into one
   #   4. append a 6-char hash of the hostname for collision safety
-  name = regexreplace(
-    regexreplace(
+  name = replace(
+    replace(
       lower("${var.cluster_name}-registry-${each.key}-${substr(md5(each.key), 0, 6)}"),
-      "[^a-z0-9-]", "-"
+      "/[^a-z0-9-]/", "-"
     ),
-    "-{2,}", "-"
+    "/-{2,}/", "-"
   )
   namespace = "fleet-default"
   type      = "kubernetes.io/basic-auth"
