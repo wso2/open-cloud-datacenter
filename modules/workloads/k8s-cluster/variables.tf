@@ -55,15 +55,28 @@ variable "registries" {
   default     = null
 
   validation {
-    condition = var.registries == null ? true : alltrue([
-      for c in var.registries.configs : (
-        # username and password must both be set or both be null
-        (c.username != null) == (c.password != null) &&
-        # inline credentials and pre-existing secret name are mutually exclusive
-        !(c.username != null && c.auth_config_secret_name != null)
-      )
-    ])
-    error_message = "Each registry config must set both username and password together, and cannot combine username/password with auth_config_secret_name."
+    condition = var.registries == null ? true : (
+      # Hostnames must be unique (case-insensitive)
+      length(var.registries.configs) == length(distinct([
+        for c in var.registries.configs : lower(trimspace(c.hostname))
+      ])) &&
+      alltrue([
+        for c in var.registries.configs : (
+          # hostname must be non-empty
+          trimspace(c.hostname) != "" &&
+          # username and password must both be set or both be null
+          (c.username != null) == (c.password != null) &&
+          # when set, username and password must be non-empty
+          (c.username == null || trimspace(c.username) != "") &&
+          (c.password == null || trimspace(c.password) != "") &&
+          # when set, auth_config_secret_name must be non-empty
+          (c.auth_config_secret_name == null || trimspace(c.auth_config_secret_name) != "") &&
+          # inline credentials and pre-existing secret name are mutually exclusive
+          !(c.username != null && c.auth_config_secret_name != null)
+        )
+      ])
+    )
+    error_message = "Each registry config must have a unique non-empty hostname; username and password must be set together and non-empty; auth_config_secret_name must be non-empty and cannot be combined with username/password."
   }
 }
 
