@@ -111,6 +111,28 @@ resource "kubernetes_secret" "rancher_credential_token" {
 }
 
 locals {
+  # Resolve the cluster via current-context following Kubernetes kubeconfig semantics:
+  #   current-context → contexts[].context.cluster → clusters[].cluster
+  _parsed_kubeconfig = var.create_cloud_credential ? yamldecode(var.harvester_kubeconfig) : null
+
+  _current_context_name = local._parsed_kubeconfig != null ? local._parsed_kubeconfig["current-context"] : ""
+
+  _matched_context = local._parsed_kubeconfig != null ? one([
+    for ctx in local._parsed_kubeconfig.contexts : ctx
+    if ctx.name == local._current_context_name
+  ]) : null
+
+  _cluster_name = local._matched_context != null ? local._matched_context.context.cluster : ""
+
+  _matched_cluster = local._parsed_kubeconfig != null ? one([
+    for c in local._parsed_kubeconfig.clusters : c
+    if c.name == local._cluster_name
+  ]) : null
+
+  _cluster_ca_data = local._matched_cluster != null ? lookup(
+    local._matched_cluster.cluster, "certificate-authority-data", null
+  ) : null
+
   # Build a minimal kubeconfig using the SA token — no Rancher-embedded token involved.
   harvester_sa_kubeconfig = var.create_cloud_credential ? yamlencode({
     apiVersion = "v1"
@@ -118,8 +140,8 @@ locals {
     clusters = [{
       name = "harvester"
       cluster = {
-        server                     = yamldecode(var.harvester_kubeconfig).clusters[0].cluster.server
-        certificate-authority-data = yamldecode(var.harvester_kubeconfig).clusters[0].cluster["certificate-authority-data"]
+        server                     = local._matched_cluster.cluster.server
+        certificate-authority-data = local._cluster_ca_data
       }
     }]
     users = [{
@@ -137,6 +159,15 @@ locals {
     }]
     current-context = "harvester"
   }) : ""
+}
+
+# Validate that the kubeconfig contains embedded CA data (certificate-authority file paths
+# are not supported when building a portable SA kubeconfig for Rancher).
+check "harvester_kubeconfig_has_embedded_ca" {
+  assert {
+    condition     = !var.create_cloud_credential || local._cluster_ca_data != null
+    error_message = "The harvester_kubeconfig must contain certificate-authority-data (embedded CA). File-path certificate-authority references are not supported for cloud credential kubeconfig generation."
+  }
 }
 
 # 7b. Create Cloud Credential for Harvester Import
