@@ -46,7 +46,7 @@ module "bootstrap" {
   ubuntu_image_id = "default/ubuntu-22-04"
 
   # Credentials – supply via tfvars or environment variables; never hardcode
-  vm_password            = var.vm_password
+  vm_password        = var.vm_password
   bootstrap_password = var.bootstrap_password
 
   rancher_hostname = "rancher.example.internal"

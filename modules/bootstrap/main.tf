@@ -191,4 +191,11 @@ resource "harvester_ippool" "rancher_ips" {
     subnet  = var.ippool_subnet
     gateway = var.ippool_gateway
   }
+
+  dynamic "selector" {
+    for_each = var.ippool_network_name != "" ? [1] : []
+    content {
+      network = var.ippool_network_name
+    }
+  }
 }

@@ -29,8 +29,8 @@ variable "machine_global_config" {
 variable "registries" {
   type = object({
     configs = optional(list(object({
-      hostname = string
-      insecure = optional(bool, false)
+      hostname        = string
+      insecure        = optional(bool, false)
       ca_bundle       = optional(string)
       tls_secret_name = optional(string)
 
@@ -89,11 +89,11 @@ variable "machine_pools" {
     name          = string
     vm_namespace  = string
     quantity      = number
-    cpu_count     = string        # string expected by Harvester API e.g. "4"
-    memory_size   = string        # GiB as string e.g. "12"
-    disk_size     = number        # GiB as integer
-    image_name    = string        # "namespace/image-id"
-    networks      = list(string)  # ["ns/nad", "iaas/storage-network", ...]
+    cpu_count     = string       # string expected by Harvester API e.g. "4"
+    memory_size   = string       # GiB as string e.g. "12"
+    disk_size     = number       # GiB as integer
+    image_name    = string       # "namespace/image-id"
+    networks      = list(string) # ["ns/nad", "iaas/storage-network", ...]
     control_plane = bool
     etcd          = bool
     worker        = bool
@@ -105,7 +105,7 @@ variable "machine_pools" {
     taints = optional(list(object({
       key    = string
       value  = string
-      effect = string  # NoSchedule | PreferNoSchedule | NoExecute
+      effect = string # NoSchedule | PreferNoSchedule | NoExecute
     })), [])
   }))
   # Defaults to empty for brownfield callers (manage_rke_config = false).

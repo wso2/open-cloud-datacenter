@@ -88,12 +88,12 @@ locals {
               {{- if ne $i 0 -}},{{- end -}}
               {"decoratedText": {"text": "{{ $pair.Name | Title }}: {{ $pair.Value }}"}}
               {{- end -}}
-              %{~ if local.rancher_proxy_base != "" ~}
+              %{~if local.rancher_proxy_base != ""~}
               ,{"buttonList": {"buttons": [
                 {"text": "View Alert", "onClick": {"openLink": {"url": "${local.alertmanager_base_url}/#/alerts?filter=%7Balertname%3D%22{{.Labels.alertname}}%22%7D"}}},
                 {"text": "View in Prometheus", "onClick": {"openLink": {"url": "${local.prometheus_base_url}/alerts?search={{.Labels.alertname}}"}}}
               ]}}
-              %{~ endif ~}
+              %{~endif~}
             ]
           },
           {

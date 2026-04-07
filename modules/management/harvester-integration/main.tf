@@ -67,7 +67,79 @@ resource "rancher2_app_v2" "harvester" {
   ]
 }
 
-# 7. Create Cloud Credential for Harvester Import
+# 7a. Create a dedicated ServiceAccount + ClusterRoleBinding on Harvester for the cloud credential.
+# The kubeconfig passed by the operator uses a Harvester-embedded Rancher token which is unknown
+# to a standalone Rancher instance. We instead generate a long-lived SA token so the standalone
+# Rancher can validate it against the Harvester API directly.
+resource "kubernetes_service_account" "rancher_credential" {
+  count = var.create_cloud_credential ? 1 : 0
+  metadata {
+    name      = "rancher-cloud-credential"
+    namespace = "default"
+  }
+}
+
+resource "kubernetes_cluster_role_binding" "rancher_credential" {
+  count = var.create_cloud_credential ? 1 : 0
+  metadata {
+    name = "rancher-cloud-credential"
+  }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "ClusterRole"
+    name      = "cluster-admin"
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = kubernetes_service_account.rancher_credential[0].metadata[0].name
+    namespace = kubernetes_service_account.rancher_credential[0].metadata[0].namespace
+  }
+}
+
+resource "kubernetes_secret" "rancher_credential_token" {
+  count = var.create_cloud_credential ? 1 : 0
+  metadata {
+    name      = "rancher-cloud-credential-token"
+    namespace = "default"
+    annotations = {
+      "kubernetes.io/service-account.name" = kubernetes_service_account.rancher_credential[0].metadata[0].name
+    }
+  }
+  type = "kubernetes.io/service-account-token"
+
+  depends_on = [kubernetes_service_account.rancher_credential]
+}
+
+locals {
+  # Build a minimal kubeconfig using the SA token — no Rancher-embedded token involved.
+  harvester_sa_kubeconfig = var.create_cloud_credential ? yamlencode({
+    apiVersion = "v1"
+    kind       = "Config"
+    clusters = [{
+      name = "harvester"
+      cluster = {
+        server                     = yamldecode(var.harvester_kubeconfig).clusters[0].cluster.server
+        certificate-authority-data = yamldecode(var.harvester_kubeconfig).clusters[0].cluster["certificate-authority-data"]
+      }
+    }]
+    users = [{
+      name = "rancher-cloud-credential"
+      user = {
+        token = kubernetes_secret.rancher_credential_token[0].data["token"]
+      }
+    }]
+    contexts = [{
+      name = "harvester"
+      context = {
+        cluster = "harvester"
+        user    = "rancher-cloud-credential"
+      }
+    }]
+    current-context = "harvester"
+  }) : ""
+}
+
+# 7b. Create Cloud Credential for Harvester Import
 # Set create_cloud_credential = false for brownfield (rancher2_cloud_credential does not
 # support import for the harvester driver; the credential already exists in production).
 resource "rancher2_cloud_credential" "harvester" {
@@ -76,8 +148,10 @@ resource "rancher2_cloud_credential" "harvester" {
   harvester_credential_config {
     cluster_id         = "local"
     cluster_type       = "imported"
-    kubeconfig_content = var.harvester_kubeconfig
+    kubeconfig_content = local.harvester_sa_kubeconfig
   }
+
+  depends_on = [kubernetes_secret.rancher_credential_token]
 }
 
 

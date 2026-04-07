@@ -209,3 +209,9 @@ variable "ippool_end" {
     error_message = "ippool_end is required when create_lb = true."
   }
 }
+
+variable "ippool_network_name" {
+  type        = string
+  description = "NetworkAttachmentDefinition name to associate with the IP pool (e.g. 'default/vm-net-100'). Required when the LB VIP is on a VLAN network so kube-vip announces it on the correct interface."
+  default     = ""
+}

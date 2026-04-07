@@ -210,8 +210,8 @@ resource "rancher2_cluster_v2" "this" {
           dynamic "configs" {
             for_each = registries.value.configs
             content {
-              hostname = configs.value.hostname
-              insecure = configs.value.insecure
+              hostname        = configs.value.hostname
+              insecure        = configs.value.insecure
               ca_bundle       = configs.value.ca_bundle
               tls_secret_name = configs.value.tls_secret_name
               auth_config_secret_name = configs.value.username != null ? (
