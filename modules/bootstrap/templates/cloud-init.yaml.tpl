@@ -2,7 +2,7 @@
 ssh_pwauth: true
 chpasswd:
   list:
-    - 'ubuntu:${password}'
+    - "ubuntu:${password}"
   expire: False
 
 ssh_authorized_keys:

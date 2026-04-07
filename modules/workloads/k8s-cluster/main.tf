@@ -30,7 +30,7 @@ locals {
 # Stored in fleet-default (same namespace as harvester cloud credential secrets)
 # so the RKE2 provisioner can read them during cluster bring-up.
 resource "rancher2_secret_v2" "registry_auth" {
-  for_each = local.registry_auth_configs
+  for_each = var.manage_rke_config ? local.registry_auth_configs : {}
 
   cluster_id = "local"
   # Sanitize the secret name to a valid DNS subdomain:
