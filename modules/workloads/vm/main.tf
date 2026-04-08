@@ -55,3 +55,32 @@ resource "harvester_virtualmachine" "this" {
     }
   }
 }
+
+# Optional scheduled backup — created only when backup_schedule is set.
+# Uses kubernetes_manifest because harvester_schedule_backup requires provider >= 1.8.
+resource "kubernetes_manifest" "scheduled_backup" {
+  count = var.backup_schedule != null ? 1 : 0
+
+  manifest = {
+    apiVersion = "harvesterhci.io/v1beta1"
+    kind       = "ScheduleVMBackup"
+    metadata = {
+      name      = "${var.name}-backup"
+      namespace = var.namespace
+    }
+    spec = {
+      cron       = var.backup_schedule
+      retain     = var.backup_retain
+      maxFailure = var.backup_max_failure
+      suspend    = !var.backup_enabled
+      vmbackup = {
+        source = {
+          apiGroup = "kubevirt.io"
+          kind     = "VirtualMachine"
+          name     = harvester_virtualmachine.this.name
+        }
+        type = "backup"
+      }
+    }
+  }
+}

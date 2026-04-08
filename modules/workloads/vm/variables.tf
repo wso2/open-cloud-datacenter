@@ -87,3 +87,29 @@ variable "additional_disks" {
   description = "List of additional disks to attach to the VM."
   default     = []
 }
+
+# --- Scheduled backups ---
+
+variable "backup_schedule" {
+  type        = string
+  description = "Cron schedule for VM backups in UTC (e.g. \"0 2 * * *\" for daily at 2 AM). Set to null to disable scheduled backups."
+  default     = null
+}
+
+variable "backup_retain" {
+  type        = number
+  description = "Number of backups to retain when scheduled backups are enabled."
+  default     = 5
+}
+
+variable "backup_enabled" {
+  type        = bool
+  description = "Whether the backup schedule is active. Only applies when backup_schedule is set."
+  default     = true
+}
+
+variable "backup_max_failure" {
+  type        = number
+  description = "Maximum consecutive failed backup attempts before suspending the schedule."
+  default     = 4
+}
