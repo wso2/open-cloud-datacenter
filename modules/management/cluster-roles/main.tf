@@ -102,6 +102,137 @@ resource "rancher2_role_template" "network_manager" {
   }
 }
 
+# Cluster-scoped prerequisite for tenants who need to create VMs.
+# Harvester stores shared resources (images, networks, SSH keypairs) outside
+# project namespaces — project-owner alone cannot see them. This role provides
+# the minimum cluster-level read access required for the VM creation flow:
+#   - VM image dropdown (VirtualMachineImage in default/harvester-public)
+#   - Network dropdown (NetworkAttachmentDefinition in harvester-public)
+#   - SSH keypair dropdown (KeyPair in the tenant's namespace, but listed cluster-wide)
+#
+# Pair with a project role (vm-manager or project-owner) via a separate
+# rancher2_cluster_role_template_binding for the same group.
+resource "rancher2_role_template" "vm_creator" {
+  name        = "vm-creator"
+  description = "Cluster-level read access to shared Harvester resources (VM images, networks, SSH keypairs) needed to create VMs. Pair with a project role for full VM lifecycle."
+  context     = "cluster"
+
+  # VM images are stored in the default or harvester-public namespace.
+  # Without this, the image dropdown is empty when creating a VM.
+  rules {
+    api_groups = ["harvesterhci.io"]
+    resources  = ["virtualmachineimages"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  # NetworkAttachmentDefinitions in harvester-public are the network references
+  # VMs use. Without this, the network interface dropdown is empty.
+  rules {
+    api_groups = ["k8s.cni.cncf.io"]
+    resources  = ["network-attachment-definitions"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  # SSH keypairs — read cluster-wide so the keypair dropdown populates.
+  # The keypair itself lives in the tenant's namespace; the cluster-level
+  # read is required for the Harvester UI to enumerate them.
+  rules {
+    api_groups = ["harvesterhci.io"]
+    resources  = ["keypairs"]
+    verbs      = ["get", "list", "watch"]
+  }
+}
+
+# Project-scoped role for teams that operate but do not provision VMs.
+# Grants power operations (start/stop/restart) and console/VNC access only.
+# Intentionally excludes create, delete, migrate, and all data volume mutations
+# so operators cannot provision or decommission VMs — only run them.
+resource "rancher2_role_template" "vm_operator" {
+  name        = "vm-operator"
+  description = "Start, stop, restart, and access the console of existing VMs. No create, delete, or migrate permissions."
+  context     = "project"
+
+  # Read-only view of VM objects — operators need to see what exists
+  rules {
+    api_groups = ["kubevirt.io"]
+    resources  = ["virtualmachines", "virtualmachineinstances"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  # Power operations and console/VNC — migrate intentionally excluded
+  rules {
+    api_groups = ["subresources.kubevirt.io"]
+    resources  = ["virtualmachines/start", "virtualmachines/stop", "virtualmachines/restart", "virtualmachineinstances/vnc", "virtualmachineinstances/console"]
+    verbs      = ["get", "update"]
+  }
+
+  # VM metrics for Harvester dashboard graphs
+  rules {
+    api_groups = ["subresources.kubevirt.io"]
+    resources  = ["virtualmachineinstances/metrics"]
+    verbs      = ["get"]
+  }
+
+  # Read-only access to available VM images (needed to see disk info in UI)
+  rules {
+    api_groups = ["harvesterhci.io"]
+    resources  = ["virtualmachineimages"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  # Service proxy for Harvester UI routing
+  rules {
+    api_groups = [""]
+    resources  = ["services/proxy"]
+    verbs      = ["get"]
+  }
+}
+
+# Cluster-scoped role for SREs who manage RKE2 node capacity.
+# Grants the ability to scale machine pools and patch cluster specs without
+# permission to create new clusters or delete existing ones.
+resource "rancher2_role_template" "cluster_operator" {
+  name        = "cluster-operator"
+  description = "Scale and reconfigure RKE2 machine pools. No permission to create or delete clusters."
+  context     = "cluster"
+
+  # Rancher provisioning v2 cluster object — can edit (scale nodes) but not create/delete.
+  # Machine pool count and nodeConfig live inside the cluster spec.
+  rules {
+    api_groups = ["provisioning.cattle.io"]
+    resources  = ["clusters"]
+    verbs      = ["get", "list", "watch", "update", "patch"]
+  }
+
+  # Read-only view of RKE2 control plane state
+  rules {
+    api_groups = ["rke.cattle.io"]
+    resources  = ["rkecontrolplanes"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  # etcd snapshots — read existing + create manual on-demand snapshots
+  rules {
+    api_groups = ["rke.cattle.io"]
+    resources  = ["etcdsnapshots"]
+    verbs      = ["get", "list", "watch", "create"]
+  }
+
+  # CAPI machine deployments and sets — needed to scale node pools
+  rules {
+    api_groups = ["cluster.x-k8s.io"]
+    resources  = ["machinedeployments", "machinesets"]
+    verbs      = ["get", "list", "watch", "update", "patch"]
+  }
+
+  # Rancher management cluster object — read-only (UI navigation, cluster health)
+  rules {
+    api_groups = ["management.cattle.io"]
+    resources  = ["clusters"]
+    verbs      = ["get", "list", "watch"]
+  }
+}
+
 # Grants read-only visibility into VM status and metrics for the Harvester
 # dashboard. Intentionally excludes all mutating verbs (update, patch, delete)
 # and subresources that control VM power state (start, stop, restart, migrate).

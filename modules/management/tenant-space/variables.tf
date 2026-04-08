@@ -10,7 +10,7 @@ variable "project_name" {
 
 variable "namespaces" {
   type        = list(string)
-  description = "One or more Kubernetes namespace names to create within the project. Must contain at least one unique entry."
+  description = "One or more Kubernetes namespace names to create within the project. At minimum, provide one namespace named after the project — this ensures the namespace dropdown is populated when creating VMs or RKE2 clusters in Rancher/Harvester. All names must be unique RFC 1123 DNS labels (lowercase alphanumeric and hyphens, max 63 chars)."
   validation {
     condition = (
       length(var.namespaces) > 0 &&
@@ -20,7 +20,7 @@ variable "namespaces" {
         can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", ns))
       ])
     )
-    error_message = "All namespace names must be unique, non-empty, at most 63 characters, and match RFC 1123 DNS label format (lowercase alphanumeric and hyphens, must start and end with alphanumeric)."
+    error_message = "At least one namespace is required. All names must be unique, at most 63 characters, and match RFC 1123 DNS label format (lowercase alphanumeric and hyphens, must start and end with alphanumeric)."
   }
 }
 
