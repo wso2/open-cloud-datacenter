@@ -151,7 +151,7 @@ This phase uses four modules, typically applied together:
 
 ---
 
-### Phase 4 — Asgardeo Auth (Future)
+### Phase 5 — Asgardeo Auth (Future)
 
 **Purpose**: Integrate Asgardeo as an external OIDC identity provider for Rancher and tenant clusters.
 
@@ -163,13 +163,11 @@ This phase configures the `asgardeo` provider (or equivalent OIDC configuration 
 
 | Provider | Used In | Purpose |
 |----------|---------|---------|
-| `harvester/harvester ~> 0.6.0` | bootstrap, networking, storage, harvester-integration | Manage Harvester VMs, networks, images, settings |
-| `hashicorp/tls ~> 4.0` | bootstrap | Generate SSH key pairs |
-| `hashicorp/helm ~> 2.0` | bootstrap (declared, cloud-init handles install) | Helm provider declaration |
-| `rancher/rancher2 ~> 3.0` | rbac, k8s-cluster | Manage Rancher projects, namespaces, cluster provisioning |
-| `rancher/rancher2 ~> 8.0.0` | harvester-integration, identity | Rancher settings, cloud credentials, cluster import, OIDC auth |
-| `hashicorp/kubernetes ~> 2.30.0` | harvester-integration, monitoring | Patch Harvester CoreDNS, deploy monitoring resources |
-| `asgardeo` | Phase 4 (future) | OIDC identity provider integration |
+| `harvester/harvester ~> 1.7` | bootstrap, workloads/vm | Manage Harvester VMs, networks, images |
+| `rancher/rancher2 ~> 13.1` | management/cluster-roles, management/tenant-space, identity/rancher-oidc | Rancher projects, namespaces, role templates, OIDC auth config |
+| `hashicorp/kubernetes ~> 3.0` | monitoring | Deploy monitoring resources to Harvester cluster |
+| `hashicorp/kubernetes ~> 2.35` | workloads/harvester-cloud-credential | Cross-cluster credential provisioning |
+| `asgardeo/asgardeo ~> 0.1` | identity/providers/asgardeo | Asgardeo application and OIDC configuration (Phase 5, future) |
 
 ---
 

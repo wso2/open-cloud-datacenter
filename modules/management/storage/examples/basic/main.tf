@@ -26,7 +26,7 @@ provider "harvester" {
 }
 
 module "storage" {
-  source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/management/storage?ref=v0.1.0"
+  source = "github.com/wso2/open-cloud-datacenter//modules/management/storage?ref=v0.5.8"
 
   harvester_namespace = "default"
 
