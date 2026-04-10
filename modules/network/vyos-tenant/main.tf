@@ -14,7 +14,7 @@
 #   2. VyOS HTTPS API enabled manually post-install:
 #        configure
 #        set service https api keys id terraform key '<api_key>'
-#        set service https api allow-client address 0.0.0.0/0
+#        set service https api allow-client address <management_cidr>
 #        set service https certificates system-generated-certificate
 #        commit; save
 #   3. VyOS uplink interface (eth0) and default route configured
@@ -64,14 +64,14 @@ resource "vyos_config_block_tree" "dhcp" {
   depends_on = [vyos_config_block_tree.vif]
 }
 
-# DHCP DNS option — each server as a separate config entry
+# DHCP DNS options — all name-server entries in a single resource.
+# Each server IP is embedded in the config key so the map keys are unique
+# and the provider sees one authoritative config block for this path.
 resource "vyos_config_block_tree" "dhcp_dns" {
-  for_each = toset(var.dns_servers)
-
   path = "service dhcp-server shared-network-name ${local.vlan_label} subnet ${local.subnet} option"
 
   configs = {
-    "name-server" = each.value
+    for srv in var.dns_servers : "name-server ${srv}" => ""
   }
 
   depends_on = [vyos_config_block_tree.dhcp]
