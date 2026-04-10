@@ -76,7 +76,22 @@ Harvester uses to report the guest IP.
 > `apt-daily-upgrade` timers run on first boot and hold the dpkg lock, causing
 > package installs to fail silently if triggered at the same time.
 
+The snippet below uses `var.vm_password` and `var.ssh_authorized_keys` — these
+are **root-module variables** that you define in your own `variables.tf`; they
+are not inputs to this module.
+
 ```hcl
+# Example root-module variables (define in your own variables.tf)
+variable "vm_password" {
+  type      = string
+  sensitive = true
+}
+
+variable "ssh_authorized_keys" {
+  type    = list(string)
+  default = []
+}
+
 module "app_vm" {
   source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/workloads/vm?ref=v0.1.x"
 
@@ -93,7 +108,9 @@ module "app_vm" {
       expire: false
     ssh_pwauth: true
     ssh_authorized_keys:
-      ${indent(6, join("\n", formatlist("- %s", var.ssh_authorized_keys)))}
+%{~ for key in var.ssh_authorized_keys }
+      - ${key}
+%{~ endfor }
     packages:
       - qemu-guest-agent
     runcmd:
