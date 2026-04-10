@@ -46,7 +46,8 @@ resource "harvester_image" "vyos" {
 # to VyOS, which handles 802.1Q sub-interfaces (vif) per tenant VLAN.
 #
 # route_mode = "manual" is required by the Harvester provider when route_cidr
-# is specified. The CIDR is informational only; routing is handled by VyOS.
+# is specified. The CIDR (10.0.0.0/8) is informational only; routing is
+# handled by VyOS sub-interfaces, not by this NAD.
 
 resource "harvester_network" "eth1_trunk" {
   name                 = local.trunk_network_name

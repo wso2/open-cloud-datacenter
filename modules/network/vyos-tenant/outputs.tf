@@ -14,7 +14,7 @@ output "gateway_ip" {
 }
 
 output "dhcp_range" {
-  value       = "${local.dhcp_start}–${local.dhcp_stop}"
+  value       = "${local.dhcp_start}-${local.dhcp_stop}"
   description = "DHCP pool range for tenant VMs."
 }
 
