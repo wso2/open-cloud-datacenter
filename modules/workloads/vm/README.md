@@ -63,6 +63,19 @@ module "app_vm" {
 
 ### With cloud-init
 
+Inject SSH keys, set a password, and install `qemu-guest-agent` so the VM's IP
+address is visible in the Harvester UI. For VMs on private VLAN networks (where
+Kubernetes IPAM is not available), `qemu-guest-agent` is the only mechanism
+Harvester uses to report the guest IP.
+
+> **Note:** Do not use a `users:` block with `password:` — on cloud-init 25.x
+> this prevents the password from being applied to the default OS user. Use the
+> top-level `password:` / `chpasswd:` / `ssh_authorized_keys:` keys instead.
+>
+> **Note:** Avoid `package_update: true`. On Ubuntu 22.04 the `apt-daily` and
+> `apt-daily-upgrade` timers run on first boot and hold the dpkg lock, causing
+> package installs to fail silently if triggered at the same time.
+
 ```hcl
 module "app_vm" {
   source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/workloads/vm?ref=v0.1.x"
@@ -71,15 +84,20 @@ module "app_vm" {
   namespace      = "iam-team-ns"
   image_name     = data.terraform_remote_state.management.outputs.image_ids["ubuntu-22-04"]
   network_name   = "iam-team-vlan"
-  ssh_public_key = file(pathexpand("~/.ssh/id_rsa.pub"))
+  wait_for_lease = false
 
   user_data = <<-EOT
     #cloud-config
-    package_update: true
+    password: ${var.vm_password}
+    chpasswd:
+      expire: false
+    ssh_pwauth: true
+    ssh_authorized_keys:
+      ${indent(6, join("\n", formatlist("- %s", var.ssh_authorized_keys)))}
     packages:
-      - nginx
+      - qemu-guest-agent
     runcmd:
-      - systemctl enable --now nginx
+      - systemctl enable --now qemu-guest-agent
   EOT
 }
 ```
@@ -135,8 +153,11 @@ locals {
   (created by `management/networking`).
 - The VM's IP address is available in `network_interfaces[0].ip_address` after the
   lease is obtained (requires `wait_for_lease = true`, which is the default).
-  Set `wait_for_lease = false` when using static IPs via cloud-init `network_data`
-  without qemu-guest-agent.
+  Set `wait_for_lease = false` when using static IPs via cloud-init `network_data`,
+  or when the VM is on a private VLAN where Kubernetes IPAM is not available.
+- For VMs on private VLAN networks, Harvester cannot obtain the guest IP from
+  Kubernetes IPAM. Install and enable `qemu-guest-agent` via cloud-init so the
+  IP reported by the guest is visible in the Harvester UI.
 - The `vm-manager` custom role from `management/cluster-roles` must be bound to the
   team's group in their `tenant-space` before they can create VMs in the namespace.
 - Removing this module or running `terraform destroy` **deletes the VM and its disk**.
