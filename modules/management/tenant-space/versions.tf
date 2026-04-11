@@ -1,9 +1,17 @@
 terraform {
-  required_version = ">= 1.3"
+  required_version = ">= 1.5"
   required_providers {
     rancher2 = {
       source  = "rancher/rancher2"
       version = "~> 13.1"
+    }
+    harvester = {
+      source  = "harvester/harvester"
+      version = "~> 1.7"
+    }
+    vyos = {
+      source  = "hiranadikari/vyos"
+      version = "~> 0.1"
     }
   }
 }

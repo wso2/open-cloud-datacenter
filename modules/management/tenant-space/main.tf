@@ -2,6 +2,8 @@ locals {
   namespace_cpu_limit     = var.namespace_cpu_limit != null ? var.namespace_cpu_limit : var.cpu_limit
   namespace_memory_limit  = var.namespace_memory_limit != null ? var.namespace_memory_limit : var.memory_limit
   namespace_storage_limit = var.namespace_storage_limit != null ? var.namespace_storage_limit : var.storage_limit
+  namespaces              = var.namespaces != null ? var.namespaces : [var.project_name]
+  network_namespace       = var.vlan_id != null ? "${var.project_name}-net" : null
 }
 
 resource "rancher2_project" "this" {
@@ -46,7 +48,7 @@ resource "rancher2_project" "this" {
 
 # One namespace per entry. Each is a standard k8s namespace assigned to this project.
 resource "rancher2_namespace" "this" {
-  for_each         = toset(var.namespaces)
+  for_each         = toset(local.namespaces)
   name             = each.value
   project_id       = rancher2_project.this.id
   wait_for_cluster = false
@@ -57,7 +59,32 @@ resource "rancher2_namespace" "this" {
   }
 }
 
-# One binding per (group, role) pair.
+# ── Network namespace (only when vlan_id is set) ──────────────────────────────
+
+resource "rancher2_namespace" "network" {
+  count            = var.vlan_id != null ? 1 : 0
+  name             = local.network_namespace
+  project_id       = rancher2_project.this.id
+  wait_for_cluster = false
+
+  lifecycle {
+    ignore_changes = [description]
+  }
+}
+
+# ── VyOS tenant network (only when vlan_id is set) ────────────────────────────
+
+module "vyos_tenant" {
+  count  = var.vlan_id != null ? 1 : 0
+  source = "../../network/vyos-tenant"
+
+  tenant_name          = var.project_name
+  vlan_id              = var.vlan_id
+  network_namespace    = rancher2_namespace.network[0].name
+  cluster_network_name = var.cluster_network_name
+}
+
+# ── One binding per (group, role) pair. ───────────────────────────────────────
 resource "rancher2_project_role_template_binding" "this" {
   for_each = {
     for idx, b in var.group_role_bindings :

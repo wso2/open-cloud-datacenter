@@ -10,9 +10,9 @@ variable "project_name" {
 
 variable "namespaces" {
   type        = list(string)
-  description = "One or more Kubernetes namespace names to create within the project. At minimum, provide one namespace named after the project — this ensures the namespace dropdown is populated when creating VMs or RKE2 clusters in Rancher/Harvester. All names must be unique RFC 1123 DNS labels (lowercase alphanumeric and hyphens, max 63 chars)."
-  validation {
-    condition = (
+  description = "Kubernetes namespace names to create within the project. Defaults to [project_name] — a single namespace matching the project. Pass additional names to create more."
+  default     = null  validation {
+    condition = var.namespaces == null || (
       length(var.namespaces) > 0 &&
       length(var.namespaces) == length(toset(var.namespaces)) &&
       alltrue([for ns in var.namespaces :
@@ -86,6 +86,30 @@ variable "namespace_storage_limit" {
     condition     = var.namespace_storage_limit == null ? true : trimspace(var.namespace_storage_limit) != ""
     error_message = "namespace_storage_limit must be null or a non-empty quantity string."
   }
+}
+
+# ── VyOS network integration — all optional ───────────────────────────────────
+# When vlan_id is set, the module additionally creates:
+#   - A "<project_name>-net" namespace in the project (network namespace)
+#   - A harvester_network for that VLAN
+#   - VyOS vif sub-interface, DHCP server, and NAT rule via the vyos-tenant module
+#
+# Requires the vyos and harvester providers to be configured in the caller.
+
+variable "vlan_id" {
+  type        = number
+  description = "VLAN ID for this tenant's network (>= 1000). When set, creates the network namespace, harvester_network, and VyOS config. When null, no network resources are created."
+  default     = null
+  validation {
+    condition     = var.vlan_id == null || var.vlan_id >= 1000
+    error_message = "vlan_id must be >= 1000."
+  }
+}
+
+variable "cluster_network_name" {
+  type        = string
+  description = "Harvester cluster network carrying tenant VLANs. Defaults to 'vm-network' — override only if your datacenter uses a different cluster network name."
+  default     = "vm-network"
 }
 
 # Role bindings — one binding is created per (group, role) pair.
