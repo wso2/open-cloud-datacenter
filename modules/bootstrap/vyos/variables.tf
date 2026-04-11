@@ -67,6 +67,12 @@ variable "trunk_network_namespace" {
   default     = null
 }
 
+variable "management_network_name" {
+  type        = string
+  description = "Full Harvester network ref for the optional eth2 management NIC, e.g. 'default/vyos-mgmt'. When set, attaches a third NIC on the Harvester management cluster network so in-cluster processes can reach the VyOS HTTPS API without routing through the external uplink."
+  default     = null
+}
+
 # ── Phase control ─────────────────────────────────────────────────────────────
 
 variable "iso_installed" {

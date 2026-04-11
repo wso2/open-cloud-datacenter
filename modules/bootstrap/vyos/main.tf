@@ -84,6 +84,18 @@ resource "harvester_virtualmachine" "vyos" {
     network_name = "${local.trunk_network_namespace}/${harvester_network.eth1_trunk.name}"
   }
 
+  # eth2 — optional management NIC. Attaches VyOS to the Harvester management
+  # cluster network so in-cluster processes (e.g. DHCP reconciler pods with
+  # hostNetwork) can reach the VyOS HTTPS API at a stable management IP.
+  dynamic "network_interface" {
+    for_each = var.management_network_name != null ? [1] : []
+    content {
+      name         = "eth2"
+      type         = "bridge"
+      network_name = var.management_network_name
+    }
+  }
+
   # Root disk — VyOS is installed here via 'install image' from the ISO.
   disk {
     name        = "rootdisk"
@@ -107,6 +119,13 @@ resource "harvester_virtualmachine" "vyos" {
       image       = harvester_image.vyos.id
       auto_delete = true
     }
+  }
+
+  # Ignore disk changes after initial provisioning. Harvester may flip
+  # auto_delete on the rootdisk after the CDROM is removed, causing a
+  # perpetual diff. The disk content is not managed by Terraform.
+  lifecycle {
+    ignore_changes = [disk]
   }
 
   depends_on = [harvester_network.eth1_trunk]
