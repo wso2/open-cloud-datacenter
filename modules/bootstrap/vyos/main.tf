@@ -121,11 +121,11 @@ resource "harvester_virtualmachine" "vyos" {
     }
   }
 
-  # Ignore disk changes after initial provisioning. Harvester may flip
-  # auto_delete on the rootdisk after the CDROM is removed, causing a
-  # perpetual diff. The disk content is not managed by Terraform.
+  # Harvester may flip auto_delete on the rootdisk after the CDROM is
+  # removed, causing a perpetual diff. Ignore only that attribute so all
+  # other disk config changes (size, bus, etc.) remain Terraform-managed.
   lifecycle {
-    ignore_changes = [disk]
+    ignore_changes = [disk[0].auto_delete]
   }
 
   depends_on = [harvester_network.eth1_trunk]

@@ -71,6 +71,13 @@ variable "management_network_name" {
   type        = string
   description = "Full Harvester network ref for the optional eth2 management NIC, e.g. 'default/vyos-mgmt'. When set, attaches a third NIC on the Harvester management cluster network so in-cluster processes can reach the VyOS HTTPS API without routing through the external uplink."
   default     = null
+  validation {
+    condition = var.management_network_name == null || (
+      trimspace(var.management_network_name) != "" &&
+      can(regex("^[^/]+/[^/]+$", var.management_network_name))
+    )
+    error_message = "management_network_name must be null or in 'namespace/name' format (e.g. 'default/vyos-mgmt')."
+  }
 }
 
 # ── Phase control ─────────────────────────────────────────────────────────────
