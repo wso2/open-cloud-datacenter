@@ -28,13 +28,10 @@ locals {
   gateway_cidr = "${local.gateway_ip}/${split("/", local.subnet)[1]}"
 
   # DHCP range — offsets from subnet base
-  subnet_base = split("/", local.subnet)[0]
-
   dhcp_start = cidrhost(local.subnet, var.dhcp_range_start_offset)
   dhcp_stop  = cidrhost(local.subnet, var.dhcp_range_end_offset)
 
   vlan_label = "VLAN${var.vlan_id}"
-  vif_path   = "interfaces ethernet eth1 vif ${var.vlan_id}"
 }
 
 check "dhcp_offset_order" {
@@ -48,52 +45,49 @@ check "dhcp_offset_order" {
 
 # eth1.vlan_id sub-interface — tenant gateway
 resource "vyos_config_block_tree" "vif" {
-  path = local.vif_path
-
-  configs = {
-    "address"     = local.gateway_cidr
-    "description" = "${var.tenant_name}-${local.vlan_label}"
-  }
+  path = ["interfaces", "ethernet", "eth1", "vif", tostring(var.vlan_id)]
+  section = jsonencode({
+    address     = local.gateway_cidr
+    description = "${var.tenant_name}-${local.vlan_label}"
+  })
 }
 
-# DHCP shared network for this tenant
+# DHCP shared network for this tenant.
+# dns_servers is expressed as a JSON array; the provider emits one
+# /configure set command per element (multi-value leaf node support).
 resource "vyos_config_block_tree" "dhcp" {
-  path = "service dhcp-server shared-network-name ${local.vlan_label}"
-
-  configs = {
-    # subnet-id equals vlan_id — traceable 1:1 mapping
-    "subnet ${local.subnet} subnet-id"             = tostring(var.vlan_id)
-    "subnet ${local.subnet} option default-router" = local.gateway_ip
-    "subnet ${local.subnet} range 0 start"         = local.dhcp_start
-    "subnet ${local.subnet} range 0 stop"          = local.dhcp_stop
-  }
+  path = ["service", "dhcp-server", "shared-network-name", local.vlan_label]
+  section = jsonencode({
+    subnet = {
+      (local.subnet) = {
+        # subnet-id equals vlan_id — traceable 1:1 mapping
+        subnet-id = var.vlan_id
+        option = {
+          default-router = local.gateway_ip
+          name-server    = var.dns_servers
+        }
+        range = {
+          "0" = {
+            start = local.dhcp_start
+            stop  = local.dhcp_stop
+          }
+        }
+      }
+    }
+  })
 
   depends_on = [vyos_config_block_tree.vif]
-}
-
-# DHCP DNS options — all name-server entries in a single resource.
-# Each server IP is embedded in the config key so the map keys are unique
-# and the provider sees one authoritative config block for this path.
-resource "vyos_config_block_tree" "dhcp_dns" {
-  path = "service dhcp-server shared-network-name ${local.vlan_label} subnet ${local.subnet} option"
-
-  configs = {
-    for srv in var.dns_servers : "name-server ${srv}" => ""
-  }
-
-  depends_on = [vyos_config_block_tree.dhcp]
 }
 
 # NAT source rule — masquerade tenant traffic out the uplink interface (internet egress)
 # Rule number = vlan_id for traceability
 resource "vyos_config_block_tree" "nat_egress" {
-  path = "nat source rule ${var.vlan_id}"
-
-  configs = {
-    "outbound-interface name" = "eth0"
-    "source address"          = local.subnet
-    "translation address"     = "masquerade"
-  }
+  path = ["nat", "source", "rule", tostring(var.vlan_id)]
+  section = jsonencode({
+    outbound-interface = { name = "eth0" }
+    source             = { address = local.subnet }
+    translation        = { address = "masquerade" }
+  })
 }
 
 # ── Harvester network resource ────────────────────────────────────────────────
