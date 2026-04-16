@@ -8,6 +8,11 @@ output "subnet" {
   description = "Tenant subnet in CIDR notation, e.g. '10.0.0.0/23'."
 }
 
+output "subnet_cidr" {
+  value       = local.subnet
+  description = "Alias for subnet. Tenant subnet in CIDR notation, e.g. '10.0.0.0/23'."
+}
+
 output "gateway_ip" {
   value       = local.gateway_ip
   description = "Tenant gateway IP (VyOS vif address), e.g. '10.0.0.1'."
