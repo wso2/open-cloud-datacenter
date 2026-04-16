@@ -7,8 +7,8 @@ terraform {
       version = "~> 1.7"
     }
     vyos = {
-      source  = "thomasfinstad/vyos-rolling"
-      version = "~> 19.0"
+      source  = "hiranadikari/vyos"
+      version = "~> 0.1"
     }
   }
 }
