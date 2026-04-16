@@ -53,9 +53,28 @@ variable "ssh_public_key" {
 
 # --- Cloud-init ---
 
+variable "default_user" {
+  type        = string
+  description = "OS username for generated cloud-init (e.g. ubuntu, debian, rocky). Only used when user_data is null and password or ssh_authorized_keys are set."
+  default     = "ubuntu"
+}
+
+variable "password" {
+  type        = string
+  description = "Password for the default_user, injected via chpasswd.list. Only used when user_data is null. Leave null to disable password auth."
+  default     = null
+  sensitive   = true
+}
+
+variable "ssh_authorized_keys" {
+  type        = list(string)
+  description = "SSH public keys to inject into the default_user. Only used when user_data is null."
+  default     = []
+}
+
 variable "user_data" {
   type        = string
-  description = "Cloud-init user-data script (plain YAML, not base64). When set, a cloud-init secret is created and attached. Leave null for no cloud-init."
+  description = "Full cloud-init user-data override (plain YAML, not base64). When set, password/ssh_authorized_keys/default_user are ignored and this is passed through unchanged."
   default     = null
 }
 

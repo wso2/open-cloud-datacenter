@@ -1,3 +1,18 @@
+locals {
+  # Generate cloud-init from first-class variables when user_data is not provided.
+  # user_data takes full precedence — when set, generation is skipped entirely.
+  _generated_user_data = (var.password != null || length(var.ssh_authorized_keys) > 0) ? templatefile(
+    "${path.module}/templates/cloud-init.tpl",
+    {
+      default_user        = var.default_user
+      password            = var.password
+      ssh_authorized_keys = var.ssh_authorized_keys
+    }
+  ) : null
+
+  effective_user_data = var.user_data != null ? var.user_data : local._generated_user_data
+}
+
 # Optional SSH key — created only when ssh_public_key is provided.
 resource "harvester_ssh_key" "this" {
   count = var.create_ssh_key ? 1 : 0
@@ -48,9 +63,9 @@ resource "harvester_virtualmachine" "this" {
   }
 
   dynamic "cloudinit" {
-    for_each = var.user_data != null ? [1] : []
+    for_each = local.effective_user_data != null ? [1] : []
     content {
-      user_data    = var.user_data
+      user_data    = local.effective_user_data
       network_data = var.network_data
     }
   }
