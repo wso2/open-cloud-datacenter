@@ -52,6 +52,15 @@ resource "rancher2_role_template" "vm_manager" {
     verbs      = ["get", "list", "watch", "create", "delete"]
   }
 
+  # NetworkAttachmentDefinitions — project-scoped so tenants only see networks
+  # within their own project's namespaces. Intentionally NOT in vm-creator
+  # (cluster role) to prevent cross-tenant network visibility.
+  rules {
+    api_groups = ["k8s.cni.cncf.io"]
+    resources  = ["network-attachment-definitions"]
+    verbs      = ["get", "list", "watch"]
+  }
+
   # Cloud-init secrets and SSH key secrets
   rules {
     api_groups = [""]
@@ -103,18 +112,22 @@ resource "rancher2_role_template" "network_manager" {
 }
 
 # Cluster-scoped prerequisite for tenants who need to create VMs.
-# Harvester stores shared resources (images, networks, SSH keypairs) outside
+# Harvester stores shared resources (images and SSH keypairs) outside
 # project namespaces — project-owner alone cannot see them. This role provides
 # the minimum cluster-level read access required for the VM creation flow:
 #   - VM image dropdown (VirtualMachineImage in default/harvester-public)
-#   - Network dropdown (NetworkAttachmentDefinition in harvester-public)
 #   - SSH keypair dropdown (KeyPair in the tenant's namespace, but listed cluster-wide)
+#
+# Network dropdown: NAD read is intentionally on vm-manager (project-scoped),
+# NOT here. Keeping it cluster-scoped would let tenants list NADs from all
+# namespaces (default, other tenants), leaking network topology. With it
+# project-scoped, the dropdown only shows networks inside their own project.
 #
 # Pair with a project role (vm-manager or project-owner) via a separate
 # rancher2_cluster_role_template_binding for the same group.
 resource "rancher2_role_template" "vm_creator" {
   name        = "vm-creator"
-  description = "Cluster-level read access to shared Harvester resources (VM images, networks, SSH keypairs) needed to create VMs. Pair with a project role for full VM lifecycle."
+  description = "Cluster-level read access to shared Harvester resources (VM images, SSH keypairs) needed to create VMs. Pair with vm-manager (project role) for full VM lifecycle."
   context     = "cluster"
 
   # VM images are stored in the default or harvester-public namespace.
@@ -122,14 +135,6 @@ resource "rancher2_role_template" "vm_creator" {
   rules {
     api_groups = ["harvesterhci.io"]
     resources  = ["virtualmachineimages"]
-    verbs      = ["get", "list", "watch"]
-  }
-
-  # NetworkAttachmentDefinitions in harvester-public are the network references
-  # VMs use. Without this, the network interface dropdown is empty.
-  rules {
-    api_groups = ["k8s.cni.cncf.io"]
-    resources  = ["network-attachment-definitions"]
     verbs      = ["get", "list", "watch"]
   }
 
