@@ -53,20 +53,10 @@ resource "rancher2_namespace" "this" {
   project_id       = rancher2_project.this.id
   wait_for_cluster = false
 
-  # Explicitly set per-namespace resource quota when the project has a quota.
-  # Rancher does not reliably propagate namespace_default_limit to namespaces
-  # created via the API — without this block the namespace ResourceQuota can
-  # end up with limits.cpu=0 / limits.memory=0, blocking all VM creation.
-  dynamic "resource_quota" {
-    for_each = var.cpu_limit != null ? [1] : []
-    content {
-      limit {
-        limits_cpu       = local.namespace_cpu_limit
-        limits_memory    = local.namespace_memory_limit
-        requests_storage = local.namespace_storage_limit
-      }
-    }
-  }
+  # resource_quota intentionally omitted — the project-level quota already
+  # enforces the aggregate ceiling across all namespaces. A per-namespace
+  # quota would block VM creation when Rancher auto-applies a zero-limit
+  # ResourceQuota to namespaces created via the API.
 
   # description may be set manually in Rancher UI; ignore to avoid removing it.
   lifecycle {
