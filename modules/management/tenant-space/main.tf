@@ -97,6 +97,8 @@ module "vyos_tenant" {
   vlan_id              = var.vlan_id
   network_namespace    = rancher2_namespace.network[0].name
   cluster_network_name = var.cluster_network_name
+  vyos_endpoint        = var.vyos_endpoint
+  vyos_api_key         = var.vyos_api_key
 }
 
 # ── One binding per (group, role) pair. ───────────────────────────────────────
