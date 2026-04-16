@@ -137,3 +137,16 @@ variable "group_role_bindings" {
   EOT
   default     = []
 }
+
+variable "vyos_endpoint" {
+  type        = string
+  description = "VyOS HTTPS API endpoint (e.g. 'https://172.22.100.50'). Required when vlan_id is set."
+  default     = null
+}
+
+variable "vyos_api_key" {
+  type        = string
+  description = "VyOS HTTPS API key. Required when vlan_id is set."
+  sensitive   = true
+  default     = null
+}
