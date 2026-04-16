@@ -136,10 +136,29 @@ variable "machine_pools" {
 }
 
 # ── Node cloud-init ───────────────────────────────────────────────────────────
+variable "node_password" {
+  type        = string
+  sensitive   = true
+  description = "Password for ssh_user on every node, injected via chpasswd.list. Only used when user_data is not set. Leave null to disable password auth."
+  default     = null
+}
+
+variable "ssh_authorized_keys" {
+  type        = list(string)
+  description = "SSH public keys to inject into ssh_user on every node. Only used when user_data is not set."
+  default     = []
+}
+
+variable "ntp_server" {
+  type        = string
+  description = "NTP server written into /etc/systemd/timesyncd.conf on every node. Only used when user_data is not set."
+  default     = "pool.ntp.org"
+}
+
 variable "user_data" {
   type        = string
   sensitive   = true
-  description = "cloud-init user-data applied to every node VM (plain YAML or base64)"
+  description = "Full cloud-init user-data override applied to every node VM (plain YAML or base64). When set, node_password/ssh_authorized_keys/ntp_server are ignored."
   default     = ""
 }
 

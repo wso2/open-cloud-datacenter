@@ -11,6 +11,20 @@ terraform {
 locals {
   pools_by_name = { for p in var.machine_pools : p.name => p }
 
+  # Generate node cloud-init from first-class variables when user_data is not provided.
+  # user_data (non-empty string) takes full precedence — generation is skipped entirely.
+  _generated_node_user_data = (var.node_password != null || length(var.ssh_authorized_keys) > 0 || var.ntp_server != "") ? templatefile(
+    "${path.module}/templates/node-cloud-init.tpl",
+    {
+      ssh_user            = var.ssh_user
+      node_password       = var.node_password
+      ssh_authorized_keys = var.ssh_authorized_keys
+      ntp_server          = var.ntp_server
+    }
+  ) : ""
+
+  effective_node_user_data = (var.user_data != null && var.user_data != "") ? var.user_data : local._generated_node_user_data
+
   # Key order is fixed to match what Rancher stores in state. Using yamlencode
   # sorts keys alphabetically (cloud-provider-config before cloud-provider-name)
   # causing a perpetual no-op diff on brownfield clusters.
@@ -76,7 +90,7 @@ resource "rancher2_machine_config_v2" "pool" {
     memory_size          = each.value.memory_size
     reserved_memory_size = "-1"
     ssh_user             = var.ssh_user
-    user_data            = var.user_data
+    user_data            = local.effective_node_user_data
 
     disk_info = jsonencode({
       disks = [{
