@@ -1,8 +1,13 @@
 # ── vyos-tenant module ────────────────────────────────────────────────────────
 #
-# Provisions one tenant VLAN on a running VyOS gateway via the HTTPS REST API.
+# Configures one tenant VLAN on a running VyOS gateway via the HTTPS REST API.
 # One call to this module = one tenant VLAN. Add more tenants by calling it
 # again with a different vlan_id.
+#
+# This module handles VyOS-side config only (vif sub-interface, DHCP server,
+# NAT rule). The Harvester network resource (harvester_network) is created by
+# the caller — typically the tenant-space module — so it exists regardless of
+# whether VyOS is configured.
 #
 # IPAM:
 #   subnet    = cidrsubnet("10.0.0.0/8", 15, vlan_id - 1000)
@@ -27,7 +32,6 @@ locals {
   gateway_ip   = cidrhost(local.subnet, 1)
   gateway_cidr = "${local.gateway_ip}/${split("/", local.subnet)[1]}"
 
-  # DHCP range — offsets from subnet base
   dhcp_start = cidrhost(local.subnet, var.dhcp_range_start_offset)
   dhcp_stop  = cidrhost(local.subnet, var.dhcp_range_end_offset)
 
@@ -92,23 +96,4 @@ resource "vyos_config_block_tree" "nat_egress" {
     source             = { address = local.subnet }
     translation        = { address = "masquerade" }
   })
-}
-
-# ── Harvester network resource ────────────────────────────────────────────────
-# vlan_id MUST match the VyOS vif tag above — this is what wires L2 frames
-# from tenant VMs to the correct VyOS sub-interface.
-
-resource "harvester_network" "tenant" {
-  name                 = "${var.tenant_name}-${lower(local.vlan_label)}"
-  namespace            = var.network_namespace
-  vlan_id              = var.vlan_id
-  cluster_network_name = var.cluster_network_name
-  route_mode           = "manual"
-  route_cidr           = local.subnet
-  route_gateway        = local.gateway_ip
-
-  depends_on = [
-    vyos_config_block_tree.vif,
-    vyos_config_block_tree.dhcp,
-  ]
 }

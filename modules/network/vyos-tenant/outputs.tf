@@ -23,17 +23,7 @@ output "dhcp_range" {
   description = "DHCP pool range for tenant VMs."
 }
 
-output "network_name" {
-  value       = harvester_network.tenant.name
-  description = "Harvester network resource name."
-}
-
-output "network_namespace" {
-  value       = harvester_network.tenant.namespace
-  description = "Harvester network resource namespace."
-}
-
-output "network_ref" {
-  value       = "${harvester_network.tenant.namespace}/${harvester_network.tenant.name}"
-  description = "Full network ref (namespace/name) to attach tenant VMs."
+output "subnet_cidr" {
+  value       = local.subnet
+  description = "Alias for subnet. Tenant /23 subnet in CIDR notation."
 }

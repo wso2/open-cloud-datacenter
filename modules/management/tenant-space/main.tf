@@ -2,10 +2,15 @@ locals {
   namespace_cpu_limit     = var.namespace_cpu_limit != null ? var.namespace_cpu_limit : var.cpu_limit
   namespace_memory_limit  = var.namespace_memory_limit != null ? var.namespace_memory_limit : var.memory_limit
   namespace_storage_limit = var.namespace_storage_limit != null ? var.namespace_storage_limit : var.storage_limit
-  namespaces              = var.namespaces != null ? var.namespaces : [var.project_name]
-  network_namespace       = var.vlan_id != null ? "${var.project_name}-net" : null
-  tenant_subnet           = var.vlan_id != null ? cidrsubnet("10.0.0.0/8", 15, var.vlan_id - 1000) : null
-  tenant_gateway          = var.vlan_id != null ? cidrhost(local.tenant_subnet, 1) : null
+  namespaces              = var.namespaces != null ? distinct(concat([var.project_name], var.namespaces)) : [var.project_name]
+
+  # create_net_ns is true when explicitly requested OR when a vlan_id is set.
+  # Keeping backward compat: callers already using vlan_id still get the namespace.
+  create_net_ns     = var.create_network_namespace || var.vlan_id != null
+  network_namespace = local.create_net_ns ? "${var.project_name}-net" : null
+
+  tenant_subnet  = var.vlan_id != null ? cidrsubnet("10.0.0.0/8", 15, var.vlan_id - 1000) : null
+  tenant_gateway = var.vlan_id != null ? cidrhost(local.tenant_subnet, 1) : null
 }
 
 resource "rancher2_project" "this" {
@@ -66,10 +71,12 @@ resource "rancher2_namespace" "this" {
   }
 }
 
-# ── Network namespace (only when vlan_id is set) ──────────────────────────────
+# ── Network namespace ─────────────────────────────────────────────────────────
+# Created when create_network_namespace = true OR when vlan_id is set.
+# Labelled so the credential reconciler skips it (no harvesterconfig needed).
 
 resource "rancher2_namespace" "network" {
-  count            = var.vlan_id != null ? 1 : 0
+  count            = local.create_net_ns ? 1 : 0
   name             = local.network_namespace
   project_id       = rancher2_project.this.id
   wait_for_cluster = false
@@ -98,7 +105,9 @@ resource "harvester_network" "tenant" {
   route_cidr           = local.tenant_subnet
   route_gateway        = local.tenant_gateway
 
-  depends_on = [rancher2_namespace.network]
+  # When VyOS is configured, wait for the vif/DHCP to be provisioned before
+  # the network is visible to tenant VMs. count=0 module depends_on is a no-op.
+  depends_on = [rancher2_namespace.network, module.vyos_tenant]
 }
 
 # ── VyOS configuration (only when vyos_endpoint is also set) ──────────────────
@@ -110,12 +119,10 @@ module "vyos_tenant" {
   count  = var.vlan_id != null && var.vyos_endpoint != null ? 1 : 0
   source = "../../network/vyos-tenant"
 
-  tenant_name          = var.project_name
-  vlan_id              = var.vlan_id
-  network_namespace    = rancher2_namespace.network[0].name
-  cluster_network_name = var.cluster_network_name
-  vyos_endpoint        = var.vyos_endpoint
-  vyos_api_key         = var.vyos_api_key
+  tenant_name   = var.project_name
+  vlan_id       = var.vlan_id
+  vyos_endpoint = var.vyos_endpoint
+  vyos_api_key  = var.vyos_api_key
 }
 
 # ── One binding per (group, role) pair. ───────────────────────────────────────

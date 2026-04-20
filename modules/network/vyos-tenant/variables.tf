@@ -64,15 +64,3 @@ variable "dns_servers" {
   description = "DNS servers to hand out via DHCP."
   default     = ["8.8.8.8", "8.8.4.4"]
 }
-
-# ── Harvester network ─────────────────────────────────────────────────────────
-
-variable "network_namespace" {
-  type        = string
-  description = "Harvester namespace for the harvester_network resource (the tenant's network namespace, e.g. 'tenant-a-net')."
-}
-
-variable "cluster_network_name" {
-  type        = string
-  description = "Harvester cluster network name carrying the tenant VLANs. Must match the cluster network used by the VyOS eth1 trunk."
-}

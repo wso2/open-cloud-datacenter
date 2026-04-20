@@ -97,9 +97,15 @@ variable "namespace_storage_limit" {
 #
 # Requires the vyos and harvester providers to be configured in the caller.
 
+variable "create_network_namespace" {
+  type        = bool
+  description = "When true, creates a dedicated <project_name>-net namespace labelled platform.wso2.com/role=network-namespace. Also true implicitly when vlan_id is set. Use this flag to pre-provision the namespace before a VLAN is assigned."
+  default     = false
+}
+
 variable "vlan_id" {
   type        = number
-  description = "VLAN ID for this tenant's network (>= 1000). When set, creates the network namespace, harvester_network, and VyOS config. When null, no network resources are created."
+  description = "VLAN ID for this tenant's network (>= 1000). When set, creates the network namespace (if not already), a harvester_network, and optionally VyOS config when vyos_endpoint is also provided. When null, no network or VyOS resources are created."
   default     = null
   validation {
     condition     = var.vlan_id == null || var.vlan_id >= 1000
