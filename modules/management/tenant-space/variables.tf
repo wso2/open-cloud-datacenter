@@ -113,6 +113,19 @@ variable "cluster_network_name" {
   default     = "vm-network"
 }
 
+variable "vyos_endpoint" {
+  type        = string
+  description = "VyOS HTTPS API endpoint (e.g. https://192.168.x.x). When set alongside vlan_id, configures VyOS vif, DHCP, and NAT for the tenant. Omit for environments using physical switch VLAN assignment."
+  default     = null
+}
+
+variable "vyos_api_key" {
+  type        = string
+  sensitive   = true
+  description = "VyOS HTTPS API key. Required when vyos_endpoint is set."
+  default     = null
+}
+
 # Role bindings — one binding is created per (group, role) pair.
 
 variable "group_role_bindings" {
