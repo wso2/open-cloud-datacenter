@@ -75,7 +75,7 @@ resource "kubernetes_service_account" "rancher_credential" {
   count = var.create_cloud_credential ? 1 : 0
   metadata {
     name      = "rancher-cloud-credential"
-    namespace = "default"
+    namespace = "kube-system"
   }
 }
 
@@ -100,7 +100,7 @@ resource "kubernetes_secret" "rancher_credential_token" {
   count = var.create_cloud_credential ? 1 : 0
   metadata {
     name      = "rancher-cloud-credential-token"
-    namespace = "default"
+    namespace = "kube-system"
     annotations = {
       "kubernetes.io/service-account.name" = kubernetes_service_account.rancher_credential[0].metadata[0].name
     }
