@@ -76,6 +76,10 @@ resource "vyos_config_block_tree" "dhcp" {
     }
   })
 
+  lifecycle {
+    ignore_changes = [section]
+  }
+
   depends_on = [vyos_config_block_tree.vif]
 }
 
