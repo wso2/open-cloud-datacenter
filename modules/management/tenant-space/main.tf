@@ -4,6 +4,8 @@ locals {
   namespace_storage_limit = var.namespace_storage_limit != null ? var.namespace_storage_limit : var.storage_limit
   namespaces              = var.namespaces != null ? var.namespaces : [var.project_name]
   network_namespace       = var.vlan_id != null ? "${var.project_name}-net" : null
+  tenant_subnet           = var.vlan_id != null ? cidrsubnet("10.0.0.0/8", 15, var.vlan_id - 1000) : null
+  tenant_gateway          = var.vlan_id != null ? cidrhost(local.tenant_subnet, 1) : null
 }
 
 resource "rancher2_project" "this" {
@@ -72,15 +74,40 @@ resource "rancher2_namespace" "network" {
   project_id       = rancher2_project.this.id
   wait_for_cluster = false
 
+  labels = {
+    "platform.wso2.com/role" = "network-namespace"
+  }
+
   lifecycle {
     ignore_changes = [description]
   }
 }
 
-# ── VyOS tenant network (only when vlan_id is set) ────────────────────────────
+# ── Harvester network (whenever vlan_id is set, with or without VyOS) ─────────
+# Created directly here so it exists regardless of whether VyOS is configured.
+# Environments using physical switch VLAN assignment skip VyOS but still need
+# the harvester_network resource to attach VMs to the correct VLAN.
+
+resource "harvester_network" "tenant" {
+  count                = var.vlan_id != null ? 1 : 0
+  name                 = "${var.project_name}-vlan${var.vlan_id}"
+  namespace            = rancher2_namespace.network[0].name
+  vlan_id              = var.vlan_id
+  cluster_network_name = var.cluster_network_name
+  route_mode           = "manual"
+  route_cidr           = local.tenant_subnet
+  route_gateway        = local.tenant_gateway
+
+  depends_on = [rancher2_namespace.network]
+}
+
+# ── VyOS configuration (only when vyos_endpoint is also set) ──────────────────
+# Environments using physical switch VLAN assignment omit vyos_endpoint and
+# only get the harvester_network above. Environments with VyOS get the full
+# vif sub-interface, DHCP server, and NAT rule in addition.
 
 module "vyos_tenant" {
-  count  = var.vlan_id != null ? 1 : 0
+  count  = var.vlan_id != null && var.vyos_endpoint != null ? 1 : 0
   source = "../../network/vyos-tenant"
 
   tenant_name          = var.project_name
