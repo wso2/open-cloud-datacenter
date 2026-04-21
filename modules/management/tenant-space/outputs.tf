@@ -23,9 +23,9 @@ output "network_namespace_id" {
   description = "Rancher namespace ID of the network namespace. Non-null when create_network_namespace = true or vlan_id is set."
 }
 
-output "network_name" {
-  value       = var.vlan_id != null ? "${harvester_network.tenant[0].namespace}/${harvester_network.tenant[0].name}" : null
-  description = "Full harvester_network reference (<namespace>/<name>) for attaching tenant VMs. Null when vlan_id is not set."
+output "network_names" {
+  value       = { for id, r in harvester_network.tenant : id => "${r.namespace}/${r.name}" }
+  description = "Map of VLAN ID (string) → full harvester_network reference (<namespace>/<name>) for attaching tenant VMs. Empty map when vlan_id is null or empty."
 }
 
 output "subnet_cidr" {

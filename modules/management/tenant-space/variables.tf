@@ -110,13 +110,28 @@ variable "create_network_namespace" {
 }
 
 variable "vlan_id" {
-  type        = number
-  description = "VLAN ID for this tenant's network (>= 1000). When set, always creates the network namespace and a harvester_network. Routing mode depends on vyos_endpoint: if set, route_mode=manual with a deterministic /23 from 10.0.0.0/8 plus full VyOS vif/DHCP/NAT config; if null, route_mode=auto (upstream router / DigiOps-issued VLAN handles routing). When vlan_id is null, no network resources are created."
+  type        = list(number)
+  description = "List of VLAN IDs for this tenant's networks. Each entry creates a harvester_network in the network namespace. When non-empty, the network namespace is always created. VyOS path (vyos_endpoint set) requires exactly one VLAN ID — a deterministic /23 from 10.0.0.0/8 is computed and full VyOS vif/DHCP/NAT config is provisioned. Auto-route path (vyos_endpoint null) supports multiple VLANs — the upstream router handles routing. When null or empty, no network resources are created."
   default     = null
   validation {
-    condition     = var.vlan_id == null || (var.vlan_id >= 1 && var.vlan_id <= 4094)
-    error_message = "vlan_id must be a valid 802.1Q VLAN ID (1–4094)."
+    condition = var.vlan_id == null || (
+      length(var.vlan_id) > 0 &&
+      alltrue([for id in var.vlan_id : id >= 1 && id <= 4094])
+    )
+    error_message = "vlan_id must be null or a non-empty list of valid 802.1Q VLAN IDs (1–4094)."
   }
+}
+
+variable "network_namespace_name" {
+  type        = string
+  description = "Override the name of the network namespace. Defaults to <project_name>-net. Use this when importing a brownfield namespace whose name differs from the default."
+  default     = null
+}
+
+variable "vlan_network_names" {
+  type        = map(string)
+  description = "Map of VLAN ID (as string) to harvester_network resource name override. Use when importing brownfield networks whose names differ from the default <project_name>-vlan<id> pattern. Example: { \"608\" = \"vm-subnet-008\" }."
+  default     = {}
 }
 
 variable "cluster_network_name" {

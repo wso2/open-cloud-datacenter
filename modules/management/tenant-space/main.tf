@@ -4,16 +4,17 @@ locals {
   namespace_storage_limit = var.namespace_storage_limit != null ? var.namespace_storage_limit : var.storage_limit
   namespaces              = var.namespaces != null ? (var.create_default_namespace ? distinct(concat([var.project_name], var.namespaces)) : var.namespaces) : (var.create_default_namespace ? [var.project_name] : [])
 
-  # create_net_ns is true when explicitly requested OR when a vlan_id is set.
+  # create_net_ns is true when explicitly requested OR when vlan_id has entries.
   # Keeping backward compat: callers already using vlan_id still get the namespace.
-  create_net_ns     = var.create_network_namespace || var.vlan_id != null
-  network_namespace = local.create_net_ns ? "${var.project_name}-net" : null
+  create_net_ns     = var.create_network_namespace || (var.vlan_id != null && length(var.vlan_id) > 0)
+  network_namespace = local.create_net_ns ? coalesce(var.network_namespace_name, "${var.project_name}-net") : null
 
   # VyOS path: compute a deterministic /23 subnet from 10.0.0.0/8 using the VLAN
-  # index. Only relevant when vyos_endpoint is set; auto-routed environments
-  # (physical switch / DigiOps-issued VLANs) do not need explicit subnets.
-  use_vyos       = var.vlan_id != null && var.vyos_endpoint != null
-  tenant_subnet  = local.use_vyos ? cidrsubnet("10.0.0.0/8", 15, var.vlan_id - 1000) : null
+  # index. Only relevant when vyos_endpoint is set and exactly one VLAN is given.
+  # Auto-routed environments (physical switch / DigiOps-issued VLANs) use multiple
+  # VLANs with route_mode=auto; no explicit subnets needed.
+  use_vyos       = var.vlan_id != null && length(var.vlan_id) > 0 && var.vyos_endpoint != null
+  tenant_subnet  = local.use_vyos ? cidrsubnet("10.0.0.0/8", 15, var.vlan_id[0] - 1000) : null
   tenant_gateway = local.use_vyos ? cidrhost(local.tenant_subnet, 1) : null
 }
 
@@ -53,6 +54,10 @@ resource "rancher2_project" "this" {
         var.namespace_storage_limit == null,
       ])
       error_message = "Quota variables (memory_limit, storage_limit, namespace_*_limit) are only applied when cpu_limit is set. Either set cpu_limit or remove the other quota variables."
+    }
+    precondition {
+      condition     = !local.use_vyos || length(var.vlan_id) == 1
+      error_message = "VyOS path requires exactly one VLAN ID. Set vyos_endpoint = null for multi-VLAN auto-route configurations."
     }
   }
 }
@@ -100,21 +105,21 @@ resource "rancher2_namespace" "network" {
 # the harvester_network resource to attach VMs to the correct VLAN.
 
 resource "harvester_network" "tenant" {
-  count                = var.vlan_id != null ? 1 : 0
-  name                 = "${var.project_name}-vlan${var.vlan_id}"
+  for_each             = var.vlan_id != null ? toset([for id in var.vlan_id : tostring(id)]) : toset([])
+  name                 = lookup(var.vlan_network_names, each.value, "${var.project_name}-vlan${each.value}")
   namespace            = rancher2_namespace.network[0].name
-  vlan_id              = var.vlan_id
+  vlan_id              = tonumber(each.value)
   cluster_network_name = var.cluster_network_name
 
-  # VyOS path: manual routing with a deterministic /23 from 10.0.0.0/8.
+  # VyOS path: manual routing with a deterministic /23 from 10.0.0.0/8 (single VLAN only).
   # DigiOps / physical-switch path: auto routing — the upstream router
   # advertises the gateway; no explicit CIDR or gateway needed here.
   route_mode    = local.use_vyos ? "manual" : "auto"
-  route_cidr    = local.tenant_subnet
-  route_gateway = local.tenant_gateway
+  route_cidr    = local.use_vyos ? local.tenant_subnet : null
+  route_gateway = local.use_vyos ? local.tenant_gateway : null
 
   # When VyOS is configured, wait for the vif/DHCP to be provisioned before
-  # the network is visible to tenant VMs. count=0 module depends_on is a no-op.
+  # the network is visible to tenant VMs. for_each with empty set is a no-op.
   depends_on = [rancher2_namespace.network, module.vyos_tenant]
 }
 
@@ -124,11 +129,11 @@ resource "harvester_network" "tenant" {
 # vif sub-interface, DHCP server, and NAT rule in addition.
 
 module "vyos_tenant" {
-  count  = var.vlan_id != null && var.vyos_endpoint != null ? 1 : 0
+  count  = local.use_vyos ? 1 : 0
   source = "../../network/vyos-tenant"
 
   tenant_name   = var.project_name
-  vlan_id       = var.vlan_id
+  vlan_id       = var.vlan_id[0]
   vyos_endpoint = var.vyos_endpoint
   vyos_api_key  = var.vyos_api_key
 }
