@@ -123,6 +123,7 @@ metadata:
   annotations:
     v2prov-authorized-secret-deletes-on-cluster-removal: "true"
     v2prov-secret-authorized-for-cluster: "${cluster_name}"
+    platform.wso2.com/credential-source-namespace: "${vm_namespace}"
 type: secret
 stringData:
   credential: |
@@ -193,16 +194,17 @@ on_deleted_namespace() {
 
   # SA, token, and rolebindings in the deleted namespace are cleaned up by K8s.
 
-  # Delete any harvesterconfig-* secrets on Rancher whose kubeconfig was built
-  # from this namespace's SA token (identified by context namespace field).
+  # Delete any harvesterconfig-* secrets on Rancher that were built from this
+  # namespace's SA token. We use an exact annotation match rather than a
+  # substring search of the kubeconfig body — substring matching would
+  # incorrectly match prefix namespaces (e.g. "team-a" matching "team-a2").
   local stale_secrets
   stale_secrets=$(kubectl_rancher get secrets -n "$FLEET_DEFAULT" -o json 2>/dev/null \
     | jq -r --arg ns "$ns" '
         .items[] |
         select(.metadata.name | startswith("harvesterconfig-")) |
-        . as $s |
-        (try (.data.credential | @base64d) catch "") |
-        if contains("namespace: " + $ns) then $s.metadata.name else empty end
+        select(.metadata.annotations["platform.wso2.com/credential-source-namespace"] == $ns) |
+        .metadata.name
       ' || true)
 
   if [[ -n "$stale_secrets" ]]; then
