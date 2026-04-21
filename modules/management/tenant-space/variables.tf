@@ -8,6 +8,12 @@ variable "project_name" {
   description = "Name of the Rancher project for this tenant."
 }
 
+variable "create_default_namespace" {
+  type        = bool
+  description = "When true (default), a namespace named after the project is always included alongside any explicitly listed namespaces. Set to false for brownfield projects where the project-name namespace was never created or is managed outside Terraform."
+  default     = true
+}
+
 variable "namespaces" {
   type        = list(string)
   description = "Kubernetes namespace names to create within the project. Defaults to [project_name] — a single namespace matching the project. Pass additional names to create more."
