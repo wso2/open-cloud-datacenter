@@ -126,6 +126,10 @@ variable "network_namespace_name" {
   type        = string
   description = "Override the name of the network namespace. Defaults to <project_name>-net. Use this when importing a brownfield namespace whose name differs from the default."
   default     = null
+  validation {
+    condition     = var.network_namespace_name == null ? true : trimspace(var.network_namespace_name) != ""
+    error_message = "network_namespace_name must be null or a non-empty string."
+  }
 }
 
 variable "vlan_network_names" {
