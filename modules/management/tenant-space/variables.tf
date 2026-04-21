@@ -105,11 +105,11 @@ variable "create_network_namespace" {
 
 variable "vlan_id" {
   type        = number
-  description = "VLAN ID for this tenant's network (>= 1000). When set, creates the network namespace (if not already), a harvester_network, and optionally VyOS config when vyos_endpoint is also provided. When null, no network or VyOS resources are created."
+  description = "VLAN ID for this tenant's network (>= 1000). When set, always creates the network namespace and a harvester_network. Routing mode depends on vyos_endpoint: if set, route_mode=manual with a deterministic /23 from 10.0.0.0/8 plus full VyOS vif/DHCP/NAT config; if null, route_mode=auto (upstream router / DigiOps-issued VLAN handles routing). When vlan_id is null, no network resources are created."
   default     = null
   validation {
-    condition     = var.vlan_id == null || var.vlan_id >= 1000
-    error_message = "vlan_id must be >= 1000."
+    condition     = var.vlan_id == null || (var.vlan_id >= 1 && var.vlan_id <= 4094)
+    error_message = "vlan_id must be a valid 802.1Q VLAN ID (1–4094)."
   }
 }
 

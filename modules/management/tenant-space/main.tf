@@ -9,8 +9,12 @@ locals {
   create_net_ns     = var.create_network_namespace || var.vlan_id != null
   network_namespace = local.create_net_ns ? "${var.project_name}-net" : null
 
-  tenant_subnet  = var.vlan_id != null ? cidrsubnet("10.0.0.0/8", 15, var.vlan_id - 1000) : null
-  tenant_gateway = var.vlan_id != null ? cidrhost(local.tenant_subnet, 1) : null
+  # VyOS path: compute a deterministic /23 subnet from 10.0.0.0/8 using the VLAN
+  # index. Only relevant when vyos_endpoint is set; auto-routed environments
+  # (physical switch / DigiOps-issued VLANs) do not need explicit subnets.
+  use_vyos       = var.vlan_id != null && var.vyos_endpoint != null
+  tenant_subnet  = local.use_vyos ? cidrsubnet("10.0.0.0/8", 15, var.vlan_id - 1000) : null
+  tenant_gateway = local.use_vyos ? cidrhost(local.tenant_subnet, 1) : null
 }
 
 resource "rancher2_project" "this" {
@@ -101,9 +105,13 @@ resource "harvester_network" "tenant" {
   namespace            = rancher2_namespace.network[0].name
   vlan_id              = var.vlan_id
   cluster_network_name = var.cluster_network_name
-  route_mode           = "manual"
-  route_cidr           = local.tenant_subnet
-  route_gateway        = local.tenant_gateway
+
+  # VyOS path: manual routing with a deterministic /23 from 10.0.0.0/8.
+  # DigiOps / physical-switch path: auto routing — the upstream router
+  # advertises the gateway; no explicit CIDR or gateway needed here.
+  route_mode    = local.use_vyos ? "manual" : "auto"
+  route_cidr    = local.tenant_subnet
+  route_gateway = local.tenant_gateway
 
   # When VyOS is configured, wait for the vif/DHCP to be provisioned before
   # the network is visible to tenant VMs. count=0 module depends_on is a no-op.

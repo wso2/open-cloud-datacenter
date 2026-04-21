@@ -29,11 +29,11 @@ output "network_name" {
 }
 
 output "subnet_cidr" {
-  value       = var.vlan_id != null ? local.tenant_subnet : null
-  description = "Tenant /23 subnet CIDR (e.g. 10.0.0.0/23). Null when vlan_id is not set."
+  value       = local.tenant_subnet
+  description = "Tenant /23 subnet CIDR (e.g. 10.0.0.0/23). Non-null only when vlan_id and vyos_endpoint are both set."
 }
 
 output "gateway_ip" {
-  value       = var.vlan_id != null ? local.tenant_gateway : null
-  description = "VyOS gateway IP for this tenant. Null when vlan_id is not set."
+  value       = local.tenant_gateway
+  description = "VyOS gateway IP for this tenant (first host in subnet_cidr). Non-null only when vlan_id and vyos_endpoint are both set."
 }
