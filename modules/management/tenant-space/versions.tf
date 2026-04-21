@@ -9,9 +9,5 @@ terraform {
       source  = "harvester/harvester"
       version = "~> 1.7"
     }
-    vyos = {
-      source  = "hiranadikari/vyos"
-      version = "~> 0.1"
-    }
-  }
+}
 }
