@@ -156,6 +156,38 @@ module "app_vm" {
 > `chpasswd:` / `ssh_authorized_keys:` keys instead.
 
 ### With scheduled backups
+### Importing a brownfield VM
+
+When a VM already exists (e.g. created via the Harvester UI) and you want to
+bring it under Terraform management without forcing destructive renames, set
+the `*_name` / `*_auto_delete` / `input_devices` overrides to match the VM's
+current spec. Defaults target greenfield conventions; override only to match
+existing state.
+
+```hcl
+module "legacy_vm" {
+  source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/workloads/vm?ref=v0.x.y"
+
+  name         = "legacy-host"
+  namespace    = "team-ns"
+  cpu          = 2
+  memory       = "8Gi"
+  disk_size    = "40Gi"
+  image_name   = "default/image-abc12" # match the existing image ID
+  network_name = "team-ns/vlan-600"
+
+  # Brownfield overrides — match what the Harvester UI created
+  disk_name              = "disk-0"
+  disk_auto_delete       = false
+  network_interface_name = "default"
+  ssh_key_ids            = ["default/shared-key"]
+  input_devices          = [{ name = "tablet", type = "tablet", bus = "usb" }]
+}
+```
+
+After declaring the module, `terraform import module.legacy_vm.harvester_virtualmachine.this <namespace>/<name>` and run `terraform plan` — the plan should show zero changes.
+
+### Referencing images from the management phase
 
 ```hcl
 module "app_vm" {
@@ -215,6 +247,17 @@ module "vm" {
 | `backup_retain` | Number of snapshots to retain | `number` | `5` | no |
 | `backup_enabled` | Whether the backup schedule is active | `bool` | `true` | no |
 | `backup_max_failure` | Max consecutive backup failures before suspending | `number` | `4` | no |
+| `ssh_public_key` | SSH public key content. Used when `create_ssh_key = true`. | `string` | `null` | no |
+| `create_ssh_key` | When true, create a `harvester_ssh_key` from `ssh_public_key`. | `bool` | `false` | no |
+| `wait_for_lease` | Wait for IP lease on primary NIC. Set false for static cloud-init IPs. | `bool` | `true` | no |
+| `user_data` | Cloud-init user-data YAML. Creates a cloud-init secret when set. | `string` | `null` | no |
+| `network_data` | Cloud-init network-data config (requires `user_data` to be set). | `string` | `""` | no |
+| `disk_name` | Name of the root disk volume. Override to match brownfield VMs. | `string` | `"rootdisk"` | no |
+| `disk_auto_delete` | Whether the root disk's PVC is deleted with the VM. | `bool` | `true` | no |
+| `network_interface_name` | Name of the primary NIC. Override to match brownfield VMs. | `string` | `"nic-1"` | no |
+| `restart_after_update` | Whether Terraform restarts the VM when its spec changes. | `bool` | `true` | no |
+| `ssh_key_ids` | Existing Harvester SSH key IDs (`namespace/name`) to attach. | `list(string)` | `[]` | no |
+| `input_devices` | Input devices (e.g. USB tablet) to attach. | `list(object)` | `[]` | no |
 
 ## Outputs
 

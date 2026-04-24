@@ -25,7 +25,7 @@ resource "harvester_ssh_key" "this" {
 resource "harvester_virtualmachine" "this" {
   name                 = var.name
   namespace            = var.namespace
-  restart_after_update = true
+  restart_after_update = var.restart_after_update
 
   cpu    = var.cpu
   memory = var.memory
@@ -33,22 +33,25 @@ resource "harvester_virtualmachine" "this" {
   run_strategy = var.run_strategy
   machine_type = "q35"
 
-  ssh_keys = var.create_ssh_key ? [harvester_ssh_key.this[0].id] : []
+  ssh_keys = concat(
+    var.create_ssh_key ? [harvester_ssh_key.this[0].id] : [],
+    var.ssh_key_ids,
+  )
 
   network_interface {
-    name           = "nic-1"
+    name           = var.network_interface_name
     wait_for_lease = var.wait_for_lease
     network_name   = var.network_name
   }
 
   disk {
-    name        = "rootdisk"
+    name        = var.disk_name
     type        = "disk"
     size        = var.disk_size
     bus         = "virtio"
     boot_order  = 1
     image       = var.image_name
-    auto_delete = true
+    auto_delete = var.disk_auto_delete
   }
 
   dynamic "disk" {
@@ -59,6 +62,15 @@ resource "harvester_virtualmachine" "this" {
       bus         = "virtio"
       image       = disk.value.image
       auto_delete = disk.value.auto_delete
+    }
+  }
+
+  dynamic "input" {
+    for_each = var.input_devices
+    content {
+      name = input.value.name
+      type = input.value.type
+      bus  = input.value.bus
     }
   }
 
