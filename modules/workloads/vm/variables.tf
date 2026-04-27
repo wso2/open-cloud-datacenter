@@ -107,6 +107,51 @@ variable "additional_disks" {
   default     = []
 }
 
+# --- Brownfield overrides ---
+# These let the module wrap VMs that were created outside Terraform (e.g. via
+# the Harvester UI) without forcing destructive renames on import. Defaults
+# match greenfield conventions; override only when matching existing state.
+
+variable "disk_name" {
+  type        = string
+  description = "Name of the root disk volume. Harvester-UI-created VMs use \"disk-0\"; module-created VMs use \"rootdisk\"."
+  default     = "rootdisk"
+}
+
+variable "disk_auto_delete" {
+  type        = bool
+  description = "Whether the root disk's PVC is deleted when the VM is deleted. UI-created VMs typically have this false."
+  default     = true
+}
+
+variable "network_interface_name" {
+  type        = string
+  description = "Name of the primary network interface. Harvester-UI-created VMs use \"default\"; module-created VMs use \"nic-1\"."
+  default     = "nic-1"
+}
+
+variable "restart_after_update" {
+  type        = bool
+  description = "Whether Terraform restarts the VM to apply spec changes. Set false to defer restarts on live VMs."
+  default     = true
+}
+
+variable "ssh_key_ids" {
+  type        = list(string)
+  description = "Existing Harvester SSH key IDs (namespace/name) to attach, in addition to any key created by create_ssh_key. Use this to reference pre-existing shared keys."
+  default     = []
+}
+
+variable "input_devices" {
+  type = list(object({
+    name = string
+    type = string
+    bus  = optional(string, "usb")
+  }))
+  description = "Input devices (e.g. USB tablet) to attach. Harvester-UI-created VMs include a tablet by default; module-created VMs add none."
+  default     = []
+}
+
 # --- Scheduled backups ---
 
 variable "backup_schedule" {
