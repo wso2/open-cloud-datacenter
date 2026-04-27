@@ -10,11 +10,6 @@ variable "kubeconfig_path" {
   description = "Path to the Harvester kubeconfig file."
 }
 
-variable "kubeconfig_context" {
-  type        = string
-  description = "kubectl context name to use from the kubeconfig."
-}
-
 variable "google_chat_webhook_url" {
   type        = string
   sensitive   = true

@@ -37,3 +37,9 @@ output "gateway_ip" {
   value       = local.tenant_gateway
   description = "VyOS gateway IP for this tenant (first host in subnet_cidr). Non-null only when vlan_id and vyos_endpoint are both set."
 }
+
+output "vm_access_kubeconfig" {
+  value       = local.vm_access_kubeconfig
+  sensitive   = true
+  description = "Namespace-scoped Harvester kubeconfig for the tenant team. Non-null when expose_vm_kubeconfig = true and the namespace-credential-provisioner has already created the secret. Hand to the tenant team once at onboarding. See examples/consumer-workloads in wso2-datacenter-project for usage."
+}

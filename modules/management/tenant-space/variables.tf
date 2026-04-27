@@ -111,7 +111,7 @@ variable "create_network_namespace" {
 
 variable "vlan_id" {
   type        = list(number)
-  description = "List of VLAN IDs for this tenant's networks. Each entry creates a harvester_network in the network namespace. When set, the network namespace is always created. VyOS path (vyos_endpoint set) requires exactly one VLAN ID — a deterministic /23 from 10.0.0.0/8 is computed and full VyOS vif/DHCP/NAT config is provisioned. Auto-route path (vyos_endpoint null) supports multiple VLANs — the upstream router handles routing. When null, no network resources are created."
+  description = "List of VLAN IDs for this tenant's networks. Each entry creates a harvester_network in the network namespace. When non-empty, the network namespace is always created. VyOS path (vyos_endpoint set) requires exactly one VLAN ID — a deterministic /23 from 10.0.0.0/8 is computed and full VyOS vif/DHCP/NAT config is provisioned. Auto-route path (vyos_endpoint null) supports multiple VLANs — the upstream router handles routing. When null or empty, no network resources are created."
   default     = null
   validation {
     condition = var.vlan_id == null || (
@@ -119,10 +119,6 @@ variable "vlan_id" {
       alltrue([for id in var.vlan_id : id >= 1 && id <= 4094])
     )
     error_message = "vlan_id must be null or a non-empty list of valid 802.1Q VLAN IDs (1–4094)."
-  }
-  validation {
-    condition     = var.vlan_id == null || length(var.vlan_id) == length(distinct(var.vlan_id))
-    error_message = "vlan_id must not contain duplicate VLAN IDs."
   }
 }
 
@@ -140,15 +136,6 @@ variable "vlan_network_names" {
   type        = map(string)
   description = "Map of VLAN ID (as string) to harvester_network resource name override. Use when importing brownfield networks whose names differ from the default <project_name>-vlan<id> pattern. Example: { \"608\" = \"vm-subnet-008\" }."
   default     = {}
-  validation {
-    condition = alltrue([
-      for k, v in var.vlan_network_names :
-      can(regex("^[1-9][0-9]{0,3}$", k)) &&
-      tonumber(k) >= 1 && tonumber(k) <= 4094 &&
-      trimspace(v) != ""
-    ])
-    error_message = "vlan_network_names keys must be canonical VLAN ID strings without leading zeros (1–4094) and values must be non-empty strings."
-  }
 }
 
 variable "cluster_network_name" {
@@ -183,13 +170,19 @@ variable "group_role_bindings" {
   default     = []
 }
 
-variable "harvester_api_server" {
+variable "expose_vm_kubeconfig" {
+  type        = bool
+  description = "When true, reads the 'harvester-vm-kubeconfig' Secret created by the namespace-credential-provisioner and exposes it via the vm_access_kubeconfig output. Requires the kubernetes.harvester provider alias to be configured in the caller. The provisioner must have run before apply."
+  default     = false
+}
+
+variable "vm_access_namespace" {
   type        = string
-  description = "Direct Harvester kube-apiserver URL (port 6443, e.g. 'https://192.168.10.100:6443'). When set, a namespace-scoped ServiceAccount and kubeconfig are provisioned for the tenant. The kubeconfig is exposed via the vm_access_kubeconfig output and allows the tenant team to use the workloads/vm and workloads/k8s-cluster modules with the harvester provider. Requires kubernetes.harvester provider to be configured in the caller."
+  description = "Namespace from which to read the 'harvester-vm-kubeconfig' Secret when expose_vm_kubeconfig = true. Defaults to the first resolved namespace (or project_name when no namespaces are configured). Set explicitly when the tenant has multiple namespaces and the kubeconfig should target a specific one."
   default     = null
   validation {
-    condition     = var.harvester_api_server == null ? true : trimspace(var.harvester_api_server) != ""
-    error_message = "harvester_api_server must be null or a non-empty URL string."
+    condition     = var.vm_access_namespace == null ? true : trimspace(var.vm_access_namespace) != ""
+    error_message = "vm_access_namespace must be null or a non-empty namespace name."
   }
 }
 
