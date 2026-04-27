@@ -25,6 +25,11 @@ replay_pid*
 
 # Infrastructure Tools
 .terraform/
+.terraform.lock.hcl
 *.tfstate*
 *.tfvars
 .env
+
+# Claude Code
+.claude/
+CLAUDE.md

@@ -238,6 +238,72 @@ resource "rancher2_role_template" "cluster_operator" {
   }
 }
 
+# ── Project-level governance role ─────────────────────────────────────────────
+# Fills the gap between the built-in project-member (no self-service) and
+# project-owner (can change resource quotas and delete the project).
+#
+# Intended for infrastructure operators and team leads who need to manage
+# namespaces and project members within a quota-bounded project without being
+# able to modify the quota ceiling set by the Platform Team.
+#
+# Permissions granted:
+#   - Create/manage namespaces within the project
+#   - Add and remove project members (projectroletemplatebindings)
+#   - Read the project metadata
+#
+# Permissions explicitly excluded:
+#   - update/patch/delete on management.cattle.io/projects (quota + project deletion)
+#   - Any cluster-level write access (pair separately with vm-creator cluster binding)
+#
+# NOTE: The management.cattle.io API rules below are the R&D candidate set.
+# Validate on lk-dev before promoting: confirm namespace creation succeeds,
+# then confirm project quota edit and project delete return 403.
+resource "rancher2_role_template" "project_contributor" {
+  name        = "project-contributor"
+  description = "Namespace management and member management within an assigned project. Cannot change resource quotas or delete the project. Intended for infrastructure operators and team leads."
+  context     = "project"
+
+  # Kubernetes namespace management — create/delete namespaces within the project.
+  # Rancher assigns namespaces to a project via annotation when created by a
+  # project member through the UI or via rancher2 provider.
+  rules {
+    api_groups = [""]
+    resources  = ["namespaces"]
+    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
+  }
+
+  # Project member management — add/remove role bindings for project members.
+  # Allows the holder to assign roles to other users/groups within this project.
+  rules {
+    api_groups = ["management.cattle.io"]
+    resources  = ["projectroletemplatebindings"]
+    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
+  }
+
+  # Read-only view of the project itself.
+  # Intentionally excludes update/patch/delete — those verbs would allow
+  # changing the resource quota (limits_cpu, limits_memory) or deleting the project.
+  rules {
+    api_groups = ["management.cattle.io"]
+    resources  = ["projects"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  # Workload read access — see what's running in the project's namespaces.
+  # Without this, the project dashboard in Rancher shows blank workload lists.
+  rules {
+    api_groups = [""]
+    resources  = ["pods", "services", "replicationcontrollers", "endpoints"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["apps"]
+    resources  = ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs      = ["get", "list", "watch"]
+  }
+}
+
 # Grants read-only visibility into VM status and metrics for the Harvester
 # dashboard. Intentionally excludes all mutating verbs (update, patch, delete)
 # and subresources that control VM power state (start, stop, restart, migrate).
