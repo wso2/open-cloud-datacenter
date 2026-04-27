@@ -408,9 +408,18 @@ kubectl get namespaces -o json | jq -r '
   [[ -z "$project_id" ]] && continue
   is_system_namespace "$ns" && continue
   [[ "$role" == "network-namespace" ]] && continue
-  log "INIT namespace: ${ns} (project: ${project_id})"
-  if on_added_namespace "$ns" "$project_id"; then
+  sa_name="harvester-cloud-provider-${ns}"
+  get_out=$(kubectl get secret "${sa_name}-token" -n "$ns" 2>&1) && get_rc=0 || get_rc=$?
+  if [[ $get_rc -eq 0 ]]; then
+    log "INIT namespace: ${ns} — already provisioned, skipping"
     echo "$ns" >> "$PROCESSED_NS_FILE"
+  elif echo "$get_out" | grep -qiE '"?not found"?|NotFound'; then
+    log "INIT namespace: ${ns} (project: ${project_id})"
+    if on_added_namespace "$ns" "$project_id"; then
+      echo "$ns" >> "$PROCESSED_NS_FILE"
+    fi
+  else
+    log "INIT namespace: ${ns} — kubectl error (${get_out}), skipping (will retry via watch)"
   fi
 done
 
