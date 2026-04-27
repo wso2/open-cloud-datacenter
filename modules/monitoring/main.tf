@@ -304,14 +304,11 @@ resource "null_resource" "alertmanager_base_config" {
     command = <<-BASH
       set -e
       kubectl create secret generic alertmanager-rancher-monitoring-alertmanager \
-        --context '${var.kubeconfig_context}' \
         -n '${local.ns}' \
         --from-file=alertmanager.yaml=<(base64 -d <<< "$AM_CONFIG_B64") \
         --from-file=rancher_defaults.tmpl=<(base64 -d <<< "$AM_TMPL_B64") \
         --dry-run=client -o yaml \
-      | kubectl apply \
-          --context '${var.kubeconfig_context}' \
-          -f -
+      | kubectl apply -f -
     BASH
   }
 }
@@ -337,14 +334,11 @@ resource "null_resource" "calert_config" {
     command = <<-BASH
       set -e
       kubectl create secret generic calert-config \
-        --context '${var.kubeconfig_context}' \
         -n '${local.ns}' \
         --from-file=config.toml=<(base64 -d <<< "$CONFIG_B64") \
         --from-file=message.tmpl=<(base64 -d <<< "$TMPL_B64") \
         --dry-run=client -o yaml \
-      | kubectl apply \
-          --context '${var.kubeconfig_context}' \
-          -f -
+      | kubectl apply -f -
     BASH
   }
 }

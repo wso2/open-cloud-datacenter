@@ -6,12 +6,26 @@
 # 1. Namespace watch (Harvester)
 #    Watches tenant namespaces on the Harvester cluster. For each new namespace
 #    that belongs to a Rancher project it creates:
+#
+#    Cloud-provider credentials (for RKE2 Harvester cloud provider):
 #      - ServiceAccount harvester-cloud-provider-<ns>
 #      - RoleBinding to harvesterhci.io:cloudprovider in the tenant namespace
 #      - Optional RoleBinding to view in the project's network namespace
 #      - Long-lived SA token secret
+#
+#    Consumer VM-access credentials (for tenant teams provisioning VMs/clusters):
+#      - ServiceAccount harvester-vm-access-<ns>
+#      - RoleBinding to harvesterhci.io:edit in the tenant namespace
+#      - RoleBinding to edit (k8s built-in) in the tenant namespace
+#      - RoleBinding to view in harvester-public (for shared OS images)
+#      - Long-lived SA token secret
+#      - Secret "harvester-vm-kubeconfig" in the tenant namespace containing a
+#        namespace-scoped kubeconfig. The platform team retrieves this once at
+#        onboarding and hands it to the tenant team.
+#
 #    On namespace deletion it deletes any harvesterconfig-* secrets on Rancher
-#    whose kubeconfig was built from that namespace's SA token.
+#    whose kubeconfig was built from that namespace's SA token, and cleans up
+#    the harvester-public RoleBinding for the VM-access SA.
 #
 # 2. Cluster watch (Rancher)
 #    Watches clusters.provisioning.cattle.io on the Rancher cluster. For each
@@ -21,9 +35,6 @@
 #      - Creates harvesterconfig-<cluster-name> in Rancher's fleet-default with
 #        v2prov-secret-authorized-for-cluster already set at creation time
 #    On cluster deletion it removes harvesterconfig-<cluster-name>.
-#
-# Consumers (tenant teams) only need the rancher2 provider. No Harvester or
-# Rancher kubeconfig required on their side.
 #
 # Environment variables (injected by the Deployment):
 #   HARVESTER_API_SERVER  — Harvester Kubernetes API server URL
@@ -131,6 +142,114 @@ $(echo "$kubeconfig" | sed 's/^/    /')
 EOF
 }
 
+# Build a namespace-scoped VM-access kubeconfig for tenant teams and write it
+# as the well-known "harvester-vm-kubeconfig" Secret in the tenant namespace.
+# Consumers retrieve this secret once at onboarding to provision VMs and RKE2
+# clusters using the workloads/vm and workloads/k8s-cluster OCD modules.
+# Args: ns
+write_vm_kubeconfig() {
+  local ns="$1"
+  local sa_name="harvester-vm-access-${ns}"
+  local secret_name="harvester-vm-kubeconfig"
+
+  # ServiceAccount in tenant namespace.
+  kubectl create serviceaccount "$sa_name" -n "$ns" \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+  # RoleBinding — Harvester VM lifecycle (VMs, keypairs, images, NADs, backups).
+  kubectl create rolebinding "${sa_name}" \
+    --clusterrole=harvesterhci.io:edit \
+    --serviceaccount="${ns}:${sa_name}" \
+    -n "$ns" --dry-run=client -o yaml | kubectl apply -f -
+
+  # RoleBinding — Kubernetes resource edit (Secrets, PVCs, ConfigMaps).
+  kubectl create rolebinding "${sa_name}-k8s-edit" \
+    --clusterrole=edit \
+    --serviceaccount="${ns}:${sa_name}" \
+    -n "$ns" --dry-run=client -o yaml | kubectl apply -f -
+
+  # RoleBinding — read shared OS images in default namespace.
+  kubectl create rolebinding "${ns}-${sa_name}-default-view" \
+    --clusterrole=view \
+    --serviceaccount="${ns}:${sa_name}" \
+    -n "default" --dry-run=client -o yaml | kubectl apply -f -
+
+  # RoleBinding — read shared OS images in harvester-public.
+  kubectl create rolebinding "${ns}-${sa_name}-public-view" \
+    --clusterrole=view \
+    --serviceaccount="${ns}:${sa_name}" \
+    -n "harvester-public" --dry-run=client -o yaml | kubectl apply -f -
+
+  # Long-lived token secret.
+  kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ${sa_name}-token
+  namespace: ${ns}
+  annotations:
+    kubernetes.io/service-account.name: ${sa_name}
+type: kubernetes.io/service-account-token
+EOF
+
+  # Wait for the token to be populated by the token controller.
+  local token=""
+  for _ in $(seq 1 20); do
+    token=$(kubectl get secret "${sa_name}-token" -n "$ns" \
+      -o jsonpath='{.data.token}' 2>/dev/null || true)
+    [[ -n "$token" ]] && break
+    sleep 1
+  done
+  if [[ -z "$token" ]]; then
+    log "  ERROR: VM access token not populated for ${sa_name} in ${ns}"
+    return 1
+  fi
+
+  local token_decoded ca_cert_b64
+  token_decoded=$(echo "$token" | base64 -d)
+  ca_cert_b64=$(kubectl get configmap kube-root-ca.crt -n kube-system \
+    -o jsonpath='{.data.ca\.crt}' | base64 | tr -d '\n')
+
+  local kubeconfig
+  kubeconfig=$(cat <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+- name: harvester
+  cluster:
+    certificate-authority-data: ${ca_cert_b64}
+    server: ${HARVESTER_API_SERVER}
+users:
+- name: ${ns}
+  user:
+    token: ${token_decoded}
+contexts:
+- name: ${ns}@harvester
+  context:
+    cluster: harvester
+    namespace: ${ns}
+    user: ${ns}
+current-context: ${ns}@harvester
+EOF
+)
+
+  kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ${secret_name}
+  namespace: ${ns}
+  annotations:
+    platform.wso2.com/vm-access-sa: "${sa_name}"
+type: Opaque
+stringData:
+  kubeconfig: |
+$(echo "$kubeconfig" | sed 's/^/    /')
+EOF
+
+  log "  [ns] VM access kubeconfig ready: ${secret_name} in ${ns}"
+}
+
 # ── Namespace watch handlers ───────────────────────────────────────────────────
 
 on_added_namespace() {
@@ -179,6 +298,11 @@ type: kubernetes.io/service-account-token
 EOF
 
   log "  [ns] SA ready: ${sa_name} in ${ns}"
+
+  # Consumer VM-access kubeconfig — separate SA with broader permissions.
+  # Explicit return propagates failure to the caller so the namespace is NOT
+  # marked processed; the watch loop will retry on the next event.
+  write_vm_kubeconfig "$ns" || return 1
 }
 
 on_deleted_namespace() {
@@ -216,6 +340,14 @@ on_deleted_namespace() {
         kubectl delete rolebinding "$rb_name_found" -n "$rb_ns" 2>/dev/null \
           && log "  [ns] deleted rolebinding ${rb_name_found} from ${rb_ns}"
       done || true
+
+  # Delete the VM-access SA's cross-namespace RoleBindings.
+  # (Resources inside the deleted namespace are cleaned up by Kubernetes.)
+  local vm_sa_name="harvester-vm-access-${ns}"
+  kubectl delete rolebinding "${ns}-${vm_sa_name}-default-view" -n "default" \
+    2>/dev/null && log "  [ns] deleted default RoleBinding for ${vm_sa_name}" || true
+  kubectl delete rolebinding "${ns}-${vm_sa_name}-public-view" -n "harvester-public" \
+    2>/dev/null && log "  [ns] deleted harvester-public RoleBinding for ${vm_sa_name}" || true
 }
 
 # ── Cluster watch handlers ─────────────────────────────────────────────────────
@@ -409,17 +541,25 @@ kubectl get namespaces -o json | jq -r '
   is_system_namespace "$ns" && continue
   [[ "$role" == "network-namespace" ]] && continue
   sa_name="harvester-cloud-provider-${ns}"
-  get_out=$(kubectl get secret "${sa_name}-token" -n "$ns" 2>&1) && get_rc=0 || get_rc=$?
-  if [[ $get_rc -eq 0 ]]; then
-    log "INIT namespace: ${ns} — already provisioned, skipping"
-    echo "$ns" >> "$PROCESSED_NS_FILE"
-  elif echo "$get_out" | grep -qiE '"?not found"?|NotFound'; then
+  if kubectl get secret "${sa_name}-token" -n "$ns" &>/dev/null; then
+    # Cloud-provider credentials already exist. Check for the VM-access kubeconfig
+    # separately — may be absent on pods that ran before this feature was added.
+    if kubectl get secret "harvester-vm-kubeconfig" -n "$ns" &>/dev/null; then
+      log "INIT namespace: ${ns} — already provisioned, skipping"
+      echo "$ns" >> "$PROCESSED_NS_FILE"
+    else
+      log "INIT namespace: ${ns} — backfilling VM access kubeconfig"
+      if write_vm_kubeconfig "$ns"; then
+        echo "$ns" >> "$PROCESSED_NS_FILE"
+      else
+        log "  WARN: VM access kubeconfig backfill failed for ${ns} — will retry on next watch event"
+      fi
+    fi
+  else
     log "INIT namespace: ${ns} (project: ${project_id})"
     if on_added_namespace "$ns" "$project_id"; then
       echo "$ns" >> "$PROCESSED_NS_FILE"
     fi
-  else
-    log "INIT namespace: ${ns} — kubectl error (${get_out}), skipping (will retry via watch)"
   fi
 done
 

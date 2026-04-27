@@ -1,20 +1,13 @@
 # Module: workloads/vm
 
 Creates a single Harvester virtual machine within a tenant namespace. Intended for use
-by product teams who have been granted a `tenant-space` with the `vm-manager` role.
+by product teams who have been granted a `tenant-space` project via the management phase.
 
 This module creates:
 - A `harvester_virtualmachine` with configurable CPU, memory, disk, and networking
-- Optionally, a `harvester_ssh_key` (when `ssh_public_key` is set)
-- Optionally, cloud-init user-data/network-data attached through the VM resource (when `user_data` is set)
-
-## When to Use
-
-Use this module in a workloads-phase root module (e.g. `04-workloads`) after the
-management phase has:
-1. Provisioned the tenant namespace via `management/tenant-space`
-2. Granted the team the `vm-manager` role via `management/cluster-roles`
-3. Downloaded OS images via `management/storage` (use `image_ids` output)
+- Optionally, a `harvester_ssh_key` (when `create_ssh_key = true`)
+- Optionally, cloud-init user-data attached through the VM resource
+- Optionally, a `ScheduleVMBackup` CRD for scheduled snapshots
 
 ## Requirements
 
@@ -22,84 +15,123 @@ management phase has:
 |------|---------|
 | terraform | >= 1.3 |
 | harvester/harvester | ~> 1.7 |
+| hashicorp/kubernetes | >= 2.0 |
+
+## Provider setup
+
+The `harvester` provider accepts either a kubeconfig file path or base64-encoded kubeconfig
+content. For consumer teams, the inline approach requires nothing beyond values already known
+at onboarding — no file handover, no scripts.
+
+```hcl
+locals {
+  _harvester_kubeconfig_b64 = base64encode(yamlencode({
+    apiVersion      = "v1"
+    kind            = "Config"
+    current-context = "harvester"
+    clusters = [{
+      name = "harvester"
+      cluster = {
+        server                   = "${var.rancher_url}/k8s/clusters/${var.harvester_cluster_id}"
+        insecure-skip-tls-verify = true  # see TLS note below
+      }
+    }]
+    users = [{
+      name = "consumer"
+      user = { token = var.rancher_api_token }
+    }]
+    contexts = [{
+      name    = "harvester"
+      context = { cluster = "harvester", user = "consumer" }
+    }]
+  }))
+}
+
+provider "harvester" {
+  kubeconfig = local._harvester_kubeconfig_b64
+}
+
+provider "kubernetes" {
+  host     = "${var.rancher_url}/k8s/clusters/${var.harvester_cluster_id}"
+  token    = var.rancher_api_token
+  insecure = true  # see TLS note below
+}
+```
+
+> **TLS note:** `insecure-skip-tls-verify = true` / `insecure = true` is convenient for
+> internal environments with self-signed certificates. For validated TLS, replace these with
+> the Rancher CA certificate instead:
+>
+> ```hcl
+> # Obtain the CA: openssl s_client -connect <rancher-host>:443 </dev/null 2>/dev/null \
+> #   | openssl x509 -outform PEM | base64
+> variable "rancher_ca_cert_b64" {
+>   type      = string
+>   sensitive = false
+>   description = "Base64-encoded PEM CA certificate for the Rancher server."
+> }
+>
+> locals {
+>   _harvester_kubeconfig_b64 = base64encode(yamlencode({
+>     # ...
+>     clusters = [{
+>       name = "harvester"
+>       cluster = {
+>         server                     = "${var.rancher_url}/k8s/clusters/${var.harvester_cluster_id}"
+>         certificate-authority-data = var.rancher_ca_cert_b64
+>       }
+>     }]
+>     # ...
+>   }))
+> }
+>
+> provider "kubernetes" {
+>   host                   = "${var.rancher_url}/k8s/clusters/${var.harvester_cluster_id}"
+>   token                  = var.rancher_api_token
+>   cluster_ca_certificate = base64decode(var.rancher_ca_cert_b64)
+> }
+> ```
+
+The three required values (`rancher_url`, `harvester_cluster_id`, `rancher_api_token`) are
+provided at onboarding and should already be in your `terraform.tfvars`.
+
+Scoping is enforced by Rancher project RBAC on the token — teams can only access namespaces
+within their assigned project.
 
 ## Prerequisites
 
 - Harvester namespace already exists (created by `tenant-space`)
-- A Harvester network attachment exists for the target VLAN (created by `management/networking`)
+- A Harvester network attachment exists for the target VLAN
 - OS image is available in Harvester (downloaded by `management/storage`)
 
 ## Usage
 
-### Minimal (image name only, no SSH key, no cloud-init)
+### Minimal
 
 ```hcl
 module "app_vm" {
-  source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/workloads/vm?ref=v0.1.x"
+  source = "github.com/wso2/open-cloud-datacenter//modules/workloads/vm?ref=v0.8.0"
 
   name         = "app-server-1"
-  namespace    = "iam-team-ns"
-  image_name   = data.terraform_remote_state.management.outputs.image_ids["ubuntu-22-04"]
-  network_name = "iam-team-vlan"
-}
-```
-
-### With SSH key
-
-```hcl
-module "app_vm" {
-  source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/workloads/vm?ref=v0.1.x"
-
-  name           = "app-server-1"
-  namespace      = "iam-team-ns"
-  cpu            = 4
-  memory         = "8Gi"
-  disk_size      = "80Gi"
-  image_name     = data.terraform_remote_state.management.outputs.image_ids["ubuntu-22-04"]
-  network_name   = "iam-team-vlan"
-  ssh_public_key = file(pathexpand("~/.ssh/id_rsa.pub"))
+  namespace    = "my-team-ns"
+  image_name   = "default/ubuntu-22-04"
+  network_name = "my-team-ns/vm-net-100"
 }
 ```
 
 ### With cloud-init
 
-Inject SSH keys, set a password, and install `qemu-guest-agent` so the VM's IP
-address is visible in the Harvester UI. For VMs on private VLAN networks (where
-Kubernetes IPAM is not available), `qemu-guest-agent` is the only mechanism
-Harvester uses to report the guest IP.
-
-> **Note:** Do not use a `users:` block with `password:` — on cloud-init 25.x
-> this prevents the password from being applied to the default OS user. Use the
-> top-level `password:` / `chpasswd:` / `ssh_authorized_keys:` keys instead.
->
-> **Note:** Avoid `package_update: true`. On Ubuntu 22.04 the `apt-daily` and
-> `apt-daily-upgrade` timers run on first boot and hold the dpkg lock, causing
-> package installs to fail silently if triggered at the same time.
-
-The snippet below uses `var.vm_password` and `var.ssh_authorized_keys` — these
-are **root-module variables** that you define in your own `variables.tf`; they
-are not inputs to this module.
-
 ```hcl
-# Example root-module variables (define in your own variables.tf)
-variable "vm_password" {
-  type      = string
-  sensitive = true
-}
-
-variable "ssh_authorized_keys" {
-  type    = list(string)
-  default = []
-}
-
 module "app_vm" {
-  source = "github.com/wso2-enterprise/open-cloud-datacenter//modules/workloads/vm?ref=v0.1.x"
+  source = "github.com/wso2/open-cloud-datacenter//modules/workloads/vm?ref=v0.8.0"
 
-  name           = "app-server-1"
-  namespace      = "iam-team-ns"
-  image_name     = data.terraform_remote_state.management.outputs.image_ids["ubuntu-22-04"]
-  network_name   = "iam-team-vlan"
-  wait_for_lease = false
+  name         = "app-server-1"
+  namespace    = "my-team-ns"
+  cpu          = 4
+  memory       = "8Gi"
+  disk_size    = "80Gi"
+  image_name   = "default/ubuntu-22-04"
+  network_name = "my-team-ns/vm-net-100"
 
   user_data = <<-EOT
     #cloud-config
@@ -108,9 +140,7 @@ module "app_vm" {
       expire: false
     ssh_pwauth: true
     ssh_authorized_keys:
-%{~ for key in var.ssh_authorized_keys }
-      - ${key}
-%{~ endfor }
+      - ${var.ssh_public_key}
     packages:
       - qemu-guest-agent
     runcmd:
@@ -119,19 +149,44 @@ module "app_vm" {
 }
 ```
 
-### Referencing images from the management phase
+> **Note:** When `user_data` is set, the module's `ssh_authorized_keys` and `password` inputs
+> are ignored — include them directly in your `user_data` cloud-config instead.
+> Do not use a `users:` block with `password:` — on cloud-init 25.x this prevents
+> the password from being applied to the default OS user. Use the top-level `password:` /
+> `chpasswd:` / `ssh_authorized_keys:` keys instead.
+
+### With scheduled backups
 
 ```hcl
-data "terraform_remote_state" "management" {
-  backend = "local"
-  config = {
-    path = "../02-management/terraform.tfstate"
-  }
-}
+module "app_vm" {
+  source = "github.com/wso2/open-cloud-datacenter//modules/workloads/vm?ref=v0.8.0"
 
-# Use the storage module's image_ids output
-locals {
-  ubuntu_image = data.terraform_remote_state.management.outputs.image_ids["ubuntu-22-04"]
+  name         = "app-server-1"
+  namespace    = "my-team-ns"
+  image_name   = "default/ubuntu-22-04"
+  network_name = "my-team-ns/vm-net-100"
+
+  backup_schedule = "0 2 * * *"  # daily at 2 AM UTC
+  backup_retain   = 7
+}
+```
+
+### Multiple VMs across namespaces
+
+```hcl
+module "vm" {
+  source   = "github.com/wso2/open-cloud-datacenter//modules/workloads/vm?ref=v0.8.0"
+  for_each = var.vms
+
+  name         = each.key
+  namespace    = each.value.namespace
+  cpu          = each.value.cpu
+  memory       = each.value.memory
+  disk_size    = each.value.disk_size
+  image_name   = var.image_name
+  network_name = var.network_name
+
+  ssh_authorized_keys = var.ssh_authorized_keys
 }
 ```
 
@@ -140,42 +195,43 @@ locals {
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|----------|
 | `name` | VM name | `string` | — | yes |
-| `namespace` | Harvester namespace (tenant project namespace) | `string` | — | yes |
+| `namespace` | Harvester namespace | `string` | — | yes |
 | `cpu` | Number of vCPUs | `number` | `2` | no |
 | `memory` | RAM (e.g. `"4Gi"`) | `string` | `"4Gi"` | no |
 | `disk_size` | Root disk size (e.g. `"40Gi"`) | `string` | `"40Gi"` | no |
 | `image_name` | Harvester image in `namespace/name` format | `string` | — | yes |
-| `network_name` | Harvester network attachment name | `string` | — | yes |
+| `network_name` | Harvester network attachment in `namespace/name` format | `string` | — | yes |
 | `run_strategy` | `RerunOnFailure`, `Always`, `Halted`, or `Manual` | `string` | `"RerunOnFailure"` | no |
-| `ssh_public_key` | SSH public key content. Used when `create_ssh_key = true`. | `string` | `null` | no |
-| `create_ssh_key` | When true, create a `harvester_ssh_key` from `ssh_public_key`. | `bool` | `false` | no |
-| `wait_for_lease` | Wait for IP lease on primary NIC. Set false for static cloud-init IPs. | `bool` | `true` | no |
-| `user_data` | Cloud-init user-data YAML. Creates a cloud-init secret when set. | `string` | `null` | no |
-| `network_data` | Cloud-init network-data config (requires `user_data` to be set). | `string` | `""` | no |
+| `create_ssh_key` | Create a `harvester_ssh_key` from `ssh_public_key` | `bool` | `false` | no |
+| `ssh_public_key` | SSH public key content (requires `create_ssh_key = true`) | `string` | `null` | no |
+| `ssh_authorized_keys` | SSH keys injected via cloud-init (no `create_ssh_key` needed) | `list(string)` | `[]` | no |
+| `default_user` | OS username for generated cloud-init | `string` | `"ubuntu"` | no |
+| `password` | Password for `default_user` injected via cloud-init | `string` | `null` | no |
+| `user_data` | Full cloud-init user-data override. When set, `password`/`ssh_authorized_keys`/`default_user` are ignored. | `string` | `null` | no |
+| `network_data` | Cloud-init network-data (requires `user_data`) | `string` | `""` | no |
+| `wait_for_lease` | Wait for IP lease on primary NIC. Set `false` for static IPs or private VLANs. | `bool` | `true` | no |
+| `additional_disks` | Extra disks to attach (name, size, optional image, auto_delete) | `list(object)` | `[]` | no |
+| `backup_schedule` | Cron schedule for VM snapshots in UTC (e.g. `"0 2 * * *"`). `null` disables. | `string` | `null` | no |
+| `backup_retain` | Number of snapshots to retain | `number` | `5` | no |
+| `backup_enabled` | Whether the backup schedule is active | `bool` | `true` | no |
+| `backup_max_failure` | Max consecutive backup failures before suspending | `number` | `4` | no |
 
 ## Outputs
 
 | Name | Description |
 |------|-------------|
-| `vm_name` | Name of the created VM. |
-| `vm_id` | Harvester resource ID (`namespace/name`). |
-| `network_interfaces` | Network interface objects, including the leased IP once the VM is running. |
-| `ssh_key_id` | Harvester SSH key ID attached to the VM, or `null` if not provided. |
+| `vm_name` | Name of the created VM |
+| `vm_id` | Harvester resource ID (`namespace/name`) |
+| `network_interfaces` | Network interface objects including leased IP once running |
+| `ssh_key_id` | Harvester SSH key ID attached to the VM, or `null` |
 
 ## Notes
 
-- `image_name` accepts the Harvester image ID format `namespace/name` — use the
-  `image_ids` output from the `management/storage` module to keep this consistent.
-- `network_name` must match a network attachment definition in the same Harvester cluster
-  (created by `management/networking`).
-- The VM's IP address is available in `network_interfaces[0].ip_address` after the
-  lease is obtained (requires `wait_for_lease = true`, which is the default).
-  Set `wait_for_lease = false` when using static IPs via cloud-init `network_data`,
-  or when the VM is on a private VLAN where Kubernetes IPAM is not available.
-- For VMs on private VLAN networks, Harvester cannot obtain the guest IP from
-  Kubernetes IPAM. Install and enable `qemu-guest-agent` via cloud-init so the
-  IP reported by the guest is visible in the Harvester UI.
-- The `vm-manager` custom role from `management/cluster-roles` must be bound to the
-  team's group in their `tenant-space` before they can create VMs in the namespace.
-- Removing this module or running `terraform destroy` **deletes the VM and its disk**.
-  Ensure data is backed up before destroying.
+- `image_name` uses the Harvester format `namespace/name` — use the `image_ids` output from
+  the `management/storage` module to keep this consistent across the platform.
+- The VM's IP is available in `network_interfaces[0].ip_address` after the lease is obtained
+  (`wait_for_lease = true`). Set `wait_for_lease = false` for static IPs via cloud-init or
+  VMs on private VLAN networks where Kubernetes IPAM is unavailable.
+- Install and enable `qemu-guest-agent` via cloud-init so the guest IP is visible in the
+  Harvester UI for VMs on private VLAN networks.
+- `terraform destroy` **deletes the VM and its root disk**. Ensure data is backed up first.

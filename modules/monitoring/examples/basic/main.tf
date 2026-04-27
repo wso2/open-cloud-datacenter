@@ -23,17 +23,15 @@ terraform {
 }
 
 provider "kubernetes" {
-  config_path    = var.kubeconfig_path
-  config_context = var.kubeconfig_context
+  config_path = var.kubeconfig_path
 }
 
 module "monitoring" {
   source = "../../"
 
   # Identifiers
-  environment        = var.environment
-  kubeconfig_path    = var.kubeconfig_path
-  kubeconfig_context = var.kubeconfig_context
+  environment     = var.environment
+  kubeconfig_path = var.kubeconfig_path
 
   # Notification
   google_chat_webhook_url = var.google_chat_webhook_url
@@ -69,11 +67,6 @@ variable "environment" {
 variable "kubeconfig_path" {
   type    = string
   default = "~/.kube/harvester-lk.yaml"
-}
-
-variable "kubeconfig_context" {
-  type    = string
-  default = "local"
 }
 
 variable "google_chat_webhook_url" {
