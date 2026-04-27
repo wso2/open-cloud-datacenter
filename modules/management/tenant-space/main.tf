@@ -13,8 +13,11 @@ locals {
   # index. Only relevant when vyos_endpoint is set and exactly one VLAN is given.
   # Auto-routed environments (physical switch / DigiOps-issued VLANs) use multiple
   # VLANs with route_mode=auto; no explicit subnets needed.
-  use_vyos       = var.vlan_id != null && length(var.vlan_id) > 0 && var.vyos_endpoint != null
-  tenant_subnet  = local.use_vyos ? cidrsubnet("10.0.0.0/8", 15, var.vlan_id[0] - 1000) : null
+  use_vyos = var.vlan_id != null && length(var.vlan_id) > 0 && var.vyos_endpoint != null
+  # vlan_id[0] must be >= 1000 when VyOS is used — enforced by the precondition below.
+  # max(..., 0) prevents a negative cidrsubnet index from causing a plan-time panic
+  # before the precondition fires.
+  tenant_subnet  = local.use_vyos ? cidrsubnet("10.0.0.0/8", 15, max(var.vlan_id[0] - 1000, 0)) : null
   tenant_gateway = local.use_vyos ? cidrhost(local.tenant_subnet, 1) : null
 }
 
@@ -58,6 +61,14 @@ resource "rancher2_project" "this" {
     precondition {
       condition     = !local.use_vyos || length(var.vlan_id) == 1
       error_message = "VyOS path requires exactly one VLAN ID. Set vyos_endpoint = null for multi-VLAN auto-route configurations."
+    }
+    precondition {
+      condition     = !local.use_vyos || var.vlan_id[0] >= 1000
+      error_message = "VyOS IPAM uses VLAN IDs >= 1000 (index = vlan_id - 1000). Set vyos_endpoint = null for VLANs below 1000."
+    }
+    precondition {
+      condition     = var.vlan_id == null || length(var.vlan_id) == 0 || local.create_net_ns
+      error_message = "vlan_id requires the network namespace to exist. This should never happen since create_net_ns is always true when vlan_id is set — if you see this, do not set create_network_namespace = false alongside vlan_id."
     }
   }
 }
@@ -136,6 +147,49 @@ module "vyos_tenant" {
   vlan_id       = var.vlan_id[0]
   vyos_endpoint = var.vyos_endpoint
   vyos_api_key  = var.vyos_api_key
+}
+
+# ── Consumer VM access kubeconfig (read from provisioner-created secret) ───────
+# The namespace-credential-provisioner automatically creates a "harvester-vm-kubeconfig"
+# Secret in each tenant namespace containing a namespace-scoped Harvester kubeconfig.
+# This data source surfaces it as a Terraform output so the platform team can
+# retrieve it once at onboarding and hand it to the tenant team:
+#
+#   terraform output -raw <tenant>_vm_kubeconfig > <team>.harvester.kubeconfig.secret
+#
+# Requires the kubernetes.harvester provider to be passed in (set expose_vm_kubeconfig = true
+# and configure kubernetes.harvester in the caller's provider block).
+#
+# IMPORTANT — two-pass apply required:
+# This data source races with the out-of-band reconciler. On a fresh namespace the
+# provisioner may not have created the secret yet when Terraform runs the data read.
+# Apply in two steps:
+#   1. terraform apply                  # creates namespaces; provisioner reconciles
+#   2. terraform apply                  # reads the now-present secret
+# Alternatively, run `terraform apply -target=rancher2_namespace.this` first, wait
+# for the provisioner, then run the full apply.
+
+locals {
+  # Primary workload namespace for the VM kubeconfig.
+  # Uses var.vm_access_namespace when explicitly set; falls back to the first
+  # resolved namespace (or project_name when no namespaces are configured).
+  vm_access_ns = var.vm_access_namespace != null ? var.vm_access_namespace : (
+    length(local.namespaces) > 0 ? local.namespaces[0] : var.project_name
+  )
+}
+
+data "kubernetes_secret_v1" "vm_access_kubeconfig" {
+  count    = var.expose_vm_kubeconfig ? 1 : 0
+  provider = kubernetes.harvester
+  metadata {
+    name      = "harvester-vm-kubeconfig"
+    namespace = local.vm_access_ns
+  }
+  depends_on = [rancher2_namespace.this]
+}
+
+locals {
+  vm_access_kubeconfig = var.expose_vm_kubeconfig ? data.kubernetes_secret_v1.vm_access_kubeconfig[0].data["kubeconfig"] : null
 }
 
 # ── One binding per (group, role) pair. ───────────────────────────────────────

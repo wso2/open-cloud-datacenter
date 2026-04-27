@@ -13,7 +13,7 @@ Provisions a tenant RKE2 Kubernetes cluster on Harvester HCI via Rancher's machi
 
 ```hcl
 module "my_rke2_cluster" {
-  source = "github.com/wso2/open-cloud-datacenter//modules/workloads/k8s-cluster?ref=v0.5.0"
+  source = "github.com/wso2/open-cloud-datacenter//modules/workloads/k8s-cluster?ref=v0.8.0"
 
   cluster_name        = "my-cluster"
   kubernetes_version  = "v1.32.13+rke2r1"
@@ -153,6 +153,43 @@ etcd_s3 = {
 | `cluster_id` | Rancher v2 cluster ID (`fleet-default/<name>`) |
 | `cluster_name` | Name of the provisioned downstream cluster |
 | `cluster_v3_id` | Legacy v3 cluster ID (`c-m-xxxx`) for use in role bindings |
+
+## Harvester cloud provider credential
+
+The Harvester cloud provider (CSI driver + load balancer controller) on each RKE2 node
+needs a kubeconfig secret — `harvesterconfig-<cluster-name>` — in Rancher's `fleet-default`
+namespace. There are two ways this secret is created:
+
+**Automatically (recommended):** If the platform team has deployed the
+`namespace-credential-provisioner` (part of the management phase), it watches for new
+clusters and creates `harvesterconfig-<cluster-name>` automatically. No action needed
+beyond setting `cloud_provider_config_secret`:
+
+```hcl
+module "my_rke2_cluster" {
+  # ...
+  enable_harvester_cloud_provider = true
+  cloud_provider_config_secret    = "harvesterconfig-${var.cluster_name}"
+}
+```
+
+The secret follows the naming convention `harvesterconfig-<cluster_name>`. The provisioner
+creates it within seconds of the cluster resource appearing in Rancher.
+
+**Manually (standalone environments):** Use the `workloads/harvester-cloud-credential`
+module (infra team only — requires direct Harvester kubeconfig):
+
+```hcl
+module "cloud_credential" {
+  source = "github.com/wso2/open-cloud-datacenter//modules/workloads/harvester-cloud-credential?ref=v0.8.0"
+  # ...
+}
+module "my_rke2_cluster" {
+  # ...
+  cloud_provider_config_secret = module.cloud_credential.secret_name
+  depends_on                   = [module.cloud_credential]
+}
+```
 
 ## Brownfield import
 
