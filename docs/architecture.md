@@ -107,6 +107,20 @@ This phase uses four modules, typically applied together:
 
 **Provider dependencies**: `rancher/rancher2 ~> 3.0`
 
+#### 2e. namespace-credential-provisioner (`modules/management/namespace-credential-provisioner`)
+
+- Deploys a long-running reconciler on the Harvester cluster that watches for tenant namespaces.
+- For each namespace, automatically creates a scoped ServiceAccount, RoleBindings, and a
+  `harvester-vm-kubeconfig` Secret that consumer teams use to authenticate the `harvester`
+  Terraform provider — no admin involvement, no file handover.
+- Backfills existing namespaces on startup (safe to deploy to running clusters).
+- Cleans up cross-namespace RoleBindings when a namespace is deleted.
+
+**Must be deployed before `tenant-space` creates namespaces** so that credentials are
+ready by the time consumer teams run `terraform apply`.
+
+**Provider dependencies**: `hashicorp/kubernetes >= 2.0`
+
 ---
 
 ### Phase 3 — Identity & Monitoring
@@ -203,7 +217,13 @@ This phase configures the `asgardeo` provider (or equivalent OIDC configuration 
            │
            │ projects/namespaces ready
            ▼
-    ┌───────────────────┐ 
+    ┌─────────────────────────┐
+    │ namespace-credential-   │
+    │ provisioner (Phase 2e)  │
+    └──────────┬──────────────┘
+               │ harvesterconfig + harvester-vm-kubeconfig per namespace
+               ▼
+    ┌───────────────────┐
     │   identity        │
     │   (Phase 3a)      │
     └────────┬──────────┘
