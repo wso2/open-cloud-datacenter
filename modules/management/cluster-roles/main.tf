@@ -321,85 +321,22 @@ resource "rancher2_role_template" "project_contributor" {
 #   - Namespace create/delete (namespaces are managed by the tenant-space module)
 resource "rancher2_role_template" "cluster_contributor" {
   name        = "cluster-contributor"
-  description = "SRE-level cluster access: full workload and config management via kubectl, logs/exec, read-only node and RBAC visibility. No Rancher management-plane operations (cannot delete or reconfigure the cluster)."
+  description = "Full Kubernetes-level access to all cluster resources and subresources (scale, exec, logs, system namespaces). Mirrors cluster-admin at the Kubernetes layer. Rancher cluster lifecycle (delete, reconfigure) is governed separately by Rancher's management-plane permissions and is not affected by this role."
   context     = "cluster"
 
-  # Core workload resources — full CRUD so SREs can deploy, restart, and clean up.
+  # Full access to all Kubernetes API groups, resources, and subresources.
+  # Wildcard resources covers subresources (*/scale, pods/exec, pods/log, etc.)
+  # matching the same pattern used by the built-in cluster-admin ClusterRole.
   rules {
-    api_groups = [""]
-    resources  = ["pods", "services", "endpoints", "configmaps", "secrets", "serviceaccounts", "persistentvolumeclaims", "replicationcontrollers"]
-    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
+    api_groups = ["*"]
+    resources  = ["*"]
+    verbs      = ["*"]
   }
 
-  # Pod operational subresources — exec, log streaming, port forwarding.
+  # Non-resource URLs — required for kubectl proxy, healthz, metrics endpoints.
   rules {
-    api_groups = [""]
-    resources  = ["pods/exec", "pods/log", "pods/portforward", "pods/status"]
-    verbs      = ["get", "create"]
-  }
-
-  # Apps workloads — deployments, statefulsets, daemonsets, replicasets.
-  rules {
-    api_groups = ["apps"]
-    resources  = ["deployments", "statefulsets", "daemonsets", "replicasets"]
-    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
-  }
-
-  # Batch workloads — jobs and cronjobs.
-  rules {
-    api_groups = ["batch"]
-    resources  = ["jobs", "cronjobs"]
-    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
-  }
-
-  # Networking — ingresses and network policies.
-  rules {
-    api_groups = ["networking.k8s.io"]
-    resources  = ["ingresses", "networkpolicies"]
-    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
-  }
-
-  # HPA — horizontal pod autoscalers.
-  rules {
-    api_groups = ["autoscaling"]
-    resources  = ["horizontalpodautoscalers"]
-    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
-  }
-
-  # Namespace visibility — read-only so `kubectl get ns` works.
-  # Create/delete intentionally omitted; namespaces are managed by tenant-space.
-  rules {
-    api_groups = [""]
-    resources  = ["namespaces"]
-    verbs      = ["get", "list", "watch"]
-  }
-
-  # Node visibility — read-only for debugging; mutations stay with Rancher.
-  rules {
-    api_groups = [""]
-    resources  = ["nodes"]
-    verbs      = ["get", "list", "watch"]
-  }
-
-  # Cluster-scoped storage — PVs visible for debugging; no mutation.
-  rules {
-    api_groups = [""]
-    resources  = ["persistentvolumes"]
-    verbs      = ["get", "list", "watch"]
-  }
-
-  # Events — read-only for `kubectl describe` and debugging.
-  rules {
-    api_groups = [""]
-    resources  = ["events"]
-    verbs      = ["get", "list", "watch"]
-  }
-
-  # RBAC visibility — read-only so SREs can audit bindings without modifying them.
-  rules {
-    api_groups = ["rbac.authorization.k8s.io"]
-    resources  = ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
-    verbs      = ["get", "list", "watch"]
+    non_resource_urls = ["*"]
+    verbs             = ["*"]
   }
 }
 
