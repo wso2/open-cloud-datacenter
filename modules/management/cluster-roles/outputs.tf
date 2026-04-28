@@ -32,3 +32,8 @@ output "cluster_operator_role_id" {
   value       = rancher2_role_template.cluster_operator.id
   description = "Role template ID for the cluster-operator cluster role. Pass to rancher2_cluster_role_template_binding for SREs who scale RKE2 node pools."
 }
+
+output "cluster_contributor_role_id" {
+  value       = rancher2_role_template.cluster_contributor.id
+  description = "Role template ID for the cluster-contributor cluster role. Grants full workload/config management via kubectl (exec, logs, deploy, scale) without Rancher management-plane permissions. Use for SRE groups that operate downstream clusters but must not delete or reconfigure them."
+}
