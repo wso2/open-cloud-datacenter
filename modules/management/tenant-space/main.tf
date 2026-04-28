@@ -87,7 +87,7 @@ resource "rancher2_namespace" "this" {
 
   # description may be set manually in Rancher UI; ignore to avoid removing it.
   lifecycle {
-    ignore_changes = [description]
+    ignore_changes = [description, labels["kubernetes.io/metadata.name"]]
   }
 }
 
@@ -106,7 +106,7 @@ resource "rancher2_namespace" "network" {
   }
 
   lifecycle {
-    ignore_changes = [description]
+    ignore_changes = [description, labels["kubernetes.io/metadata.name"]]
   }
 }
 
