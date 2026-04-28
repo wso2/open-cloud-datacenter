@@ -1,3 +1,8 @@
+output "project_contributor_role_id" {
+  value       = rancher2_role_template.project_contributor.id
+  description = "Role template ID for the project-contributor role. Grants namespace and member management within a project without the ability to change resource quotas or delete the project. Pass to tenant-space module's group_role_bindings for infrastructure operators and team leads."
+}
+
 output "vm_manager_role_id" {
   value       = rancher2_role_template.vm_manager.id
   description = "Role template ID for the vm-manager role. Pass to tenant-space module's group_role_bindings."
