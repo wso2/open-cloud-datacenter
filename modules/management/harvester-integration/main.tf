@@ -75,7 +75,7 @@ resource "kubernetes_service_account" "rancher_credential" {
   count = var.create_cloud_credential ? 1 : 0
   metadata {
     name      = "rancher-cloud-credential"
-    namespace = "kube-system"
+    namespace = var.credential_namespace
   }
 }
 
@@ -100,7 +100,7 @@ resource "kubernetes_secret" "rancher_credential_token" {
   count = var.create_cloud_credential ? 1 : 0
   metadata {
     name      = "rancher-cloud-credential-token"
-    namespace = "kube-system"
+    namespace = var.credential_namespace
     annotations = {
       "kubernetes.io/service-account.name" = kubernetes_service_account.rancher_credential[0].metadata[0].name
     }
@@ -108,6 +108,54 @@ resource "kubernetes_secret" "rancher_credential_token" {
   type = "kubernetes.io/service-account-token"
 
   depends_on = [kubernetes_service_account.rancher_credential]
+}
+
+locals {
+  _coredns_corefile_patched = <<-EOT
+    .:53 {
+        errors
+        health {
+            lameduck 10s
+        }
+        ready
+        hosts {
+            ${var.rancher_lb_ip} ${var.rancher_hostname}
+            fallthrough
+        }
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+            pods insecure
+            fallthrough in-addr.arpa ip6.arpa
+            ttl 30
+        }
+        prometheus 0.0.0.0:9153
+        forward . /etc/resolv.conf
+        cache 30
+        loop
+        reload
+        loadbalance
+    }
+  EOT
+
+  _coredns_corefile_default = <<-EOT
+    .:53 {
+        errors
+        health {
+            lameduck 10s
+        }
+        ready
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+            pods insecure
+            fallthrough in-addr.arpa ip6.arpa
+            ttl 30
+        }
+        prometheus 0.0.0.0:9153
+        forward . /etc/resolv.conf
+        cache 30
+        loop
+        reload
+        loadbalance
+    }
+  EOT
 }
 
 locals {
@@ -264,39 +312,18 @@ resource "harvester_setting" "registration_url" {
 # hostname. This replaces the Corefile with one that includes a hosts entry mapping
 # rancher_lb_ip → rancher_hostname, allowing nodes to reach Rancher during bootstrap.
 # Set patch_coredns = false (default) when using a publicly resolvable domain.
+#
+# The resource is always present so that toggling patch_coredns from true → false
+# restores the standard Corefile rather than destroying the key entirely (which
+# would leave CoreDNS with an empty config and break cluster DNS).
 resource "kubernetes_config_map_v1_data" "harvester_coredns_patch" {
-  count = var.patch_coredns ? 1 : 0
-
   metadata {
     name      = "rke2-coredns-rke2-coredns"
     namespace = "kube-system"
   }
 
   data = {
-    Corefile = <<-EOT
-      .:53 {
-          errors
-          health {
-              lameduck 10s
-          }
-          ready
-          hosts {
-              ${var.rancher_lb_ip} ${var.rancher_hostname}
-              fallthrough
-          }
-          kubernetes cluster.local in-addr.arpa ip6.arpa {
-              pods insecure
-              fallthrough in-addr.arpa ip6.arpa
-              ttl 30
-          }
-          prometheus 0.0.0.0:9153
-          forward . /etc/resolv.conf
-          cache 30
-          loop
-          reload
-          loadbalance
-      }
-    EOT
+    Corefile = var.patch_coredns ? local._coredns_corefile_patched : local._coredns_corefile_default
   }
 
   # Overwrite the ConfigMap data managed by the rke2-coredns Helm chart.

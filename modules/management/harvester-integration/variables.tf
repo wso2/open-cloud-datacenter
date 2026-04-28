@@ -16,6 +16,12 @@ variable "cloud_credential_name" {
   default     = "harvester-local-creds"
 }
 
+variable "credential_namespace" {
+  type        = string
+  description = "Kubernetes namespace for the cloud credential ServiceAccount and token Secret on Harvester. Override to match an existing namespace when importing brownfield state."
+  default     = "kube-system"
+}
+
 variable "cluster_labels" {
   type        = map(string)
   description = "Additional labels to set on the Harvester cluster object in Rancher. Merged with the required provider.cattle.io=harvester label."
