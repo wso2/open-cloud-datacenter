@@ -48,9 +48,28 @@ variable "vm_disk_auto_delete" {
   default     = true
 }
 
+variable "image_url" {
+  type        = string
+  description = "Download URL for the cloud image (e.g. Ubuntu 22.04 qcow2). The module fetches and registers it as a Harvester backing image. Mutually exclusive with ubuntu_image_id."
+  default     = ""
+}
+
+variable "image_name" {
+  type        = string
+  description = "Harvester resource name for the downloaded image. Only used when image_url is set."
+  default     = "ubuntu-22-04"
+}
+
+variable "image_display_name" {
+  type        = string
+  description = "Human-readable display name shown in the Harvester UI. Only used when image_url is set."
+  default     = "ubuntu-22.04"
+}
+
 variable "ubuntu_image_id" {
   type        = string
-  description = "Harvester resource ID of the Ubuntu cloud image (e.g. 'default/image-cwl4b')"
+  description = "Harvester resource ID of a pre-existing cloud image (e.g. 'default/image-cwl4b'). Use this for brownfield clusters where the image already exists. Mutually exclusive with image_url."
+  default     = ""
 }
 
 variable "enable_usb_tablet" {
@@ -213,5 +232,74 @@ variable "ippool_end" {
 variable "ippool_network_name" {
   type        = string
   description = "NetworkAttachmentDefinition name to associate with the IP pool (e.g. 'default/vm-net-100'). Required when the LB VIP is on a VLAN network so kube-vip announces it on the correct interface."
+  default     = ""
+}
+
+# ── Storage class ─────────────────────────────────────────────────────────────
+variable "manage_storage_class" {
+  type        = bool
+  description = "Create a custom Longhorn StorageClass, set it as the cluster default, and patch the built-in longhorn SC replica count. Set false for brownfield clusters."
+  default     = true
+}
+
+variable "harvester_kubeconfig_path" {
+  type        = string
+  description = "Filesystem path to the Harvester kubeconfig. Required when manage_storage_class = true so the longhorn StorageClass can be patched via kubectl (parameters are immutable in the Kubernetes API and cannot be updated in-place)."
+  default     = ""
+}
+
+variable "storage_class_name" {
+  type        = string
+  description = "Name of the custom StorageClass to create."
+  default     = "harvester-longhorn-2r"
+}
+
+variable "storage_class_replicas" {
+  type        = number
+  description = "Longhorn replica count for the custom StorageClass."
+  default     = 2
+}
+
+# ── Storage network ───────────────────────────────────────────────────────────
+variable "manage_storage_network" {
+  type        = bool
+  description = "If true, configure the Harvester storage-network Setting (L2VlanNetwork for Longhorn replication traffic). Requires a dedicated storage cluster network to exist in Harvester."
+  default     = false
+}
+
+variable "storage_network_vlan" {
+  type        = number
+  description = "VLAN ID for the storage network (e.g. 699)."
+  default     = 0
+}
+
+variable "storage_network_cluster_network" {
+  type        = string
+  description = "Name of the Harvester cluster network to use for storage traffic (e.g. 'strg-network')."
+  default     = ""
+}
+
+variable "storage_network_range" {
+  type        = string
+  description = "IP CIDR range assigned to storage NICs (e.g. '172.23.0.0/19')."
+  default     = ""
+}
+
+variable "storage_network_exclude_ranges" {
+  type        = list(string)
+  description = "CIDR blocks to exclude from the storage range (maps to the 'exclude' key in the Harvester storage-network JSON value)."
+  default     = []
+}
+
+# ── RKE2 / Rancher versions ───────────────────────────────────────────────────
+variable "rke2_version" {
+  type        = string
+  description = "RKE2 release to install (e.g. 'v1.32.4+rke2r1'). Pin this to a version that is compatible with the Rancher chart selected by rancher_version."
+  default     = "v1.34.7+rke2r1"
+}
+
+variable "rancher_version" {
+  type        = string
+  description = "Rancher Helm chart version (e.g. '2.14.0'). Leave empty to install the latest stable release."
   default     = ""
 }
