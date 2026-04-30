@@ -29,15 +29,31 @@ runcmd:
       echo "--- Starting RKE2 and Rancher Deployment ---" > /dev/console
       
       # 1. Install RKE2
-      curl -sfL https://get.rke2.io | sh -
+      curl -sfL https://get.rke2.io | INSTALL_RKE2_VERSION=${rke2_version} sh -
       mkdir -p /etc/rancher/rke2
 
       cat <<EOF > /etc/rancher/rke2/config.yaml
       token: static-bootstrap-token-123
       $( [ "${node_index}" != "0" ] && echo "server: https://${lb_ip}:9345" )
+      tls-san:
+        - ${lb_ip}
+      etcd-heartbeat-interval: "500"
+      etcd-election-timeout: "5000"
     EOF
 
       systemctl enable rke2-server.service
+%{~ if node_index != 0 }
+
+      # Join nodes: wait until the LB is routing port 9345 before starting.
+      # The LB health check is on port 443 (ingress-nginx), which only passes
+      # once node-0's ingress is up. Waiting here avoids failed join attempts
+      # and the systemd restart loop that follows.
+      echo "Waiting for supervisor endpoint ${lb_ip}:9345 to be routable..."
+      until python3 -c "import socket,sys; s=socket.socket(); s.settimeout(5); s.connect(('${lb_ip}', 9345)); s.close()" 2>/dev/null; do
+        sleep 15
+      done
+      echo "Supervisor endpoint reachable, joining cluster..."
+%{~ endif }
       systemctl start rke2-server.service
 
       # 2. IMMEDIATE kubectl download
@@ -63,7 +79,7 @@ runcmd:
       if [ "${node_index}" -eq "0" ]; then
         echo "Initializing Rancher..."
         curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-        /usr/local/bin/helm repo add rancher-stable https://releases.rancher.com/server-charts/stable
+        /usr/local/bin/helm repo add rancher-latest https://releases.rancher.com/server-charts/latest
         /usr/local/bin/helm repo update
         
         # 6. Two-Stage Ingress Wait (Corrected for DaemonSet)
@@ -84,15 +100,21 @@ runcmd:
         /usr/local/bin/kubectl wait --for=condition=Available --timeout=600s deployment/cert-manager-webhook -n cert-manager
         
         # 8. Rancher Installation Loop
-        for i in {1..10}; do
+        i=1; while [ $i -le 10 ]; do
           echo "Rancher install attempt $i..."
-          /usr/local/bin/helm upgrade --install rancher rancher-stable/rancher \
+          /usr/local/bin/helm upgrade --install rancher rancher-latest/rancher \
             --namespace cattle-system \
             --create-namespace \
+%{~ if rancher_version != "" }
+            --version ${rancher_version} \
+%{~ endif }
             --set hostname=${cluster_dns} \
             --set bootstrapPassword=${rancher_password} \
             --set replicas=${node_count} \
-            --wait && break || sleep 30
+            --set global.cattle.psp.enabled=false \
+            --set startupProbe.failureThreshold=60 \
+            --wait --timeout 15m && break
+          i=$((i+1)); sleep 30
         done
       fi
       echo "--- Deployment Script Finished ---" > /dev/console
