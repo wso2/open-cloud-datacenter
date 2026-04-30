@@ -209,6 +209,15 @@ locals {
   }) : ""
 }
 
+# Guard: patch_coredns = true requires both rancher_lb_ip and rancher_hostname.
+# Without them, the hosts block renders empty strings and breaks CoreDNS resolution.
+check "coredns_patch_vars_set" {
+  assert {
+    condition     = !var.patch_coredns || (var.rancher_lb_ip != "" && var.rancher_hostname != "")
+    error_message = "patch_coredns = true requires both rancher_lb_ip and rancher_hostname to be set."
+  }
+}
+
 # Validate that the kubeconfig contains embedded CA data (certificate-authority file paths
 # are not supported when building a portable SA kubeconfig for Rancher).
 check "harvester_kubeconfig_has_embedded_ca" {
