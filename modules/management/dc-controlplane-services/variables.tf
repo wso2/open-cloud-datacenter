@@ -120,3 +120,17 @@ variable "arc_chart_version" {
   description = "Version of the gha-runner-scale-set / controller Helm charts to install."
   default     = "0.14.1"
 }
+
+# ── Helm CLI bypass kubeconfig ────────────────────────────────────────────────
+# The TF helm provider repeatedly hits "http: request body too large" when
+# posting the ARC release Secret through Rancher's proxy chain (cause not
+# pinned down — Rancher 2.14 introduced something subtle). Helm CLI directly
+# against the same Rancher proxy URL works fine. So the two ARC helm_release
+# resources are replaced with null_resource + local-exec calling helm CLI.
+# This variable is the kubeconfig the local-exec uses; the consumer layer
+# constructs it from the same host + token the helm provider would use.
+variable "helm_kubeconfig" {
+  type        = string
+  sensitive   = true
+  description = "Full kubeconfig YAML pointing at the Rancher proxy URL with admin token. Used by null_resource local-exec to invoke helm CLI directly, bypassing the TF helm provider."
+}
