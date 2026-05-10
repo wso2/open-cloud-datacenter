@@ -522,14 +522,30 @@ resource "kubernetes_role_binding_v1" "dc_api_deployer" {
 # at the Rancher proxy URL with the admin token. We materialise it to a temp
 # file at apply time, then run helm install/uninstall against that kubeconfig.
 
+# Per-instance suffix for the temp files written below. Without this, two
+# module instances (or two applies sharing the same module checkout) would
+# collide on fixed filenames in path.module. Keyed on the arc-systems
+# namespace so the suffix stays stable across plans for the same instance.
+resource "random_id" "workdir_suffix" {
+  byte_length = 4
+  keepers = {
+    arc_namespace = kubernetes_namespace.arc_systems.metadata[0].name
+  }
+}
+
+locals {
+  helm_kubeconfig_path  = "${path.module}/.helm-kubeconfig-${random_id.workdir_suffix.hex}.yaml"
+  dc_runner_values_path = "${path.module}/.dc-runner-values-${random_id.workdir_suffix.hex}.yaml"
+}
+
 resource "local_sensitive_file" "helm_kubeconfig" {
-  filename        = "${path.module}/.helm-kubeconfig.yaml"
+  filename        = local.helm_kubeconfig_path
   content         = var.helm_kubeconfig
   file_permission = "0600"
 }
 
 resource "local_sensitive_file" "dc_runner_values" {
-  filename = "${path.module}/.dc-runner-values.yaml"
+  filename = local.dc_runner_values_path
   content = yamlencode({
     githubConfigUrl    = var.github_repo_url
     githubConfigSecret = kubernetes_secret.github_runner_pat.metadata[0].name
@@ -547,29 +563,33 @@ resource "local_sensitive_file" "dc_runner_values" {
 
 resource "null_resource" "arc_controller" {
   triggers = {
-    chart_version = var.arc_chart_version
-    namespace     = kubernetes_namespace.arc_systems.metadata[0].name
+    chart_version   = var.arc_chart_version
+    namespace       = kubernetes_namespace.arc_systems.metadata[0].name
+    kubeconfig_path = local.helm_kubeconfig_path
   }
 
   provisioner "local-exec" {
-    command = <<-EOT
+    interpreter = ["/usr/bin/env", "bash", "-c"]
+    command     = <<-EOT
       set -euo pipefail
-      export KUBECONFIG=${local_sensitive_file.helm_kubeconfig.filename}
+      export KUBECONFIG="${local_sensitive_file.helm_kubeconfig.filename}"
       helm upgrade --install arc \
         oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
-        --version ${var.arc_chart_version} \
-        --namespace ${kubernetes_namespace.arc_systems.metadata[0].name} \
+        --version "${var.arc_chart_version}" \
+        --namespace "${kubernetes_namespace.arc_systems.metadata[0].name}" \
         --wait --timeout 10m
     EOT
   }
 
   provisioner "local-exec" {
-    when       = destroy
-    on_failure = continue
-    command    = <<-EOT
+    when        = destroy
+    on_failure  = continue
+    interpreter = ["/usr/bin/env", "bash", "-c"]
+    command     = <<-EOT
       set -eu
-      export KUBECONFIG=${self.triggers.namespace == "" ? "/dev/null" : "${path.module}/.helm-kubeconfig.yaml"}
-      helm uninstall arc --namespace ${self.triggers.namespace} --ignore-not-found || true
+      if [[ -z "${self.triggers.namespace}" ]]; then exit 0; fi
+      export KUBECONFIG="${self.triggers.kubeconfig_path}"
+      helm uninstall arc --namespace "${self.triggers.namespace}" --ignore-not-found || true
     EOT
   }
 
@@ -581,31 +601,35 @@ resource "null_resource" "arc_controller" {
 
 resource "null_resource" "dc_runner" {
   triggers = {
-    chart_version = var.arc_chart_version
-    namespace     = kubernetes_namespace.arc_runners.metadata[0].name
-    values_sha    = sha256(local_sensitive_file.dc_runner_values.content)
+    chart_version   = var.arc_chart_version
+    namespace       = kubernetes_namespace.arc_runners.metadata[0].name
+    values_sha      = sha256(local_sensitive_file.dc_runner_values.content)
+    kubeconfig_path = local.helm_kubeconfig_path
   }
 
   provisioner "local-exec" {
-    command = <<-EOT
+    interpreter = ["/usr/bin/env", "bash", "-c"]
+    command     = <<-EOT
       set -euo pipefail
-      export KUBECONFIG=${local_sensitive_file.helm_kubeconfig.filename}
+      export KUBECONFIG="${local_sensitive_file.helm_kubeconfig.filename}"
       helm upgrade --install dc-runner \
         oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
-        --version ${var.arc_chart_version} \
-        --namespace ${kubernetes_namespace.arc_runners.metadata[0].name} \
-        --values ${local_sensitive_file.dc_runner_values.filename} \
+        --version "${var.arc_chart_version}" \
+        --namespace "${kubernetes_namespace.arc_runners.metadata[0].name}" \
+        --values "${local_sensitive_file.dc_runner_values.filename}" \
         --wait --timeout 10m
     EOT
   }
 
   provisioner "local-exec" {
-    when       = destroy
-    on_failure = continue
-    command    = <<-EOT
+    when        = destroy
+    on_failure  = continue
+    interpreter = ["/usr/bin/env", "bash", "-c"]
+    command     = <<-EOT
       set -eu
-      export KUBECONFIG=${self.triggers.namespace == "" ? "/dev/null" : "${path.module}/.helm-kubeconfig.yaml"}
-      helm uninstall dc-runner --namespace ${self.triggers.namespace} --ignore-not-found || true
+      if [[ -z "${self.triggers.namespace}" ]]; then exit 0; fi
+      export KUBECONFIG="${self.triggers.kubeconfig_path}"
+      helm uninstall dc-runner --namespace "${self.triggers.namespace}" --ignore-not-found || true
     EOT
   }
 
