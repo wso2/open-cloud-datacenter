@@ -24,6 +24,6 @@ output "backup_schedule_name" {
 }
 
 output "ip_addresses" {
-  value       = [for iface in harvester_virtualmachine.this.network_interface : iface.ip_address]
+  value       = compact([for iface in harvester_virtualmachine.this.network_interface : try(iface.ip_address, null)])
   description = "List of all IP addresses assigned to the VM interfaces."
 }
