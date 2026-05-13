@@ -13,6 +13,15 @@ locals {
   effective_user_data = var.user_data != null ? var.user_data : local._generated_user_data
 }
 
+# Optional Harvester Cloud-Init Secret to hold the cloud-init data.
+resource "harvester_cloudinit_secret" "this" {
+  count = local.effective_user_data != null ? 1 : 0
+
+  name      = "${var.name}-cloud-config"
+  namespace = var.namespace
+  user_data = local.effective_user_data
+}
+
 # Optional SSH key — created only when ssh_public_key is provided.
 resource "harvester_ssh_key" "this" {
   count = var.create_ssh_key ? 1 : 0
@@ -75,18 +84,18 @@ resource "harvester_virtualmachine" "this" {
   }
 
   dynamic "cloudinit" {
-    for_each = local.effective_user_data != null ? [1] : []
+    for_each = length(harvester_cloudinit_secret.this) > 0 ? [1] : []
     content {
-      user_data    = local.effective_user_data
-      network_data = var.network_data
+      user_data_secret_name = harvester_cloudinit_secret.this[0].name
+      network_data          = var.network_data
     }
   }
 
   lifecycle {
     ignore_changes = [
-      # cloud-init runs only on first boot; template changes after provisioning
-      # have no effect and should not trigger a VM restart.
-      cloudinit,
+      # Harvester/KubeVirt automatically injects a `cloudinitdisk` at runtime.
+      # Ignoring it to prevent drifts.
+      disk,
     ]
   }
 }

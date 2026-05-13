@@ -1,4 +1,10 @@
 #cloud-config
+packages:
+  - qemu-guest-agent
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+
 ssh_pwauth: True
 %{~ if password != null }
 chpasswd:

@@ -22,3 +22,8 @@ output "backup_schedule_name" {
   value       = var.backup_schedule != null ? kubernetes_manifest.scheduled_backup[0].manifest.metadata.name : null
   description = "Name of the scheduled VM backup, or null if no backup schedule was configured."
 }
+
+output "ip_addresses" {
+  value       = [for iface in harvester_virtualmachine.this.network_interface : iface.ip_address]
+  description = "List of all IP addresses assigned to the VM interfaces."
+}

@@ -85,6 +85,12 @@ resource "rancher2_namespace" "this" {
   # quota would block VM creation when Rancher auto-applies a zero-limit
   # ResourceQuota to namespaces created via the API.
 
+  # field.cattle.io/projectId label is required for the harvester UI to show neccessary quotas for the namespace
+  labels = {
+    "field.cattle.io/projectId" = split(":", rancher2_project.this.id)[1]
+    "platform.wso2.com/role"    = "project-default-namespace"
+  }
+
   # description may be set manually in Rancher UI; ignore to avoid removing it.
   lifecycle {
     ignore_changes = [description, labels["kubernetes.io/metadata.name"]]
@@ -101,13 +107,26 @@ resource "rancher2_namespace" "network" {
   project_id       = rancher2_project.this.id
   wait_for_cluster = false
 
+  # Set 0 limits so that no VMs can be provisioned in this namespace
+  resource_quota {
+    limit {
+      limits_cpu       = "0"
+      limits_memory    = "0Mi"
+      requests_storage = "0Gi"
+    }
+  }
+
+  # field.cattle.io/projectId label is required for the harvester UI to show neccessary quotas for the namespace
   labels = {
-    "platform.wso2.com/role" = "network-namespace"
+    "field.cattle.io/projectId" = split(":", rancher2_project.this.id)[1]
+    "platform.wso2.com/role"    = "network-namespace"
   }
 
   lifecycle {
     ignore_changes = [description, labels["kubernetes.io/metadata.name"]]
   }
+
+  depends_on = [rancher2_namespace.this]
 }
 
 # ── Harvester network (whenever vlan_id is set, with or without VyOS) ─────────
