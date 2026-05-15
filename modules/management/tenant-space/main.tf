@@ -88,7 +88,6 @@ resource "rancher2_namespace" "this" {
   # field.cattle.io/projectId label is required for the harvester UI to show neccessary quotas for the namespace
   labels = {
     "field.cattle.io/projectId" = split(":", rancher2_project.this.id)[1]
-    "platform.wso2.com/role"    = "project-default-namespace"
   }
 
   # description may be set manually in Rancher UI; ignore to avoid removing it.
