@@ -85,7 +85,7 @@ resource "rancher2_namespace" "this" {
   # quota would block VM creation when Rancher auto-applies a zero-limit
   # ResourceQuota to namespaces created via the API.
 
-  # field.cattle.io/projectId label is required for the harvester UI to show neccessary quotas for the namespace
+  # field.cattle.io/projectId label is required for the harvester UI to show necessary quotas for the namespace
   labels = {
     "field.cattle.io/projectId" = split(":", rancher2_project.this.id)[1]
   }
@@ -115,7 +115,7 @@ resource "rancher2_namespace" "network" {
     }
   }
 
-  # field.cattle.io/projectId label is required for the harvester UI to show neccessary quotas for the namespace
+  # field.cattle.io/projectId label is required for the harvester UI to show necessary quotas for the namespace
   labels = {
     "field.cattle.io/projectId" = split(":", rancher2_project.this.id)[1]
     "platform.wso2.com/role"    = "network-namespace"
