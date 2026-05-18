@@ -5,6 +5,10 @@ terraform {
       source  = "rancher/rancher2"
       version = "~> 13.1"
     }
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.6"
+    }
   }
 }
 
@@ -25,12 +29,24 @@ locals {
 
   effective_node_user_data = (var.user_data != null && var.user_data != "") ? var.user_data : local._generated_node_user_data
 
-  # Key order is fixed to match what Rancher stores in state. Using yamlencode
-  # sorts keys alphabetically (cloud-provider-config before cloud-provider-name)
-  # causing a perpetual no-op diff on brownfield clusters.
-  machine_selector_config = var.cloud_provider_config_secret != "" ? (
-    "cloud-provider-config: secret://fleet-default:${var.cloud_provider_config_secret}\ncloud-provider-name: harvester\nprotect-kernel-defaults: false\n"
-  ) : "cloud-provider-name: harvester\nprotect-kernel-defaults: false\n"
+  harvester_kubeconfig = (var.create_cloud_credential && length(data.http.harvester_cloud_provider_kubeconfig) > 0) ? (
+    data.http.harvester_cloud_provider_kubeconfig[0].status_code == 200 ? jsondecode(data.http.harvester_cloud_provider_kubeconfig[0].response_body) : null
+  ) : null
+
+  machine_selector_config = var.create_cloud_credential ? jsonencode({
+    "cloud-provider-config"   = local.harvester_kubeconfig
+    "cloud-provider-name"     = "harvester"
+    "protect-kernel-defaults" = false
+    }) : (
+    var.cloud_provider_config_secret != "" ? jsonencode({
+      "cloud-provider-config"   = "secret://fleet-default:${var.cloud_provider_config_secret}"
+      "cloud-provider-name"     = "harvester"
+      "protect-kernel-defaults" = false
+      }) : jsonencode({
+      "cloud-provider-name"     = "harvester"
+      "protect-kernel-defaults" = false
+    })
+  )
 
   # Map of registry configs that carry inline credentials (username set).
   # Keyed by hostname so each host gets one secret regardless of insecure/tls settings.
@@ -38,6 +54,15 @@ locals {
     for c in try(var.registries.configs, []) : c.hostname => c
     if c.username != null
   }
+
+  default_chart_values = (var.enable_harvester_cloud_provider && var.create_cloud_credential) ? (<<-EOF
+harvester-cloud-provider:
+  clusterName: ${var.cluster_name}
+  cloudConfigPath: /var/lib/rancher/rke2/etc/config-files/cloud-provider-config
+EOF
+  ) : ""
+
+  effective_chart_values = var.chart_values != "" ? var.chart_values : local.default_chart_values
 }
 
 # Registry auth secrets — created only for configs that supply username/password.
@@ -114,7 +139,7 @@ resource "rancher2_machine_config_v2" "pool" {
 resource "rancher2_cluster_v2" "this" {
   name                         = var.cluster_name
   kubernetes_version           = var.kubernetes_version
-  cloud_credential_secret_name = var.cloud_credential_id
+  cloud_credential_secret_name = var.create_cloud_credential ? rancher2_cloud_credential.harvester[0].id : var.cloud_credential_id
 
   # rke_config is applied on CREATE (when manage_rke_config = true) but is
   # intentionally ignored on subsequent applies for both managed and brownfield
@@ -179,7 +204,7 @@ resource "rancher2_cluster_v2" "this" {
         for_each = var.machine_pools
         content {
           name                         = machine_pools.value.name
-          cloud_credential_secret_name = var.cloud_credential_id
+          cloud_credential_secret_name = var.create_cloud_credential ? rancher2_cloud_credential.harvester[0].id : var.cloud_credential_id
           control_plane_role           = machine_pools.value.control_plane
           etcd_role                    = machine_pools.value.etcd
           worker_role                  = machine_pools.value.worker
@@ -247,6 +272,8 @@ resource "rancher2_cluster_v2" "this" {
         control_plane_concurrency = "1"
         worker_concurrency        = "1"
       }
+
+      chart_values = local.effective_chart_values != "" ? local.effective_chart_values : null
     }
   }
 }
@@ -273,5 +300,58 @@ removed {
   from = rancher2_machine_config_v2.harvester_nodes
   lifecycle {
     destroy = false
+  }
+}
+
+# ── Dynamic Harvester Cloud Credential Provisioning ───────────────────────────
+
+data "rancher2_cluster" "harvester" {
+  count = (var.create_cloud_credential && var.harvester_cluster_name != "") ? 1 : 0
+  name  = var.harvester_cluster_name
+}
+
+data "rancher2_cluster_v2" "harvester" {
+  count = var.create_cloud_credential ? 1 : 0
+  name  = var.harvester_cluster_name != "" ? data.rancher2_cluster.harvester[0].name : var.harvester_cluster_id
+}
+
+data "http" "harvester_cloud_provider_kubeconfig" {
+  count = var.create_cloud_credential ? 1 : 0
+
+  url      = "${var.rancher_api_url}/k8s/clusters/${data.rancher2_cluster_v2.harvester[0].cluster_v1_id}/v1/harvester/kubeconfig"
+  method   = "POST"
+  insecure = true
+
+  request_headers = {
+    "Content-Type"  = "application/json"
+    "Authorization" = "Basic ${base64encode(var.rancher_api_token)}"
+  }
+
+  request_body = jsonencode({
+    clusterRoleName    = "harvesterhci.io:cloudprovider"
+    namespace          = coalesce(var.harvester_vm_namespace, var.cluster_name)
+    serviceAccountName = coalesce(var.harvester_service_account_name, var.harvester_cluster_name, data.rancher2_cluster_v2.harvester[0].name)
+  })
+
+  lifecycle {
+    postcondition {
+      condition     = self.status_code == 200
+      error_message = "Failed to retrieve Harvester cloud provider kubeconfig from Rancher. Status code: ${self.status_code}. Response: ${self.response_body}"
+    }
+  }
+}
+
+resource "rancher2_cloud_credential" "harvester" {
+  count = var.create_cloud_credential ? 1 : 0
+  name  = "harvester-${var.cluster_name}-credential"
+
+  harvester_credential_config {
+    cluster_id         = data.rancher2_cluster_v2.harvester[0].cluster_v1_id
+    cluster_type       = "imported"
+    kubeconfig_content = data.rancher2_cluster_v2.harvester[0].kube_config
+  }
+
+  lifecycle {
+    ignore_changes = [harvester_credential_config[0].kubeconfig_content]
   }
 }

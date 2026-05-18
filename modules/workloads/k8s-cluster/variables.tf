@@ -12,6 +12,7 @@ variable "cloud_credential_id" {
   type        = string
   sensitive   = true
   description = "Harvester cloud credential secret name (cattle-global-data:cc-xxxx)"
+  default     = ""
 }
 
 variable "cni" {
@@ -221,4 +222,65 @@ variable "etcd_s3" {
     )
     error_message = "When etcd_s3 is set, bucket/region/cloud_credential_id must be non-empty, snapshot_retention must be a positive integer, and snapshot_schedule must be non-empty."
   }
+}
+
+# ── Dynamic Cloud Credential variables ───────────────────────────────────────
+variable "create_cloud_credential" {
+  type        = bool
+  description = "When true, dynamically provisions rancher2_cloud_credential.harvester and fetches cloud provider config using Rancher API rather than requiring predefined inputs."
+  default     = false
+
+  validation {
+    condition = (
+      !var.create_cloud_credential || (
+        trimspace(var.rancher_api_url) != "" &&
+        trimspace(var.rancher_api_token) != "" &&
+        (trimspace(var.harvester_cluster_id) != "" || trimspace(var.harvester_cluster_name) != "")
+      )
+    )
+    error_message = "When create_cloud_credential is true, rancher_api_url and rancher_api_token must be non-empty, and at least one of harvester_cluster_id or harvester_cluster_name must be non-empty."
+  }
+}
+
+variable "harvester_cluster_id" {
+  type        = string
+  description = "Upstream host Harvester cluster ID (optional when create_cloud_credential = true, preferred over harvester_cluster_name)"
+  default     = ""
+}
+
+variable "harvester_cluster_name" {
+  type        = string
+  description = "Upstream host Harvester cluster name (required when create_cloud_credential = true)"
+  default     = ""
+}
+
+variable "rancher_api_url" {
+  type        = string
+  description = "Rancher API Server URL (required when create_cloud_credential = true)"
+  default     = ""
+}
+
+variable "rancher_api_token" {
+  type        = string
+  sensitive   = true
+  description = "Rancher API bearer token key (required when create_cloud_credential = true)"
+  default     = ""
+}
+
+variable "harvester_vm_namespace" {
+  type        = string
+  description = "Harvester host cluster VM namespace where the guest VMs reside (optional when create_cloud_credential = true, defaults to guest cluster name)"
+  default     = ""
+}
+
+variable "harvester_service_account_name" {
+  type        = string
+  description = "ServiceAccount name to be created/used in Harvester for cloud provider (optional when create_cloud_credential = true, defaults to Harvester cluster name)"
+  default     = ""
+}
+
+variable "chart_values" {
+  type        = string
+  description = "Custom Helm chart values to pass to RKE2"
+  default     = ""
 }
