@@ -37,15 +37,75 @@ resource "harvester_network" "mgmt" {
 }
 
 # ── LoadBalancer IPPool ───────────────────────────────────────────────────────
+# Single ingress VIP for the dc-api ingress. The API VIP is NOT in this pool —
+# kube-vip claims it directly via ARP on the node side.
 resource "harvester_ippool" "lb" {
   name = "${var.cluster_name}-lb"
 
   range {
-    start   = var.lb_range_start
-    end     = var.lb_range_end
+    start   = var.ingress_vip
+    end     = var.ingress_vip
     subnet  = var.lb_subnet
     gateway = var.lb_gateway
   }
+}
+
+# ── kube-vip static-pod manifest ──────────────────────────────────────────────
+# Rendered once at the module level; the same manifest is shipped to every
+# server node via cloud-init write_files. Each kube-vip instance uses lease-
+# based leader election so only one node ARP-announces the API VIP at a time.
+locals {
+  kube_vip_manifest = templatefile("${path.module}/templates/kube-vip-rke2.yaml.tftpl", {
+    kube_vip_image = var.kube_vip_image
+    vip_interface  = var.node_interface_name
+    api_vip        = var.api_vip
+  })
+
+  # write_files YAML scalar block needs every line of the manifest indented by
+  # 6 spaces (4 for the list item's content + 2 for the parent key). Pre-indent
+  # once here so the template just interpolates the block.
+  kube_vip_manifest_indented = join("\n", [
+    for line in split("\n", local.kube_vip_manifest) : "      ${line}"
+  ])
+}
+
+# ── Per-node cloud-init ───────────────────────────────────────────────────────
+# One rendered cloud-init per node, with the node's static IP baked into the
+# bootcmd netplan block. Indexed so node_user_data[i] maps to node{i+1}.
+locals {
+  node_user_data = [
+    for idx, ip in var.node_ips : templatefile("${path.module}/templates/node-cloud-init.yaml.tftpl", {
+      interface_name             = var.node_interface_name
+      node_ip                    = ip
+      node_cidr_suffix           = var.node_mgmt_cidr_suffix
+      default_gateway            = var.node_default_gateway
+      dns_servers_json           = jsonencode(var.node_dns_servers)
+      ssh_user                   = var.ssh_user
+      node_password              = var.node_password
+      ntp_server                 = var.ntp_server
+      ssh_authorized_keys_json   = jsonencode(var.ssh_authorized_keys)
+      kube_vip_manifest_indented = local.kube_vip_manifest_indented
+    })
+  ]
+
+  # One pool per node, each with quantity=1. Pool naming is deterministic
+  # (node1/node2/...) so per-node operations don't shuffle between applies.
+  machine_pools = [
+    for idx, ip in var.node_ips : {
+      name          = "node${idx + 1}"
+      vm_namespace  = var.project_name
+      quantity      = 1
+      cpu_count     = var.node_cpu_count
+      memory_size   = var.node_memory_size
+      disk_size     = var.node_disk_size
+      image_name    = var.node_image_name
+      networks      = ["${var.project_name}/${harvester_network.mgmt.name}"]
+      control_plane = true
+      etcd          = true
+      worker        = true
+      user_data     = local.node_user_data[idx]
+    }
+  ]
 }
 
 # ── RKE2 cluster ─────────────────────────────────────────────────────────────
@@ -53,8 +113,13 @@ resource "harvester_ippool" "lb" {
 # namespace-credential-provisioner creates automatically once the VM namespace
 # is assigned to a project (via module.project above).
 #
-# The default machine_global_config tolerates the multi-hundred-ms etcd fsync
-# latencies seen on Harvester/Longhorn-backed VM disks. Two adjustments:
+# Default machine_global_config tolerates the multi-hundred-ms etcd fsync
+# latencies seen on Harvester/Longhorn-backed VM disks. Three adjustments
+# vs. RKE2 defaults:
+#
+#   * tls-san: includes the API VIP (and any extra hostnames the operator
+#     passes) so the apiserver cert is valid for client connections through
+#     kube-vip's announced VIP.
 #
 #   * kube-apiserver: extend `etcd-healthcheck-timeout` from 2s → 10s so the
 #     readyz etcd probe absorbs WAL fsync spikes instead of marking the
@@ -68,10 +133,16 @@ resource "harvester_ippool" "lb" {
 # Note: the apiserver flag is `etcd-healthcheck-timeout` (one word).
 # `etcd-health-check-timeout` is a typo and the binary rejects it on startup.
 locals {
+  tls_san_entries = distinct(concat([var.api_vip], var.tls_san_extra))
+
   machine_global_config = var.machine_global_config != null ? var.machine_global_config : <<-YAML
     cni: cilium
     disable-kube-proxy: false
     etcd-expose-metrics: false
+    tls-san:
+    %{~for san in local.tls_san_entries~}
+      - ${san}
+    %{~endfor~}
     kube-apiserver-arg:
       - etcd-healthcheck-timeout=10s
     kube-controller-manager-arg:
@@ -97,11 +168,11 @@ module "cluster" {
 
   machine_global_config = local.machine_global_config
 
-  machine_pools = [
-    for pool in var.machine_pools : merge(pool, { vm_namespace = var.project_name })
-  ]
+  machine_pools = local.machine_pools
 
-  user_data         = var.user_data
+  # No module-level user_data — every pool carries its own (each baked with
+  # its node's static IP).
+  user_data         = ""
   manage_rke_config = var.manage_rke_config
 
   depends_on = [

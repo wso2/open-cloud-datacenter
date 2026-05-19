@@ -115,7 +115,11 @@ resource "rancher2_machine_config_v2" "pool" {
     memory_size          = each.value.memory_size
     reserved_memory_size = "-1"
     ssh_user             = var.ssh_user
-    user_data            = local.effective_node_user_data
+    user_data = (
+      try(each.value.user_data, null) != null && try(each.value.user_data, "") != ""
+      ? each.value.user_data
+      : local.effective_node_user_data
+    )
 
     disk_info = jsonencode({
       disks = [{

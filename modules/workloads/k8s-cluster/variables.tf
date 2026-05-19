@@ -108,6 +108,11 @@ variable "machine_pools" {
       value  = string
       effect = string # NoSchedule | PreferNoSchedule | NoExecute
     })), [])
+    # Optional per-pool cloud-init override. When set and non-empty, takes
+    # precedence over the module-level user_data for VMs in this pool only.
+    # Required for HA control-plane setups where each node needs its own
+    # static IP pinned at boot time.
+    user_data = optional(string)
   }))
   # Defaults to empty for brownfield callers (manage_rke_config = false).
   # A precondition on the cluster resource enforces at least one pool when
