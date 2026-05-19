@@ -1,7 +1,11 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: kube-vip
+  # Static pod, scheduled by kubelet from /var/lib/rancher/rke2/server/manifests/.
+  # Distinct from the kube-vip DaemonSet that harvester-cloud-provider installs
+  # for Service-type LoadBalancers (that one runs with cp_enable=false). This
+  # pod is dedicated to announcing the kube-apiserver VIP.
+  name: kube-vip-apiserver
   namespace: kube-system
 spec:
   containers:
