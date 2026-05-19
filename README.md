@@ -7,6 +7,7 @@ The Open Cloud Data Center initiative is focused on providing a standardized, sc
 The Open Cloud Data Center simplifies the deployment and management of cloud infrastructure through a modular, open-source architecture.
 
 **Why choose Open Cloud Data Center?**
+
 - **Sovereignty**: Complete control over your data and infrastructure.
 - **Portability**: Move workloads across cloud providers or on-premises hardware.
 - **Cost-Efficiency**: Optimize resource usage and avoid vendor lock-in.
