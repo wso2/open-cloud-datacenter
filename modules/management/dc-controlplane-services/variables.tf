@@ -79,6 +79,18 @@ variable "cloudui_service_port" {
   default     = 80
 }
 
+variable "cloudui_image" {
+  type        = string
+  description = "Container image for the cloud-ui Deployment (e.g. registry/cloud-ui:sha). When empty, the Deployment + Service are skipped entirely — useful for environments that don't ship a cloud-ui. CI is expected to roll the image forward via `kubectl set image`; the Deployment's lifecycle ignores image changes so TF and CI don't fight."
+  default     = ""
+}
+
+variable "cloudui_replicas" {
+  type        = number
+  description = "Replica count for the cloud-ui Deployment."
+  default     = 1
+}
+
 variable "tenant_group_prefix" {
   type        = string
   description = "Asgardeo group prefix that identifies tenants (e.g. 'dc-tenant-' → group 'dc-tenant-teamalpha' maps to tenant 'teamalpha')."
