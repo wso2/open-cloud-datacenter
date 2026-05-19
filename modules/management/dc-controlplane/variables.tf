@@ -96,7 +96,20 @@ variable "node_disk_size" {
 
 variable "node_image_name" {
   type        = string
-  description = "Harvester VM image reference ('namespace/image-id')."
+  description = "Harvester VM image reference ('namespace/image-id') to clone the VM root disks from. Required when create_local_storage_class is false (operator provides a pre-existing image). When create_local_storage_class is true the module creates its OWN image in the project namespace (with the local-fast SC baked in) and this variable is ignored — pass an empty string."
+  default     = ""
+}
+
+variable "node_image_url" {
+  type        = string
+  description = "Download URL for the cloud image the module bakes into its own VirtualMachineImage when create_local_storage_class is true. Defaults to the upstream Ubuntu 22.04 jammy cloud image. Ignored when create_local_storage_class is false."
+  default     = "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+}
+
+variable "node_image_display_name" {
+  type        = string
+  description = "Friendly display name for the VirtualMachineImage when the module creates one. Ignored when create_local_storage_class is false."
+  default     = "DC-API Control-Plane Ubuntu 22.04"
 }
 
 # ── Cloud-init knobs ─────────────────────────────────────────────────────────

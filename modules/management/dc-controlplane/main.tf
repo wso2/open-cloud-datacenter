@@ -31,6 +31,11 @@ resource "harvester_network" "mgmt" {
 
   lifecycle {
     ignore_changes = [labels]
+
+    precondition {
+      condition     = var.create_local_storage_class || var.node_image_name != ""
+      error_message = "node_image_name is required when create_local_storage_class is false. Pass a pre-existing image reference (typically the 00-bootstrap layer's vm_image_id output)."
+    }
   }
 
   depends_on = [module.project]
@@ -82,6 +87,43 @@ locals {
     var.vm_storage_class_override != "" ? var.vm_storage_class_override :
     var.create_local_storage_class ? var.local_storage_class_name :
     ""
+  )
+}
+
+# ── VirtualMachineImage on the local SC ──────────────────────────────────────
+# Harvester's VM provisioner ignores the storageClassName field passed via
+# HarvesterConfig.disk_info — it clones the boot disk from the source image's
+# PVC and the cloned PVC inherits the SOURCE image's StorageClass, not the
+# requested one. To actually land VM root disks on dcapi-controlplane-local
+# we have to give the source image itself that SC. So when the operator opts
+# into the local SC, the module also creates its own VirtualMachineImage in
+# the project namespace, downloaded from the same upstream URL, but with
+# storageClassName pinned. VMs cloned from this image inherit the local SC.
+resource "harvester_image" "dcapi_node" {
+  count = var.create_local_storage_class ? 1 : 0
+
+  name         = "dcapi-controlplane-ubuntu"
+  namespace    = var.project_name
+  display_name = var.node_image_display_name
+  source_type  = "download"
+  url          = var.node_image_url
+
+  storage_class_name = var.local_storage_class_name
+
+  depends_on = [
+    module.project,
+    kubernetes_storage_class_v1.vm_local,
+  ]
+}
+
+# Resolved image reference passed to each machine_pool. When the module
+# created its own image, use that. Otherwise the operator must supply
+# node_image_name themselves (typically from a bootstrap layer's output).
+locals {
+  effective_image_name = (
+    var.create_local_storage_class && length(harvester_image.dcapi_node) > 0
+    ? "${var.project_name}/${harvester_image.dcapi_node[0].name}"
+    : var.node_image_name
   )
 }
 
@@ -147,7 +189,7 @@ locals {
       cpu_count          = var.node_cpu_count
       memory_size        = var.node_memory_size
       disk_size          = var.node_disk_size
-      image_name         = var.node_image_name
+      image_name         = local.effective_image_name
       networks           = ["${var.project_name}/${harvester_network.mgmt.name}"]
       control_plane      = true
       etcd               = true
