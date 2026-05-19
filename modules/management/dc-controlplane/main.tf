@@ -60,11 +60,17 @@ resource "kubernetes_storage_class_v1" "vm_local" {
   volume_binding_mode    = "Immediate"
   allow_volume_expansion = true
 
+  # dataLocality: Harvester's validator webhook rejects "strict-local"
+  # because it would forbid VM live-migration of any workload using this
+  # SC. "best-effort" tells Longhorn to TRY to co-locate the replica with
+  # the consumer, but allow migration when needed. Single-replica + best-
+  # effort gets us the no-network-replication fsync benefit (the actual
+  # bottleneck) without fighting Harvester's migration model.
   parameters = {
     numberOfReplicas    = "1"
-    dataLocality        = "strict-local"
+    dataLocality        = "best-effort"
     fsType              = "ext4"
-    migratable          = "false"
+    migratable          = "true"
     staleReplicaTimeout = "30"
   }
 }
