@@ -122,11 +122,19 @@ resource "rancher2_machine_config_v2" "pool" {
     )
 
     disk_info = jsonencode({
-      disks = [{
-        imageName = each.value.image_name
-        bootOrder = 1
-        size      = each.value.disk_size
-      }]
+      disks = [merge(
+        {
+          imageName = each.value.image_name
+          bootOrder = 1
+          size      = each.value.disk_size
+        },
+        # storageClassName is only emitted when the pool sets it. Omitting
+        # the key lets Harvester fall back to its default StorageClass —
+        # the original module behaviour.
+        try(each.value.storage_class_name, null) != null && try(each.value.storage_class_name, "") != "" ? {
+          storageClassName = each.value.storage_class_name
+        } : {}
+      )]
     })
 
     network_info = jsonencode({

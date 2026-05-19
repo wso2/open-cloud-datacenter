@@ -176,3 +176,37 @@ variable "harvester_kubeconfig_path" {
   type        = string
   description = "Path to the Harvester kubeconfig file. Used to run the kubectl patch that sets the IPPool selector.scope after cluster creation."
 }
+
+# ── VM root-disk storage ─────────────────────────────────────────────────────
+# By default, this module creates a single-replica, strict-local Longhorn
+# StorageClass on the Harvester host cluster and points the control-plane VM
+# root disks at it. The fsync-latency drop versus the default 2-replica SC is
+# 5-10× — necessary for etcd quorum to bootstrap and stay healthy on slow or
+# overloaded host storage. The trade is that losing the Harvester host where
+# a VM lives loses that VM's root disk; etcd quorum at the application layer
+# is what compensates.
+#
+# For environments with fast underlying storage (good NVMe + spare IOPS),
+# set create_local_storage_class = false to fall back to the host cluster's
+# default StorageClass and recover full per-disk replication.
+#
+# In-cluster PVCs (e.g. dc-postgres) are unaffected — they continue to use
+# the downstream cluster's default StorageClass, which the Harvester CSI
+# driver translates to the host's default (replicated) SC.
+variable "create_local_storage_class" {
+  type        = bool
+  description = "When true, create a single-replica strict-local Longhorn StorageClass on the Harvester host cluster for the control-plane VM root disks. Recommended for dev / slow-disk environments where etcd fsync latency is the bottleneck. Set false in production when host storage has adequate IOPS for the default 2-replica SC."
+  default     = true
+}
+
+variable "local_storage_class_name" {
+  type        = string
+  description = "Name of the local-fast StorageClass created on the Harvester host cluster when create_local_storage_class = true."
+  default     = "dcapi-controlplane-local"
+}
+
+variable "vm_storage_class_override" {
+  type        = string
+  description = "Explicit StorageClass name for the control-plane VM root disks. Takes precedence over create_local_storage_class — use this to point at a pre-existing custom SC on the Harvester cluster. Empty string defers to the create_local_storage_class logic."
+  default     = ""
+}

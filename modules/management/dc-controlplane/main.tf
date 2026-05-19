@@ -36,6 +36,49 @@ resource "harvester_network" "mgmt" {
   depends_on = [module.project]
 }
 
+# ── VM root-disk StorageClass (Longhorn, 1 replica, strict-local) ────────────
+# Provisioned on the Harvester HOST cluster — that's where Longhorn actually
+# runs. The downstream control-plane VMs reference this SC by name in their
+# HarvesterConfig disk_info; Harvester then provisions each VM's root disk
+# as a single-replica volume pinned to the same host as the VM.
+#
+# Trade: losing the Harvester node hosting a VM loses that VM's root disk
+# (no replicated copy elsewhere). etcd quorum at the application layer is
+# what makes this acceptable for control-plane clusters — losing 1 of 3
+# VMs is survivable; 2 of 3 is not. With only 2 Harvester hosts available,
+# at-rest layout will be unavoidably 2 VMs on one host, 1 on the other.
+resource "kubernetes_storage_class_v1" "vm_local" {
+  count    = var.create_local_storage_class ? 1 : 0
+  provider = kubernetes.harvester
+
+  metadata {
+    name = var.local_storage_class_name
+  }
+
+  storage_provisioner    = "driver.longhorn.io"
+  reclaim_policy         = "Delete"
+  volume_binding_mode    = "Immediate"
+  allow_volume_expansion = true
+
+  parameters = {
+    numberOfReplicas    = "1"
+    dataLocality        = "strict-local"
+    fsType              = "ext4"
+    migratable          = "false"
+    staleReplicaTimeout = "30"
+  }
+}
+
+# Resolved SC name for the VM root disks. Empty string = let Harvester use
+# the host cluster's default StorageClass (the original module behaviour).
+locals {
+  vm_storage_class_name = (
+    var.vm_storage_class_override != "" ? var.vm_storage_class_override :
+    var.create_local_storage_class ? var.local_storage_class_name :
+    ""
+  )
+}
+
 # ── LoadBalancer IPPool ───────────────────────────────────────────────────────
 # Single ingress VIP for the dc-api ingress. The API VIP is NOT in this pool —
 # kube-vip claims it directly via ARP on the node side.
@@ -92,18 +135,19 @@ locals {
   # (node1/node2/...) so per-node operations don't shuffle between applies.
   machine_pools = [
     for idx, ip in var.node_ips : {
-      name          = "node${idx + 1}"
-      vm_namespace  = var.project_name
-      quantity      = 1
-      cpu_count     = var.node_cpu_count
-      memory_size   = var.node_memory_size
-      disk_size     = var.node_disk_size
-      image_name    = var.node_image_name
-      networks      = ["${var.project_name}/${harvester_network.mgmt.name}"]
-      control_plane = true
-      etcd          = true
-      worker        = true
-      user_data     = local.node_user_data[idx]
+      name               = "node${idx + 1}"
+      vm_namespace       = var.project_name
+      quantity           = 1
+      cpu_count          = var.node_cpu_count
+      memory_size        = var.node_memory_size
+      disk_size          = var.node_disk_size
+      image_name         = var.node_image_name
+      networks           = ["${var.project_name}/${harvester_network.mgmt.name}"]
+      control_plane      = true
+      etcd               = true
+      worker             = true
+      user_data          = local.node_user_data[idx]
+      storage_class_name = local.vm_storage_class_name
     }
   ]
 }

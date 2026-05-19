@@ -113,6 +113,15 @@ variable "machine_pools" {
     # Required for HA control-plane setups where each node needs its own
     # static IP pinned at boot time.
     user_data = optional(string)
+    # Optional Kubernetes StorageClass for the VM root disk. When unset or
+    # empty, Harvester uses the host cluster's default StorageClass (typically
+    # harvester-longhorn-2r). Set this to an SC tuned for low fsync latency
+    # (numberOfReplicas=1, dataLocality=strict-local) for clusters whose
+    # bootstrap and steady-state are bottlenecked on replicated-write
+    # latency, e.g. control-plane clusters that run etcd on Longhorn-backed
+    # disks. The StorageClass must already exist on the Harvester host
+    # cluster — this module does NOT create it.
+    storage_class_name = optional(string)
   }))
   # Defaults to empty for brownfield callers (manage_rke_config = false).
   # A precondition on the cluster resource enforces at least one pool when
