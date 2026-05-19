@@ -57,8 +57,26 @@ variable "dcapi_hostname" {
 
 variable "ingress_additional_dns_names" {
   type        = list(string)
-  description = "Extra DNS names to add to the self-signed cert's SAN list (e.g. environment wildcards like *.dev.example.com). Empty by default — the cert only covers dcapi_hostname."
+  description = "Extra DNS names to add to the self-signed cert's SAN list (e.g. environment wildcards like *.dev.example.com). Empty by default — the cert only covers dcapi_hostname. Setting a wildcard here is what lets a single cert cover both dc-api and cloud-ui Ingresses without two browser warnings."
   default     = []
+}
+
+variable "cloudui_hostname" {
+  type        = string
+  description = "Public hostname for the cloud-ui ingress. When non-empty, this module creates an Ingress (and re-uses the dc-api self-signed cert via SAN) that routes the hostname to a Service named 'cloud-ui' in the dc-system namespace. The cloud-ui Deployment + Service themselves are deployed separately (out-of-band CI workflow); leaving the Ingress here means a cluster rebuild restores routing as soon as the workflow drops the Service back in. Set to empty string to opt out."
+  default     = ""
+}
+
+variable "cloudui_service_name" {
+  type        = string
+  description = "Backend Service name the cloud-ui Ingress points at. Defaults to 'cloud-ui' — matching the cloud-ui workflow's Service manifest. Override only if the consumer renames the Service."
+  default     = "cloud-ui"
+}
+
+variable "cloudui_service_port" {
+  type        = number
+  description = "Backend Service port the cloud-ui Ingress points at."
+  default     = 80
 }
 
 variable "tenant_group_prefix" {
