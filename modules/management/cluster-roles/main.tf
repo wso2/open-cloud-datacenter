@@ -340,6 +340,162 @@ resource "rancher2_role_template" "cluster_contributor" {
   }
 }
 
+# ── Restricted project membership for Harvester VM tenants ───────────────────
+# Purpose: replace the built-in "project-member" role for tenants who provision
+# Harvester VMs. The built-in role inherits from the Kubernetes "edit"
+# ClusterRole which grants wildcard write access to all resources — including
+# harvesterhci.io/virtualmachineimages. Since Kubernetes RBAC is purely
+# additive (no deny verbs), there is no way to subtract image-write from an
+# inherited role. This custom role therefore does NOT inherit from "project-member"
+# or "edit"; instead it enumerates exactly the rules that Harvester VM tenants
+# need, with virtualmachineimages explicitly restricted to get/list/watch.
+#
+# Provides:
+#   - All explicit project-member rules (governance, UI, catalog, storage visibility)
+#   - Full Harvester VM lifecycle (create/start/stop/console/delete)
+#   - DataVolume (VM disk) management
+#   - SSH keypair management within the project
+#   - Cloud-init secrets and ConfigMaps
+#   - Read-only network attachment definitions (DC ops manages VLANs)
+#   - Read-only VM images (platform team manages the image catalogue)
+#
+# Does NOT provide:
+#   - virtualmachineimages create/update/delete/patch
+#   - Kubernetes pod/deployment/service creation (pure VM tenant use case)
+#   - Project membership management (project-member cannot manage its own members)
+resource "rancher2_role_template" "project_member_restricted" {
+  name        = "project-member-restricted"
+  description = "Project member role for Harvester VM tenants. Mirrors the built-in project-member capabilities with full VM lifecycle management added. VM image access is hard-restricted to read-only — tenants use images provisioned by the platform team and cannot create, upload, or delete them."
+  context     = "project"
+
+  # ── project-member explicit rules (excluding the 'edit' inheritance) ────────
+
+  rules {
+    api_groups = ["ui.cattle.io"]
+    resources  = ["navlinks"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["management.cattle.io"]
+    resources  = ["projectroletemplatebindings"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = [""]
+    resources  = ["namespaces"]
+    verbs      = ["create"]
+  }
+
+  rules {
+    api_groups = [""]
+    resources  = ["persistentvolumes"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["storage.k8s.io"]
+    resources  = ["storageclasses"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["apiregistration.k8s.io"]
+    resources  = ["apiservices"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = [""]
+    resources  = ["persistentvolumeclaims"]
+    verbs      = ["*"]
+  }
+
+  rules {
+    api_groups = ["metrics.k8s.io"]
+    resources  = ["pods"]
+    verbs      = ["*"]
+  }
+
+  rules {
+    api_groups = ["management.cattle.io"]
+    resources  = ["clusterevents"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["catalog.cattle.io"]
+    resources  = ["clusterrepos", "operations", "releases", "apps"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups     = ["management.cattle.io"]
+    resources      = ["clusters"]
+    resource_names = ["local"]
+    verbs          = ["get"]
+  }
+
+  # ── Harvester VM lifecycle ─────────────────────────────────────────────────
+
+  rules {
+    api_groups = ["kubevirt.io"]
+    resources  = ["virtualmachines", "virtualmachineinstances", "virtualmachineinstancepresets", "virtualmachineinstancereplicasets"]
+    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
+  }
+
+  rules {
+    api_groups = ["subresources.kubevirt.io"]
+    resources  = ["virtualmachines/start", "virtualmachines/stop", "virtualmachines/restart", "virtualmachines/migrate", "virtualmachineinstances/vnc", "virtualmachineinstances/console", "virtualmachineinstances/portforward", "virtualmachineinstances/pause", "virtualmachineinstances/unpause"]
+    verbs      = ["get", "update"]
+  }
+
+  rules {
+    api_groups = ["subresources.kubevirt.io"]
+    resources  = ["virtualmachineinstances/metrics"]
+    verbs      = ["get"]
+  }
+
+  rules {
+    api_groups = ["cdi.kubevirt.io"]
+    resources  = ["datavolumes"]
+    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
+  }
+
+  # VM images — READ ONLY. Tenants select from the platform-managed catalogue;
+  # create/update/delete/patch are intentionally absent.
+  rules {
+    api_groups = ["harvesterhci.io"]
+    resources  = ["virtualmachineimages"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["harvesterhci.io"]
+    resources  = ["keypairs"]
+    verbs      = ["get", "list", "watch", "create", "delete"]
+  }
+
+  rules {
+    api_groups = ["k8s.cni.cncf.io"]
+    resources  = ["network-attachment-definitions"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = [""]
+    resources  = ["secrets", "configmaps"]
+    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
+  }
+
+  rules {
+    api_groups = [""]
+    resources  = ["services/proxy"]
+    verbs      = ["get"]
+  }
+}
+
 # Grants read-only visibility into VM status and metrics for the Harvester
 # dashboard. Intentionally excludes all mutating verbs (update, patch, delete)
 # and subresources that control VM power state (start, stop, restart, migrate).

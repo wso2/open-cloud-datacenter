@@ -35,6 +35,19 @@ write_files:
       nf_conntrack
     owner: root:root
     permissions: '0644'
+%{~ if enable_storage_netplan }
+  - path: /etc/netplan/60-storage-network.yaml
+    owner: root:root
+    permissions: '0600'
+    content: |
+      network:
+        version: 2
+        ethernets:
+          enp2s0:
+            dhcp4: true
+            dhcp4-overrides:
+              use-routes: false
+%{~ endif }
 runcmd:
   - - systemctl
     - enable
@@ -49,6 +62,10 @@ runcmd:
   - systemctl restart systemd-timesyncd
   - timedatectl set-ntp false
   - timedatectl set-ntp true
+%{~ if enable_storage_netplan }
+  - netplan generate
+  - netplan apply
+%{~ endif }
 %{~ if length(ssh_authorized_keys) > 0 }
 ssh_authorized_keys:
 %{~ for key in ssh_authorized_keys }

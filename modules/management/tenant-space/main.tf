@@ -4,9 +4,9 @@ locals {
   namespace_storage_limit = var.namespace_storage_limit != null ? var.namespace_storage_limit : var.storage_limit
   namespaces              = var.namespaces != null ? (var.create_default_namespace ? distinct(concat([var.project_name], var.namespaces)) : var.namespaces) : (var.create_default_namespace ? [var.project_name] : [])
 
-  # create_net_ns is true when explicitly requested OR when vlan_id has entries.
-  # Keeping backward compat: callers already using vlan_id still get the namespace.
-  create_net_ns     = var.create_network_namespace || (var.vlan_id != null && length(var.vlan_id) > 0)
+  # create_net_ns is true when explicitly requested, when any VLAN variable is set
+  # (all NADs live in the network namespace regardless of traffic type).
+  create_net_ns     = var.create_network_namespace || (var.vlan_id != null && length(var.vlan_id) > 0) || var.vm_network_vlan_id != null || var.storage_network_vlan_id != null
   network_namespace = local.create_net_ns ? coalesce(var.network_namespace_name, "${var.project_name}-net") : null
 
   # VyOS path: compute a deterministic /23 subnet from 10.0.0.0/8 using the VLAN
@@ -85,7 +85,8 @@ resource "rancher2_namespace" "this" {
   # quota would block VM creation when Rancher auto-applies a zero-limit
   # ResourceQuota to namespaces created via the API.
 
-  # field.cattle.io/projectId label is required for the harvester UI to show necessary quotas for the namespace
+  # field.cattle.io/projectId is required for the Harvester UI to show
+  # resource quota information correctly for namespaces in this project.
   labels = {
     "field.cattle.io/projectId" = split(":", rancher2_project.this.id)[1]
   }
@@ -106,7 +107,7 @@ resource "rancher2_namespace" "network" {
   project_id       = rancher2_project.this.id
   wait_for_cluster = false
 
-  # Set 0 limits so that no VMs can be provisioned in this namespace
+  # Zero-limit quota prevents any VMs from being created in the network namespace.
   resource_quota {
     limit {
       limits_cpu       = "0"
@@ -115,7 +116,6 @@ resource "rancher2_namespace" "network" {
     }
   }
 
-  # field.cattle.io/projectId label is required for the harvester UI to show necessary quotas for the namespace
   labels = {
     "field.cattle.io/projectId" = split(":", rancher2_project.this.id)[1]
     "platform.wso2.com/role"    = "network-namespace"
@@ -150,6 +150,40 @@ resource "harvester_network" "tenant" {
   # When VyOS is configured, wait for the vif/DHCP to be provisioned before
   # the network is visible to tenant VMs. for_each with empty set is a no-op.
   depends_on = [rancher2_namespace.network, module.vyos_tenant]
+}
+
+# ── VM network (simple path: vm_vlan_id) ──────────────────────────────────────
+# Created when vm_vlan_id is set. Attached to cluster_network_name (default 'vm-network').
+# Named <project_name>-vlan<id> by default. Always auto-routed.
+# For multi-VLAN or VyOS scenarios use the legacy vlan_id list below instead.
+
+resource "harvester_network" "vm" {
+  count                = var.vm_network_vlan_id != null ? 1 : 0
+  name                 = coalesce(var.vm_network_name, "${var.project_name}-vlan${var.vm_network_vlan_id}")
+  namespace            = rancher2_namespace.network[0].name
+  vlan_id              = var.vm_network_vlan_id
+  cluster_network_name = var.cluster_network_name
+  route_mode           = "auto"
+
+  depends_on = [rancher2_namespace.network]
+}
+
+# ── Storage network (only when storage_vlan_id is set) ────────────────────────
+# Attached to storage_cluster_network_name (default 'storage-network'), which maps
+# to the dedicated storage NIC (e.g. enp2s0) on the Harvester nodes.
+# Always auto-routed — the upstream switch advertises the storage gateway.
+# Route and DHCP settings for this interface are handled by VM cloud-init
+# (use-routes: false on enp2s0 ensures no default route is stolen from the VM NIC).
+
+resource "harvester_network" "storage" {
+  count                = var.storage_network_vlan_id != null ? 1 : 0
+  name                 = coalesce(var.storage_network_name, "${var.project_name}-strg-vlan${var.storage_network_vlan_id}")
+  namespace            = rancher2_namespace.network[0].name
+  vlan_id              = var.storage_network_vlan_id
+  cluster_network_name = var.storage_cluster_network_name
+  route_mode           = "auto"
+
+  depends_on = [rancher2_namespace.network]
 }
 
 # ── VyOS configuration (only when vyos_endpoint is also set) ──────────────────
@@ -221,4 +255,48 @@ resource "rancher2_project_role_template_binding" "this" {
   project_id         = rancher2_project.this.id
   role_template_id   = each.value.role_template_id
   group_principal_id = each.value.group_principal_id
+}
+
+# ── Shared image access ────────────────────────────────────────────────────────
+# Grants each unique group in group_role_bindings a read-only binding to the
+# shared images project. Using rancher2_project_role_template_binding (Rancher-
+# native) rather than kubernetes_role_binding_v1. Groups are deduplicated and
+# sorted so the idx-based key is stable across plan/apply runs.
+#
+# The shared project is discovered by name (shared_image_project_name, default
+# "shared") so callers do not need to pass a project ID. The data source is
+# guarded by both enable_shared_image_access AND the presence of at least one
+# group binding — this prevents a spurious lookup when the module itself IS the
+# shared space (no group_role_bindings configured) or when access is disabled.
+#
+# Callers should ensure the shared project exists before this module runs by
+# adding depends_on = [module.shared_space] at the module call site.
+
+locals {
+  # Sort unique group principals for a stable idx → group mapping.
+  _sorted_image_groups = var.enable_shared_image_access ? sort(distinct([
+    for b in var.group_role_bindings : b.group_principal_id
+  ])) : []
+
+  # Map: "<project_name>-img-<idx>" => group_principal_id
+  # e.g. "kasun-test-img-0" => "genericoidc_group://testgroup"
+  shared_image_bindings = {
+    for idx, group in local._sorted_image_groups :
+    "${var.project_name}-img-${idx}" => group
+  }
+}
+
+data "rancher2_project" "shared_images" {
+  count      = var.enable_shared_image_access && length(local._sorted_image_groups) > 0 ? 1 : 0
+  cluster_id = var.cluster_id
+  name       = var.shared_image_project_name
+}
+
+resource "rancher2_project_role_template_binding" "shared_image_access" {
+  for_each = local.shared_image_bindings
+
+  name               = each.key
+  project_id         = data.rancher2_project.shared_images[0].id
+  role_template_id   = "read-only"
+  group_principal_id = each.value
 }

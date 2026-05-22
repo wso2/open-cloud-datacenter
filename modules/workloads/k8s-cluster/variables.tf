@@ -87,14 +87,28 @@ variable "registries" {
 # entries for larger ones.
 variable "machine_pools" {
   type = list(object({
-    name          = string
-    vm_namespace  = string
-    quantity      = number
-    cpu_count     = string       # string expected by Harvester API e.g. "4"
-    memory_size   = string       # GiB as string e.g. "12"
-    disk_size     = number       # GiB as integer
-    image_name    = string       # "namespace/image-id"
-    networks      = list(string) # ["ns/nad", "iaas/storage-network", ...]
+    name         = string
+    vm_namespace = string
+    quantity     = number
+    cpu_count    = string # string expected by Harvester API e.g. "4"
+    memory_size  = string # GiB as string e.g. "12"
+    disk_size    = number # GiB as integer
+    image_name   = string # "namespace/image-id"
+
+    # ── Network interfaces ────────────────────────────────────────────────────
+    # Simple path (new): declare vm_network and/or storage_network as single refs.
+    #   vm_network      → first interface (primary NIC, gets default route)
+    #   storage_network → last interface (storage NIC, use-routes: false via cloud-init)
+    #   networks        → any additional interfaces inserted between the two above
+    #
+    # Legacy path (backward compat): set networks with the full list in order.
+    #   networks = ["ns/vm-nad", "ns/storage-nad", ...]
+    #
+    # Final interface order: [vm_network, ...networks, storage_network]
+    vm_network      = optional(string)       # primary VM network ref e.g. "kasun-test-net/kasun-test-vlan601"
+    storage_network = optional(string)       # storage network ref   e.g. "kasun-test-net/kasun-test-strg-vlan698"
+    networks        = optional(list(string), []) # additional or legacy full network list
+
     control_plane = bool
     etcd          = bool
     worker        = bool

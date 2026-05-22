@@ -1,3 +1,8 @@
+output "project_member_restricted_role_id" {
+  value       = rancher2_role_template.project_member_restricted.id
+  description = "Role template ID for the project-member-restricted role. Replaces the built-in project-member for Harvester VM tenants. Grants full VM lifecycle management (create/start/stop/console/delete) with VM image access hard-restricted to read-only. Use in tenant-space group_role_bindings instead of the built-in 'project-member' or 'project-owner'."
+}
+
 output "project_contributor_role_id" {
   value       = rancher2_role_template.project_contributor.id
   description = "Role template ID for the project-contributor role. Grants namespace and member management within a project without the ability to change resource quotas or delete the project. Pass to tenant-space module's group_role_bindings for infrastructure operators and team leads."
