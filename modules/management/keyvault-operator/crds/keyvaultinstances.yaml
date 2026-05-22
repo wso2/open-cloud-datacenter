@@ -1,0 +1,235 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: keyvaultinstances.keyvault.opencloud.wso2.com
+spec:
+  group: keyvault.opencloud.wso2.com
+  names:
+    kind: KeyVaultInstance
+    listKind: KeyVaultInstanceList
+    plural: keyvaultinstances
+    shortNames:
+    - kvi
+    singular: keyvaultinstance
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.backendRef.name
+      name: Backend
+      type: string
+    - jsonPath: .status.mountPath
+      name: MountPath
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          KeyVaultInstance is a user-facing key vault — a KV-v2 mount + AppRole
+          inside a Backend.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              KeyVaultInstanceSpec defines the desired state of a user-facing Key Vault.
+
+              A KeyVaultInstance is a KV-v2 mount path inside a shared per-tenant
+              KeyVaultBackend plus an AppRole scoped to that mount. The user never sees
+              the Backend; they see independent KeyVaultInstance Resources at the
+              project URL.
+            properties:
+              backendRef:
+                description: |-
+                  BackendRef points at the KeyVaultBackend in dc-tenant-<slug>.
+                  dc-api sets this; users never specify it.
+                properties:
+                  name:
+                    description: Name of the KeyVaultBackend CR.
+                    type: string
+                  namespace:
+                    description: Namespace of the KeyVaultBackend CR (typically dc-tenant-<slug>).
+                    type: string
+                required:
+                - name
+                - namespace
+                type: object
+              softDeleteDays:
+                default: 30
+                description: |-
+                  SoftDeleteDays is honoured by OpenBao's KV-v2 metadata
+                  delete_version_after configuration. Default 30, min 7, max 90.
+                maximum: 90
+                minimum: 7
+                type: integer
+            required:
+            - backendRef
+            type: object
+          status:
+            description: KeyVaultInstanceStatus defines the observed state of a Key
+              Vault.
+            properties:
+              conditions:
+                description: Conditions follow standard Kubernetes status conventions.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              endpoint:
+                description: |-
+                  Endpoint.Address is the Backend's in-cluster address (consumed by dc-api's
+                  PrivateEndpoint handler to configure proxy upstreams).
+                  Endpoint.SecretRef points at the AppRole credential Secret in the same
+                  namespace as this CR.
+                properties:
+                  address:
+                    description: Address is the Backend's in-cluster address (NOT
+                      a customer-VPC IP).
+                    type: string
+                  port:
+                    description: Port is the OpenBao API port.
+                    type: integer
+                  secretRef:
+                    description: |-
+                      SecretRef points at the credentials Secret in the KeyVaultInstance's namespace.
+                      Data keys: role_id, secret_id, mount_path, backend_address, backend_port.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - address
+                - port
+                type: object
+              message:
+                description: Message is the human-readable explanation of the current
+                  phase.
+                type: string
+              mountPath:
+                description: |-
+                  MountPath inside the Backend (e.g. tenants/<tenant-uuid>/<resource-uuid>).
+                  Set once on first successful reconcile; immutable thereafter.
+                type: string
+              phase:
+                description: Phase mirrors the managed-services contract enum.
+                enum:
+                - Pending
+                - Provisioning
+                - Ready
+                - Failed
+                - Terminating
+                type: string
+              resources:
+                description: Resources tracks owned objects (the credentials Secret)
+                  for idempotency.
+                items:
+                  description: ResourceRef identifies a Kubernetes object owned by
+                    this CR (for idempotency).
+                  properties:
+                    apiVersion:
+                      type: string
+                    kind:
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  type: object
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
