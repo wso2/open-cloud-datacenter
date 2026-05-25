@@ -169,7 +169,7 @@ resource "harvester_network" "vm" {
 }
 
 # ── Storage network (only when storage_vlan_id is set) ────────────────────────
-# Attached to storage_cluster_network_name (default 'storage-network'), which maps
+# Attached to storage_cluster_network_name (default 'strg-network'), which maps
 # to the dedicated storage NIC (e.g. enp2s0) on the Harvester nodes.
 # Always auto-routed — the upstream switch advertises the storage gateway.
 # Route and DHCP settings for this interface are handled by VM cloud-init

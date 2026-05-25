@@ -204,12 +204,13 @@ variable "group_role_bindings" {
 # granting the tenant groups access to the images namespace via project-owner
 # or project-member, which would silently include all other namespaces.
 #
-# Backwards-compatible: defaults to false, so existing tenant spaces are
-# completely unaffected unless they explicitly opt in.
+# Defaults to true so all tenant spaces get read-only image access out of the
+# box. Set to false only for spaces that should not see the shared catalogue
+# (e.g. the shared space itself).
 
 variable "enable_shared_image_access" {
   type        = bool
-  description = "When true (default), creates a Rancher read-only project role binding for each unique group in group_role_bindings to the shared images project. Set to false only for tenant spaces that should not see the shared image catalogue (e.g. the shared space itself)."
+  description = "When true, creates a read-only Rancher project role binding for each group in group_role_bindings to the shared images project. Set to false for tenant spaces that should not see the shared image catalogue (e.g. the shared space itself)."
   default     = true
 }
 
@@ -270,7 +271,7 @@ variable "vyos_api_key" {
 
 variable "storage_network_vlan_id" {
   type        = number
-  description = "VLAN ID for the dedicated storage network. Creates a harvester_network named '<project_name>-strg-vlan<id>' attached to storage_cluster_network_name (default 'storage-network'). Storage is always auto-routed. When set, the network namespace is always created. Separate from vlan_id which targets cluster_network_name (default 'vm-network')."
+  description = "VLAN ID for the dedicated storage network. Creates a harvester_network named '<project_name>-strg-vlan<id>' attached to storage_cluster_network_name (default 'strg-network'). Storage is always auto-routed. When set, the network namespace is always created. Separate from vlan_id which targets cluster_network_name (default 'vm-network')."
   default     = null
   validation {
     condition     = var.storage_network_vlan_id == null || (var.storage_network_vlan_id >= 1 && var.storage_network_vlan_id <= 4094)
@@ -280,8 +281,8 @@ variable "storage_network_vlan_id" {
 
 variable "storage_cluster_network_name" {
   type        = string
-  description = "Harvester cluster network for the storage VLAN. Should map to the dedicated storage NIC (e.g. enp2s0). Defaults to 'storage-network' — override only if your datacenter uses a different cluster network name for storage traffic."
-  default     = "storage-network"
+  description = "Harvester cluster network for the storage VLAN. Should map to the dedicated storage NIC (e.g. enp2s0). Defaults to 'strg-network' — override only if your datacenter uses a different cluster network name for storage traffic."
+  default     = "strg-network"
   validation {
     condition     = trimspace(var.storage_cluster_network_name) != ""
     error_message = "storage_cluster_network_name must be a non-empty string."
