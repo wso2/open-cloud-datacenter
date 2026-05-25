@@ -154,19 +154,10 @@ variable "machine_pools" {
       for p in var.machine_pools : (
         (p.vm_network == null || trimspace(p.vm_network) != "") &&
         (p.storage_network == null || trimspace(p.storage_network) != "") &&
-        alltrue([for n in p.networks : trimspace(n) != ""]) &&
-        length(distinct(compact(concat(
-          p.vm_network != null ? [p.vm_network] : [],
-          p.networks,
-          p.storage_network != null ? [p.storage_network] : []
-          )))) == length(compact(concat(
-          p.vm_network != null ? [p.vm_network] : [],
-          p.networks,
-          p.storage_network != null ? [p.storage_network] : []
-        )))
+        alltrue([for n in p.networks : trimspace(n) != ""])
       )
     ])
-    error_message = "Each pool's network refs must be non-empty strings with no duplicates across vm_network, networks, and storage_network."
+    error_message = "Each pool's network refs (vm_network, storage_network, and entries in networks) must be non-empty strings."
   }
 }
 

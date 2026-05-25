@@ -251,8 +251,8 @@ locals {
 # than silently keeping stale state due to Computed field behaviour.
 resource "rancher2_project_role_template_binding" "this" {
   for_each = {
-    for b in var.group_role_bindings :
-    "${var.project_name}--${coalesce(b.group_principal_id, b.group_id, b.user_principal_id, b.user_id)}--${b.role_template_id}" => b
+    for idx, b in var.group_role_bindings :
+    "${var.project_name}--${coalesce(b.group_principal_id, b.group_id, b.user_principal_id, b.user_id)}--${idx}" => b
   }
 
   name               = substr(replace(replace(lower(each.key), "/[^a-z0-9-]/", "-"), "/-{2,}/", "-"), 0, 63)
