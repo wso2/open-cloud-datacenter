@@ -244,17 +244,24 @@ locals {
   vm_access_kubeconfig = var.expose_vm_kubeconfig ? data.kubernetes_secret_v1.vm_access_kubeconfig[0].data["kubeconfig"] : null
 }
 
-# ── One binding per (group, role) pair. ───────────────────────────────────────
+# ── One binding per (principal, role) pair. ───────────────────────────────────
+# Key is derived from the principal value + role so that switching principal
+# type (e.g. group_principal_id → user_principal_id) produces a different key,
+# causing Terraform to destroy the old binding and create the new one rather
+# than silently keeping stale state due to Computed field behaviour.
 resource "rancher2_project_role_template_binding" "this" {
   for_each = {
-    for idx, b in var.group_role_bindings :
-    "${var.project_name}-${idx}" => b
+    for b in var.group_role_bindings :
+    "${var.project_name}--${coalesce(b.group_principal_id, b.group_id, b.user_principal_id, b.user_id)}--${b.role_template_id}" => b
   }
 
-  name               = each.key
+  name               = substr(replace(replace(lower(each.key), "/[^a-z0-9-]/", "-"), "/-{2,}/", "-"), 0, 63)
   project_id         = rancher2_project.this.id
   role_template_id   = each.value.role_template_id
   group_principal_id = each.value.group_principal_id
+  group_id           = each.value.group_id
+  user_principal_id  = each.value.user_principal_id
+  user_id            = each.value.user_id
 }
 
 # ── Shared image access ────────────────────────────────────────────────────────
@@ -273,21 +280,25 @@ resource "rancher2_project_role_template_binding" "this" {
 # adding depends_on = [module.shared_space] at the module call site.
 
 locals {
-  # Sort unique group principals for a stable idx → group mapping.
-  _sorted_image_groups = var.enable_shared_image_access ? sort(distinct([
-    for b in var.group_role_bindings : b.group_principal_id
-  ])) : []
+  # Deduplicate by principal value across all four field types so one principal
+  # with multiple role bindings only gets one shared-image access binding.
+  # Sorted for a stable idx → binding mapping that doesn't drift on list reorder.
+  _image_access_deduped = var.enable_shared_image_access ? {
+    for b in var.group_role_bindings :
+    coalesce(b.group_principal_id, b.group_id, b.user_principal_id, b.user_id) => b...
+  } : {}
 
-  # Map: "<project_name>-img-<idx>" => group_principal_id
-  # e.g. "kasun-test-img-0" => "genericoidc_group://testgroup"
+  _sorted_image_keys = sort(keys(local._image_access_deduped))
+
+  # Map: "<project_name>-img-<idx>" => binding object
   shared_image_bindings = {
-    for idx, group in local._sorted_image_groups :
-    "${var.project_name}-img-${idx}" => group
+    for idx, key in local._sorted_image_keys :
+    "${var.project_name}-img-${idx}" => local._image_access_deduped[key][0]
   }
 }
 
 data "rancher2_project" "shared_images" {
-  count      = var.enable_shared_image_access && length(local._sorted_image_groups) > 0 ? 1 : 0
+  count      = var.enable_shared_image_access && length(local._sorted_image_keys) > 0 ? 1 : 0
   cluster_id = var.cluster_id
   name       = var.shared_image_project_name
 }
@@ -298,5 +309,8 @@ resource "rancher2_project_role_template_binding" "shared_image_access" {
   name               = each.key
   project_id         = data.rancher2_project.shared_images[0].id
   role_template_id   = "read-only"
-  group_principal_id = each.value
+  group_principal_id = each.value.group_principal_id
+  group_id           = each.value.group_id
+  user_principal_id  = each.value.user_principal_id
+  user_id            = each.value.user_id
 }

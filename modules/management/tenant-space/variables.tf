@@ -176,25 +176,36 @@ variable "cluster_network_name" {
 
 variable "group_role_bindings" {
   type = list(object({
-    group_principal_id = string
     role_template_id   = string
+    group_principal_id = optional(string) # OIDC/LDAP group principal e.g. "genericoidc_group://my-group"
+    group_id           = optional(string) # local Rancher group ID
+    user_principal_id  = optional(string) # OIDC/LDAP user principal e.g. "genericoidc_user://user@example.com"
+    user_id            = optional(string) # local Rancher user ID
   }))
   description = <<-EOT
-    List of group + role pairs to bind within this project. Each entry creates a
-    rancher2_project_role_template_binding.
+    List of principal + role pairs to bind within this project. Each entry creates a
+    rancher2_project_role_template_binding. Exactly one of group_principal_id,
+    group_id, user_principal_id, or user_id must be set per entry.
 
-    group_principal_id: Rancher principal ID for the group
-      (e.g. "local://group-id", or the OIDC/LDAP principal returned by Rancher).
     role_template_id: built-in role name ("project-member", "read-only") or the
       ID of a custom rancher2_role_template (from the cluster-roles module).
 
-    Example:
+    Examples:
       group_role_bindings = [
-        { group_principal_id = "openid://my-oidc-group", role_template_id = "project-member" },
-        { group_principal_id = "openid://my-oidc-group", role_template_id = module.cluster_roles.vm_metrics_observer_role_id },
+        { group_principal_id = "genericoidc_group://my-group", role_template_id = "project-member" },
+        { user_principal_id  = "genericoidc_user://user@example.com", role_template_id = "read-only" },
+        { user_id            = "u-abc123", role_template_id = module.cluster_roles.vm_metrics_observer_role_id },
       ]
   EOT
   default     = []
+
+  validation {
+    condition = alltrue([
+      for b in var.group_role_bindings :
+      length(compact([b.group_principal_id, b.group_id, b.user_principal_id, b.user_id])) == 1
+    ])
+    error_message = "Each binding must specify exactly one of: group_principal_id, group_id, user_principal_id, or user_id."
+  }
 }
 
 # ── Shared image access — all optional ───────────────────────────────────────
