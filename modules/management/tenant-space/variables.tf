@@ -193,7 +193,7 @@ variable "group_role_bindings" {
     Examples:
       group_role_bindings = [
         { group_principal_id = "genericoidc_group://my-group", role_template_id = "project-member" },
-        { user_principal_id  = "genericoidc_user://user@example.com", role_template_id = "read-only" },
+        { user_principal_id  = "genericoidc_user://uuid", role_template_id = "read-only" },
         { user_id            = "u-abc123", role_template_id = module.cluster_roles.vm_metrics_observer_role_id },
       ]
   EOT
