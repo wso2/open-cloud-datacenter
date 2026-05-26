@@ -106,7 +106,7 @@ resource "rancher2_machine_config_v2" "pool" {
     memory_size          = each.value.memory_size
     reserved_memory_size = "-1"
     ssh_user             = var.ssh_user
-    user_data = (var.user_data != null && var.user_data != "") ? var.user_data : (
+    user_data = (var.user_data != null && trimspace(var.user_data) != "") ? var.user_data : (
       (var.node_password != null || length(var.ssh_authorized_keys) > 0 || var.ntp_server != "" || (local._using_generated_user_data && each.value.storage_network != null)) ? templatefile(
         "${path.module}/templates/node-cloud-init.tpl",
         {
@@ -120,11 +120,19 @@ resource "rancher2_machine_config_v2" "pool" {
     )
 
     disk_info = jsonencode({
-      disks = [{
-        imageName = each.value.image_name
-        bootOrder = 1
-        size      = each.value.disk_size
-      }]
+      disks = [merge(
+        {
+          imageName = each.value.image_name
+          bootOrder = 1
+          size      = each.value.disk_size
+        },
+        # storageClassName is only emitted when the pool sets it. Omitting
+        # the key lets Harvester fall back to its default StorageClass —
+        # the original module behaviour.
+        try(each.value.storage_class_name, null) != null && trimspace(try(each.value.storage_class_name, "")) != "" ? {
+          storageClassName = each.value.storage_class_name
+        } : {}
+      )]
     })
 
     network_info = jsonencode({

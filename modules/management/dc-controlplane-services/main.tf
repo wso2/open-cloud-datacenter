@@ -520,6 +520,166 @@ resource "kubernetes_service" "dc_api" {
   }
 }
 
+# ── cloud-ui Deployment + Service ─────────────────────────────────────────────
+# Same pattern as dc-api above: TF owns the shape (replicas, probes, security
+# context, volumes); CI owns the container image via `kubectl set image`.
+# The lifecycle ignore on image lets the two coexist without diff churn.
+#
+# cloud-ui is a static SPA (nginx-unprivileged) with no env-var or Secret
+# dependency, so no ConfigMap is wired up here.
+#
+# Gated on cloudui_image so consumers that haven't built a cloud-ui yet can
+# leave it unset and skip the Deployment + Service entirely. The Ingress
+# stays independent: it gates on cloudui_hostname only and is harmless when
+# the backend Service is missing (nginx returns 503 until the Service shows
+# up — either via TF on the next apply or via the CI workflow).
+resource "kubernetes_deployment" "cloud_ui" {
+  count = var.cloudui_image != "" ? 1 : 0
+
+  metadata {
+    name      = "cloud-ui"
+    namespace = kubernetes_namespace.dc_system.metadata[0].name
+    labels = {
+      app = "cloud-ui"
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [
+      metadata[0].annotations,
+      spec[0].template[0].spec[0].container[0].image,
+    ]
+  }
+
+  spec {
+    replicas = var.cloudui_replicas
+
+    selector {
+      match_labels = {
+        app = "cloud-ui"
+      }
+    }
+
+    template {
+      metadata {
+        labels = {
+          app = "cloud-ui"
+        }
+      }
+
+      spec {
+        # nginx-unprivileged runs as uid/gid 101 (nginx group).
+        security_context {
+          run_as_non_root = true
+          run_as_user     = 101
+          run_as_group    = 101
+        }
+
+        image_pull_secrets {
+          name = kubernetes_secret.ghcr_pull.metadata[0].name
+        }
+
+        container {
+          name              = "cloud-ui"
+          image             = var.cloudui_image
+          image_pull_policy = "Always"
+
+          port {
+            container_port = 8080
+          }
+
+          security_context {
+            allow_privilege_escalation = false
+            read_only_root_filesystem  = true
+            capabilities {
+              drop = ["ALL"]
+            }
+          }
+
+          liveness_probe {
+            http_get {
+              path = "/healthz"
+              port = 8080
+            }
+            initial_delay_seconds = 5
+            period_seconds        = 15
+          }
+
+          readiness_probe {
+            http_get {
+              path = "/healthz"
+              port = 8080
+            }
+            initial_delay_seconds = 3
+            period_seconds        = 10
+          }
+
+          resources {
+            requests = {
+              cpu    = "50m"
+              memory = "64Mi"
+            }
+            limits = {
+              cpu    = "200m"
+              memory = "256Mi"
+            }
+          }
+
+          # nginx-unprivileged needs writable /tmp + two nginx dirs.
+          # tmpfs everything so the root FS stays read-only.
+          volume_mount {
+            name       = "tmp"
+            mount_path = "/tmp"
+          }
+          volume_mount {
+            name       = "nginx-cache"
+            mount_path = "/var/cache/nginx"
+          }
+          volume_mount {
+            name       = "nginx-run"
+            mount_path = "/var/run"
+          }
+        }
+
+        volume {
+          name = "tmp"
+          empty_dir {}
+        }
+        volume {
+          name = "nginx-cache"
+          empty_dir {}
+        }
+        volume {
+          name = "nginx-run"
+          empty_dir {}
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_service" "cloud_ui" {
+  count = var.cloudui_image != "" ? 1 : 0
+
+  metadata {
+    name      = var.cloudui_service_name
+    namespace = kubernetes_namespace.dc_system.metadata[0].name
+    labels = {
+      app = "cloud-ui"
+    }
+  }
+  spec {
+    type = "ClusterIP"
+    selector = {
+      app = "cloud-ui"
+    }
+    port {
+      port        = var.cloudui_service_port
+      target_port = 8080
+    }
+  }
+}
+
 # ── TLS — self-signed certificate for the DC-API ingress ─────────────────────
 # Dev cluster, internal hostname, no public CA path available.
 # Valid for 1 year. Re-running apply after expiry regenerates it automatically.
@@ -537,10 +697,11 @@ resource "tls_self_signed_cert" "dc_api" {
     organization = "WSO2 LK Datacenter (dev)"
   }
 
-  dns_names = concat(
+  dns_names = distinct(compact(concat(
     [var.dcapi_hostname],
+    var.auto_include_cloudui_in_tls_sans && var.cloudui_hostname != "" ? [var.cloudui_hostname] : [],
     var.ingress_additional_dns_names,
-  )
+  )))
 
   validity_period_hours = 8760 # 1 year
 
@@ -626,6 +787,58 @@ resource "kubernetes_ingress_v1" "dc_api" {
               name = kubernetes_service.dc_api.metadata[0].name
               port {
                 number = 80
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+# ── cloud-ui Ingress + TLS reuse ──────────────────────────────────────────────
+# The cloud-ui Deployment + Service are applied by the cloud-ui GitHub workflow
+# (not by this module). After a cluster rebuild that Ingress would be missing
+# until the next workflow run, leaving cloud-ui unreachable. Keeping the
+# Ingress here means routing is restored as part of the TF apply; the Service
+# the Ingress points at appears as soon as the workflow runs.
+#
+# The cert this Ingress references is the same dc-api self-signed cert — its
+# SAN list includes any wildcards passed via ingress_additional_dns_names, so
+# a single browser warning covers both hostnames.
+resource "kubernetes_ingress_v1" "cloud_ui" {
+  count = var.cloudui_hostname != "" ? 1 : 0
+
+  metadata {
+    name      = "cloud-ui"
+    namespace = kubernetes_namespace.dc_system.metadata[0].name
+    annotations = {
+      "nginx.ingress.kubernetes.io/proxy-read-timeout" = "3600"
+      "nginx.ingress.kubernetes.io/proxy-send-timeout" = "3600"
+    }
+  }
+  lifecycle {
+    ignore_changes = [metadata[0].annotations]
+  }
+  spec {
+    ingress_class_name = "nginx"
+
+    tls {
+      hosts       = [var.cloudui_hostname]
+      secret_name = kubernetes_secret_v1.dc_api_tls.metadata[0].name
+    }
+
+    rule {
+      host = var.cloudui_hostname
+      http {
+        path {
+          path      = "/"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = var.cloudui_service_name
+              port {
+                number = var.cloudui_service_port
               }
             }
           }

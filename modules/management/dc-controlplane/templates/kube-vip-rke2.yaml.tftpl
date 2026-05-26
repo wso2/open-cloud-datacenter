@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  # Static pod, scheduled by kubelet from /var/lib/rancher/rke2/server/manifests/.
+  # Distinct from the kube-vip DaemonSet that harvester-cloud-provider installs
+  # for Service-type LoadBalancers (that one runs with cp_enable=false). This
+  # pod is dedicated to announcing the kube-apiserver VIP.
+  name: kube-vip-apiserver
+  namespace: kube-system
+spec:
+  containers:
+    - name: kube-vip
+      image: ${kube_vip_image}
+      imagePullPolicy: IfNotPresent
+      args:
+        - manager
+      env:
+        - name: vip_arp
+          value: "true"
+        - name: port
+          value: "6443"
+        - name: vip_interface
+          value: "${vip_interface}"
+        - name: vip_cidr
+          value: "32"
+        - name: cp_enable
+          value: "true"
+        - name: cp_namespace
+          value: kube-system
+        - name: vip_ddns
+          value: "false"
+        - name: svc_enable
+          value: "false"
+        - name: vip_leaderelection
+          value: "true"
+        - name: vip_leaseduration
+          value: "15"
+        - name: vip_renewdeadline
+          value: "10"
+        - name: vip_retryperiod
+          value: "2"
+        - name: address
+          value: "${api_vip}"
+      securityContext:
+        capabilities:
+          add:
+            - NET_ADMIN
+            - NET_RAW
+            - SYS_TIME
+      volumeMounts:
+        - mountPath: /etc/kubernetes/admin.conf
+          name: kubeconfig
+  hostNetwork: true
+  hostAliases:
+    - hostnames:
+        - kubernetes
+      ip: 127.0.0.1
+  volumes:
+    - hostPath:
+        path: /etc/rancher/rke2/rke2.yaml
+      name: kubeconfig

@@ -57,8 +57,44 @@ variable "dcapi_hostname" {
 
 variable "ingress_additional_dns_names" {
   type        = list(string)
-  description = "Extra DNS names to add to the self-signed cert's SAN list (e.g. environment wildcards like *.dev.example.com). Empty by default — the cert only covers dcapi_hostname."
+  description = "Extra DNS names to add to the self-signed cert's SAN list (e.g. environment wildcards like *.dev.example.com). Empty by default — the cert only covers dcapi_hostname. Setting a wildcard here is what lets a single cert cover both dc-api and cloud-ui Ingresses without two browser warnings."
   default     = []
+}
+
+variable "cloudui_hostname" {
+  type        = string
+  description = "Public hostname for the cloud-ui ingress. When non-empty, this module creates an Ingress that routes the hostname to a Service named 'cloud-ui' in the dc-system namespace, AND — if cloudui_image is also set — the cloud-ui Deployment + Service themselves. The Ingress re-uses the dc-api self-signed cert via SAN; either set ingress_additional_dns_names to a wildcard that covers cloudui_hostname, or enable auto_include_cloudui_in_tls_sans to have the module add it explicitly. Set to empty string to opt out."
+  default     = ""
+}
+
+variable "auto_include_cloudui_in_tls_sans" {
+  type        = bool
+  description = "When true AND cloudui_hostname is non-empty, the dc-api self-signed cert's SAN list automatically includes cloudui_hostname. Defaults to false so existing deployments that already cover cloud-ui via ingress_additional_dns_names (e.g. a wildcard) don't regenerate their cert on apply. New consumers who don't want to manage SANs manually should set this true."
+  default     = false
+}
+
+variable "cloudui_service_name" {
+  type        = string
+  description = "Backend Service name the cloud-ui Ingress points at. Defaults to 'cloud-ui' — matching the cloud-ui workflow's Service manifest. Override only if the consumer renames the Service."
+  default     = "cloud-ui"
+}
+
+variable "cloudui_service_port" {
+  type        = number
+  description = "Backend Service port the cloud-ui Ingress points at."
+  default     = 80
+}
+
+variable "cloudui_image" {
+  type        = string
+  description = "Container image for the cloud-ui Deployment (e.g. registry/cloud-ui:sha). When empty, the Deployment + Service are skipped entirely — useful for environments that don't ship a cloud-ui. CI is expected to roll the image forward via `kubectl set image`; the Deployment's lifecycle ignores image changes so TF and CI don't fight."
+  default     = ""
+}
+
+variable "cloudui_replicas" {
+  type        = number
+  description = "Replica count for the cloud-ui Deployment."
+  default     = 1
 }
 
 variable "tenant_group_prefix" {
