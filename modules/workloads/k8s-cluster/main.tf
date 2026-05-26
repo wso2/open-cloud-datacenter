@@ -15,19 +15,10 @@ terraform {
 locals {
   pools_by_name = { for p in var.machine_pools : p.name => p }
 
-  # Generate node cloud-init from first-class variables when user_data is not provided.
-  # user_data (non-empty string) takes full precedence — generation is skipped entirely.
-  _generated_node_user_data = (var.node_password != null || length(var.ssh_authorized_keys) > 0 || var.ntp_server != "") ? templatefile(
-    "${path.module}/templates/node-cloud-init.tpl",
-    {
-      ssh_user            = var.ssh_user
-      node_password       = var.node_password
-      ssh_authorized_keys = var.ssh_authorized_keys
-      ntp_server          = var.ntp_server
-    }
-  ) : ""
-
-  effective_node_user_data = (var.user_data != null && var.user_data != "") ? var.user_data : local._generated_node_user_data
+  # user_data (non-empty string) takes full precedence over template generation.
+  # When not set, cloud-init is generated per-pool so enable_storage_netplan
+  # reflects only that pool's storage_network field (not a cluster-wide flag).
+  _using_generated_user_data = var.user_data == null || var.user_data == ""
 
   harvester_kubeconfig = (var.create_cloud_credential && length(data.http.harvester_cloud_provider_kubeconfig) > 0) ? (
     data.http.harvester_cloud_provider_kubeconfig[0].status_code == 200 ? jsondecode(data.http.harvester_cloud_provider_kubeconfig[0].response_body) : null
@@ -115,10 +106,17 @@ resource "rancher2_machine_config_v2" "pool" {
     memory_size          = each.value.memory_size
     reserved_memory_size = "-1"
     ssh_user             = var.ssh_user
-    user_data = (
-      try(each.value.user_data, null) != null && try(each.value.user_data, "") != ""
-      ? each.value.user_data
-      : local.effective_node_user_data
+    user_data = (var.user_data != null && var.user_data != "") ? var.user_data : (
+      (var.node_password != null || length(var.ssh_authorized_keys) > 0 || var.ntp_server != "" || (local._using_generated_user_data && each.value.storage_network != null)) ? templatefile(
+        "${path.module}/templates/node-cloud-init.tpl",
+        {
+          ssh_user               = var.ssh_user
+          node_password          = var.node_password
+          ssh_authorized_keys    = var.ssh_authorized_keys
+          ntp_server             = var.ntp_server
+          enable_storage_netplan = each.value.storage_network != null
+        }
+      ) : ""
     )
 
     disk_info = jsonencode({
@@ -139,7 +137,11 @@ resource "rancher2_machine_config_v2" "pool" {
 
     network_info = jsonencode({
       interfaces = [
-        for net in each.value.networks : {
+        for net in compact(concat(
+          each.value.vm_network != null ? [each.value.vm_network] : [],
+          each.value.networks,
+          each.value.storage_network != null ? [each.value.storage_network] : []
+          )) : {
           networkName = net
           macAddress  = ""
         }
@@ -324,7 +326,7 @@ data "rancher2_cluster" "harvester" {
 
 data "rancher2_cluster_v2" "harvester" {
   count = var.create_cloud_credential ? 1 : 0
-  name  = var.harvester_cluster_name != "" ? data.rancher2_cluster.harvester[0].name : var.harvester_cluster_id
+  name  = var.harvester_cluster_name != "" ? data.rancher2_cluster.harvester[0].id : var.harvester_cluster_id
 }
 
 data "http" "harvester_cloud_provider_kubeconfig" {
