@@ -72,6 +72,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Generate a sortable timestamp tag (UTC) for Flux ImagePolicy's
+      # numerical sort. See OCD's flux/platform/cloud-ui/base/image-automation.yaml.
+      - name: Generate build timestamp
+        id: ts
+        run: echo "tag=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
       # Dockerfile context is the repo root so the build can copy from
       # both cloud-ui/ and dc-api/openapi.yaml. Matches sovereign-cloud's
       # context pattern.
@@ -84,6 +90,7 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:${{ steps.ts.outputs.tag }}-${{ github.sha }}
           cache-from: type=gha,scope=cloud-ui
           cache-to: type=gha,mode=max,scope=cloud-ui
 

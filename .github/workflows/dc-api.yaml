@@ -60,6 +60,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Generate a sortable timestamp tag (UTC) for Flux ImagePolicy's
+      # numerical sort. See OCD's flux/platform/dc-api/base/image-automation.yaml
+      # for the matching filter pattern. Bare-SHA tags sort alphabetically
+      # which is meaningless for hex — picks "ff..." over every "fe...".
+      - name: Generate build timestamp
+        id: ts
+        run: echo "tag=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push dc-api
         uses: docker/build-push-action@v5
         with:
@@ -68,6 +76,7 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:${{ steps.ts.outputs.tag }}-${{ github.sha }}
           cache-from: type=gha,scope=dc-api
           cache-to: type=gha,mode=max,scope=dc-api
 
@@ -80,6 +89,7 @@ jobs:
           tags: |
             ${{ env.WEBHOOK_IMAGE }}:latest
             ${{ env.WEBHOOK_IMAGE }}:${{ github.sha }}
+            ${{ env.WEBHOOK_IMAGE }}:${{ steps.ts.outputs.tag }}-${{ github.sha }}
           cache-from: type=gha,scope=dc-api-webhook
           cache-to: type=gha,mode=max,scope=dc-api-webhook
 
