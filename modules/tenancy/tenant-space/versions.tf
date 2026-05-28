@@ -14,5 +14,9 @@ terraform {
       version               = "~> 2.35"
       configuration_aliases = [kubernetes.harvester]
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 }

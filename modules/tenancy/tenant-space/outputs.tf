@@ -43,3 +43,19 @@ output "vm_access_kubeconfig" {
   sensitive   = true
   description = "Namespace-scoped Harvester kubeconfig for the tenant team. Non-null when expose_vm_kubeconfig = true and the namespace-credential-provisioner has already created the secret. Hand to the tenant team once at onboarding. See examples/consumer-workloads in wso2-datacenter-project for usage."
 }
+
+output "bot_users" {
+  value = {
+    for name, mod in module.bot_user : name => {
+      user_id  = mod.user_id
+      username = mod.username
+    }
+  }
+  description = "Map of bot name → identity metadata (user_id, username) for each bot_users entry."
+}
+
+output "bot_user_tokens" {
+  value       = { for name, mod in module.bot_user : name => mod.token }
+  sensitive   = true
+  description = "Map of bot name → raw Rancher API token. Sensitive. Consumed by the caller to build a combined credentials output for tenant teams."
+}
