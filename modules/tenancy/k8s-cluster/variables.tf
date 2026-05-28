@@ -21,9 +21,20 @@ variable "cni" {
   default     = "cilium"
 }
 
+variable "ingress_controller" {
+  type        = string
+  description = "Ingress controller to use. Accepted values: ingress-nginx (RKE2 default), traefik, none. Ignored when machine_global_config is set explicitly."
+  default     = "ingress-nginx"
+
+  validation {
+    condition     = contains(["traefik", "ingress-nginx", "none"], var.ingress_controller)
+    error_message = "ingress_controller must be one of: traefik, ingress-nginx, none."
+  }
+}
+
 variable "machine_global_config" {
   type        = string
-  description = "Full machine_global_config YAML for the cluster. When null the module generates a default from the cni variable. Override to add extra args such as kube-proxy-arg."
+  description = "Full machine_global_config YAML for the cluster. When set, takes full precedence and ingress_controller is ignored. When null (default), the module generates a config from cni and ingress_controller."
   default     = null
 }
 
