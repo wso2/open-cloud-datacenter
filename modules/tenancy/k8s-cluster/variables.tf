@@ -396,16 +396,19 @@ variable "cluster_members" {
   validation {
     condition = alltrue([
       for m in var.cluster_members :
-      length(compact([m.email, m.name, m.user_id, m.user_principal_id, m.group_principal_id])) == 1
+      length([
+        for v in [m.email, m.name, m.user_id, m.user_principal_id, m.group_principal_id] :
+        v if v != null && trimspace(v) != ""
+      ]) == 1
     ])
-    error_message = "Each cluster_members entry must set exactly one of: email, name, user_id, user_principal_id, or group_principal_id."
+    error_message = "Each cluster_members entry must set exactly one of: email, name, user_id, user_principal_id, or group_principal_id (non-empty, non-whitespace)."
   }
 
   validation {
     condition = alltrue([
       for m in var.cluster_members :
-      m.name != null || m.type == "user"
+      m.name == null ? m.type == "user" : contains(["user", "group"], m.type)
     ])
-    error_message = "type (\"user\" or \"group\") is only meaningful with name-based lookup. For email, user_id, user_principal_id, or group_principal_id entries, omit type or leave it as the default."
+    error_message = "When name is set, type must be \"user\" or \"group\". For email, user_id, user_principal_id, or group_principal_id entries, omit type (defaults to \"user\")."
   }
 }
