@@ -298,14 +298,14 @@ variable "vyos_api_key" {
 
 variable "bot_users" {
   type = list(object({
-    name                      = string
-    password                  = optional(string)
-    cluster_role_template_ids = optional(list(string), [])
-    project_role_template_ids = optional(list(string), [])
-    can_provision_clusters    = optional(bool, false)
-    token_ttl                 = optional(number, 7776000)
-    token_rotation_version    = optional(number, 1)
-    password_rotation_version = optional(number, 1)
+    name                       = string
+    password                   = optional(string)
+    cluster_role_template_ids  = optional(list(string), [])
+    project_role_template_ids  = optional(list(string), [])
+    can_provision_clusters     = optional(bool, false)
+    token_ttl                  = optional(number, 7776000)
+    token_rotation_version     = optional(number, 1)
+    password_rotation_version  = optional(number, 1)
     enable_shared_image_access = optional(bool, true)
     shared_image_project_name  = optional(string, "shared")
   }))
