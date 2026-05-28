@@ -1,0 +1,86 @@
+name: keyvault-operator
+
+# Build, test, and publish the Key Vault operator image. Runs on
+# GitHub-hosted runners. ubuntu-latest ships with make + build-essential
+# pre-installed, so `make test` (which runs setup-envtest to download
+# etcd / kube-apiserver and then `go test`) works out of the box — no
+# custom runner image needed.
+
+on:
+  pull_request:
+    paths:
+      - 'keyvault/**'
+      - '.github/workflows/keyvault-operator.yaml'
+  push:
+    branches: [operators]
+    paths:
+      - 'keyvault/**'
+      - '.github/workflows/keyvault-operator.yaml'
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/wso2/keyvault-operator
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: keyvault/go.mod
+          cache-dependency-path: keyvault/go.sum
+
+      # `make test` orchestrates: manifests + generate (controller-gen),
+      # fmt, vet, setup-envtest download of etcd + kube-apiserver
+      # binaries into ./bin, then `go test` with KUBEBUILDER_ASSETS set.
+      # Whole chain takes ~3-5 min on a cold cache, ~1-2 min when the
+      # GHA cache holds the envtest assets.
+      - name: Run unit tests
+        run: cd keyvault && make test
+
+  build-and-push:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push keyvault-operator
+        uses: docker/build-push-action@v5
+        with:
+          context: ./keyvault
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha,scope=keyvault-operator
+          cache-to: type=gha,mode=max,scope=keyvault-operator
+
+      - name: Summary
+        run: |
+          {
+            echo "### keyvault-operator published"
+            echo
+            echo "- \`${{ env.IMAGE }}:latest\`"
+            echo "- \`${{ env.IMAGE }}:${{ github.sha }}\`"
+            echo
+            echo "Consumer-side: the terraform branch's"
+            echo "\`modules/operators/keyvault/\` module pins this image"
+            echo "tag in its kustomize-managed Deployment."
+          } >> "$GITHUB_STEP_SUMMARY"
