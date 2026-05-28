@@ -39,6 +39,7 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog"
+	"github.com/wso2/dc-api/internal/api/respond"
 	"github.com/wso2/dc-api/internal/models"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -109,13 +110,13 @@ func (a *ServiceAccountAuth) Validate(next http.Handler) http.Handler {
 			// Malformed token — wrong lookup_id length or missing separator.
 			a.log.Warn().Str("token_prefix", ServiceAccountTokenPrefix).
 				Msg("sa auth: malformed token (bad lookup_id length or missing separator)")
-			http.Error(w, "Unauthorized: invalid service account token format", http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "Unauthorized: invalid service account token format")
 			return
 		}
 		lookupID := body[:sepIdx]
 		secret := body[sepIdx+1:]
 		if secret == "" {
-			http.Error(w, "Unauthorized: invalid service account token format", http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "Unauthorized: invalid service account token format")
 			return
 		}
 
@@ -124,12 +125,12 @@ func (a *ServiceAccountAuth) Validate(next http.Handler) http.Handler {
 		if err != nil {
 			a.log.Error().Err(err).Str("lookup_id", lookupID).
 				Msg("sa auth: db lookup failed")
-			http.Error(w, "Unauthorized: internal error", http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "Unauthorized: internal error")
 			return
 		}
 		if sa == nil {
 			// No SA row with this lookup_id — invalid token.
-			http.Error(w, "Unauthorized: invalid service account token", http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "Unauthorized: invalid service account token")
 			return
 		}
 
@@ -138,7 +139,7 @@ func (a *ServiceAccountAuth) Validate(next http.Handler) http.Handler {
 			// bcrypt mismatch — wrong secret, possible token forgery.
 			a.log.Warn().Str("sa_id", sa.ID.String()).Str("tenant_id", sa.TenantID).
 				Msg("sa auth: bcrypt mismatch — invalid secret")
-			http.Error(w, "Unauthorized: invalid service account token", http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "Unauthorized: invalid service account token")
 			return
 		}
 
@@ -221,7 +222,7 @@ func (c *CompositeAuth) runChain(w http.ResponseWriter, r *http.Request, idx int
 		// All validators passed without claiming — request is unauthenticated.
 		// Should not happen in practice because the last validator (OIDC) always
 		// either claims or rejects with 401. Defensive 401 here just in case.
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		respond.Error(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 

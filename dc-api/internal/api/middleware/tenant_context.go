@@ -23,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"github.com/wso2/dc-api/internal/api/respond"
 	"github.com/wso2/dc-api/internal/models"
 )
 
@@ -68,13 +69,13 @@ func (t *TenantContext) Validate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		urlTenant := chi.URLParam(r, "tenant_id")
 		if urlTenant == "" {
-			http.Error(w, "Bad Request: tenant_id required in URL", http.StatusBadRequest)
+			respond.Error(w, http.StatusBadRequest, "Bad Request: tenant_id required in URL")
 			return
 		}
 
 		if t.repo == nil {
 			log.Error().Msg("tenant_context: repo is nil — refusing tenant-scoped request")
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			respond.Error(w, http.StatusInternalServerError, "Internal Server Error")
 			return
 		}
 
@@ -86,11 +87,11 @@ func (t *TenantContext) Validate(next http.Handler) http.Handler {
 		if err != nil {
 			log.Error().Err(err).Str("tenant", urlTenant).
 				Msg("tenant_context: tenant uuid lookup failed")
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			respond.Error(w, http.StatusInternalServerError, "Internal Server Error")
 			return
 		}
 		if tenantUUID == uuid.Nil {
-			http.Error(w, "tenant not found", http.StatusNotFound)
+			respond.Error(w, http.StatusNotFound, "tenant not found")
 			return
 		}
 
@@ -109,7 +110,7 @@ func (t *TenantContext) Validate(next http.Handler) http.Handler {
 
 		pType, pID, ok := PrincipalFromContext(r.Context())
 		if !ok {
-			http.Error(w, "Unauthorized: no principal in context", http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "Unauthorized: no principal in context")
 			return
 		}
 
@@ -120,7 +121,7 @@ func (t *TenantContext) Validate(next http.Handler) http.Handler {
 		if pType == models.PrincipalTypeServiceAccount {
 			saTenant, _ := TenantFromContext(r.Context())
 			if saTenant != urlTenant {
-				http.Error(w, "tenant not found", http.StatusNotFound)
+				respond.Error(w, http.StatusNotFound, "tenant not found")
 				return
 			}
 			dispatch(r.Context())
@@ -134,7 +135,7 @@ func (t *TenantContext) Validate(next http.Handler) http.Handler {
 		if err != nil {
 			log.Error().Err(err).Str("principal", pID).Str("tenant", urlTenant).
 				Msg("tenant_context: list role assignments failed")
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			respond.Error(w, http.StatusInternalServerError, "Internal Server Error")
 			return
 		}
 		for _, a := range assignments {
@@ -149,12 +150,11 @@ func (t *TenantContext) Validate(next http.Handler) http.Handler {
 		// leak whether the tenant exists).
 		for _, t := range IdPTenantsFromContext(r.Context()) {
 			if t == urlTenant {
-				http.Error(w,
-					"no membership in tenant "+urlTenant+"; ask an owner to invite you",
-					http.StatusForbidden)
+				respond.Error(w, http.StatusForbidden,
+					"no membership in tenant "+urlTenant+"; ask an owner to invite you")
 				return
 			}
 		}
-		http.Error(w, "tenant not found", http.StatusNotFound)
+		respond.Error(w, http.StatusNotFound, "tenant not found")
 	})
 }
