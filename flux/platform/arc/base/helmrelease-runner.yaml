@@ -1,0 +1,53 @@
+# dc-runner scale-set. Registers an in-cluster runner labelled
+# `dc-runner` with GitHub; jobs scheduled with `runs-on: dc-runner`
+# (e.g. dc-api/, cloud-ui/, keyvault-operator/ workflows) land here.
+#
+# Three things this base does NOT set — the consumer overlay patches
+# them in because they're env-specific:
+#   - `githubConfigUrl`        : the consumer's actual repo URL
+#   - `githubConfigSecret`     : name of the in-namespace Secret holding
+#                                the GitHub PAT (set by the wizard's
+#                                seal phase as `github-runner-pat`).
+#
+# The PAT itself is a classic GitHub PAT with `repo` scope. It's only
+# ever stored as a sealed-secret in the consumer repo; ARC's listener
+# reads it from the cluster and uses it to register the runner.
+#
+# `containerMode: dind` is set here in the base because the dc-* CI
+# workflows do docker builds — every consumer needs it. If a future
+# consumer wants kubernetes-mode runners, this overrides cleanly in
+# the platform-overlay patch.
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: dc-runner
+  namespace: arc-runners
+spec:
+  interval: 30m
+  chartRef:
+    kind: OCIRepository
+    name: gha-runner-scale-set
+    namespace: arc-runners
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  # ARC's chart materialises an AutoscalingRunnerSet CR that the controller
+  # watches. The controller HelmRelease must succeed first or this one
+  # errors with "no matches for kind AutoscalingRunnerSet".
+  dependsOn:
+    - name: arc
+      namespace: arc-systems
+  values:
+    # Per-consumer URL injected via the platform-overlay kustomize patch:
+    #   spec.values.githubConfigUrl = https://github.com/<owner>/<repo>
+    githubConfigUrl: "https://github.com/CHANGE-ME-org/CHANGE-ME-repo"
+    githubConfigSecret: github-runner-pat
+    containerMode:
+      type: dind
+    template:
+      spec:
+        serviceAccountName: dc-api-deployer

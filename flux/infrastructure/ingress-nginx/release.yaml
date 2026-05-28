@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: ingress-nginx
+  namespace: ingress-nginx
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: ingress-nginx
+      version: "4.11.x"
+      sourceRef:
+        kind: HelmRepository
+        name: ingress-nginx
+        namespace: flux-system
+  values:
+    controller:
+      service:
+        type: LoadBalancer
+        # Pinned LB IP comes from the operator's overlay (per-env value).
+        loadBalancerIP: ""
+      config:
+        # Match what dc-controlplane-services TF used to set:
+        # ~50Mi to tolerate big Helm chart Secrets via the Rancher proxy.
+        proxy-body-size: 50m

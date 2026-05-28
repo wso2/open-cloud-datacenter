@@ -1,0 +1,34 @@
+# Root kustomization for the env's Flux overlay. Without this file,
+# Flux's root Kustomization (created by flux_bootstrap_git, path
+# `./environments/<env>/flux/`) falls into a fallback mode where it
+# auto-includes every YAML file at this level AND recurses into
+# subdirs that have kustomization.yaml — that drags
+# platform-overlay/'s Ingress + Deployment resources into the root
+# reconcile BEFORE infrastructure (cert-manager + ingress-nginx +
+# sealed-secrets) has been installed, and the apply fails dry-run
+# against missing admission webhooks.
+#
+# By listing the 4 child-Kustomization YAML files explicitly, the root
+# reconcile is a one-shot "create the 4 controllers" pass. Each child
+# (infrastructure, platform, image-automation) handles its own ordering
+# via dependsOn.
+#
+# flux-system/ is intentionally excluded — that subdir is owned by
+# flux_bootstrap_git's gotk-* manifests and applied separately at
+# cluster bootstrap time, not by the root Kustomization.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # flux-system/ MUST be listed — it contains gotk-components.yaml,
+  # gotk-sync.yaml, and the bootstrap kustomization.yaml that
+  # flux_bootstrap_git wrote. Without it in the root inventory, the
+  # root Kustomization (prune: true) deletes everything in the
+  # gotk-* set on the next reconcile — including the GitRepository
+  # the root itself depends on, plus source-controller /
+  # kustomize-controller / notification-controller. The cluster
+  # silently goes offline.
+  - flux-system
+  - sources.yaml
+  - infrastructure.yaml
+  - platform.yaml
+  - image-update-automation.yaml

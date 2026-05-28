@@ -1,0 +1,24 @@
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: keyvault-operator
+  namespace: flux-system
+spec:
+  image: ghcr.io/wso2/keyvault-operator
+  interval: 5m
+  secretRef:
+    name: ghcr-pull-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: keyvault-operator
+  namespace: flux-system
+spec:
+  imageRepositoryRef: { name: keyvault-operator }
+  filterTags:
+    pattern: '^(?P<sha>[a-f0-9]{7,40})$'
+    extract: '$sha'
+  policy:
+    alphabetical: { order: asc }

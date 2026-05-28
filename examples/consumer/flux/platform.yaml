@@ -1,0 +1,25 @@
+# Reconciles the consumer's platform overlay. The overlay lives in
+# this same directory (./platform-overlay/) and pulls OCD's shared
+# flux/platform/ as a Kustomize remote base, then applies env-specific
+# patches and sealed secrets.
+#
+# Depends on infrastructure (sealed-secrets controller must be up
+# before the sealed secrets here can decrypt).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform
+  namespace: flux-system
+spec:
+  interval: 10m
+  # Path is relative to the consumer repo's root. Adjust to match where
+  # you copied this template.
+  path: ./environments/CHANGE-ME-env/flux/platform-overlay
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    - name: infrastructure
+  wait: true
+  timeout: 10m

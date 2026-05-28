@@ -1,0 +1,29 @@
+# OCIRepositories for the two ARC Helm charts.
+#
+# The charts are published OCI-style (not via a classic Helm
+# repository), so we use Flux's OCIRepository source type. Tag is pinned
+# to a specific release — bump deliberately when upgrading. Loose pins
+# would let `terraform init`-style drift happen the same way it did for
+# the flux provider on 2026-05-27.
+---
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: OCIRepository
+metadata:
+  name: gha-runner-scale-set-controller
+  namespace: arc-systems
+spec:
+  interval: 1h
+  url: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+  ref:
+    tag: "0.14.1"
+---
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: OCIRepository
+metadata:
+  name: gha-runner-scale-set
+  namespace: arc-runners
+spec:
+  interval: 1h
+  url: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+  ref:
+    tag: "0.14.1"

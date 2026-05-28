@@ -1,0 +1,130 @@
+# RBAC ported verbatim from the operator's kubebuilder-generated
+# config/rbac/role.yaml. Bump along with operator version bumps.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: keyvault-controller-manager
+  namespace: keyvault-system
+  labels:
+    app.kubernetes.io/name: keyvault-operator
+    app.kubernetes.io/managed-by: open-cloud-datacenter
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: keyvault-leader-election-role
+  namespace: keyvault-system
+  labels:
+    app.kubernetes.io/name: keyvault-operator
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: keyvault-leader-election-rolebinding
+  namespace: keyvault-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: keyvault-leader-election-role
+subjects:
+  - kind: ServiceAccount
+    name: keyvault-controller-manager
+    namespace: keyvault-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: keyvault-manager-role
+  labels:
+    app.kubernetes.io/name: keyvault-operator
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "configmaps", "services", "serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/proxy"]
+    verbs: ["get", "create", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["keyvault.opencloud.wso2.com"]
+    resources: ["keyvaultbackends", "keyvaultinstances"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["keyvault.opencloud.wso2.com"]
+    resources: ["keyvaultbackends/finalizers", "keyvaultinstances/finalizers"]
+    verbs: ["update"]
+  - apiGroups: ["keyvault.opencloud.wso2.com"]
+    resources: ["keyvaultbackends/status", "keyvaultinstances/status"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: keyvault-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: keyvault-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: keyvault-controller-manager
+    namespace: keyvault-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: keyvault-metrics-auth-role
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: keyvault-metrics-auth-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: keyvault-metrics-auth-role
+subjects:
+  - kind: ServiceAccount
+    name: keyvault-controller-manager
+    namespace: keyvault-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: keyvault-metrics-reader
+rules:
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]

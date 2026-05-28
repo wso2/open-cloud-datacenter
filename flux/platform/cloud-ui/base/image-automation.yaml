@@ -1,0 +1,28 @@
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: cloud-ui
+  namespace: flux-system
+spec:
+  image: ghcr.io/wso2/cloud-ui
+  interval: 5m
+  secretRef:
+    name: ghcr-pull-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: cloud-ui
+  namespace: flux-system
+spec:
+  imageRepositoryRef: { name: cloud-ui }
+  # Filter on the timestamp-prefixed tag format (<YYYYMMDD>-<HHMMSS>-<sha>)
+  # that the OCD cloud-ui workflow publishes. See the dc-api policy in
+  # ../dc-api/base/image-automation.yaml for the full rationale on why
+  # alphabetical-sort of hex SHAs was broken.
+  filterTags:
+    pattern: '^(?P<ts>\d{8}-\d{6})-[a-f0-9]+$'
+    extract: '$ts'
+  policy:
+    numerical: { order: asc }

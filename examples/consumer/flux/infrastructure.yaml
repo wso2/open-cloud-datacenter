@@ -1,0 +1,16 @@
+# Reconciles OCD's shared cluster add-ons (cert-manager, ingress-nginx,
+# sealed-secrets). No overlay — every consumer gets the same shapes.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: infrastructure
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./flux/infrastructure
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: open-cloud-datacenter
+  wait: true
+  timeout: 10m

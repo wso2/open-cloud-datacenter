@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dc-api
+  namespace: dc-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dc-api
+  template:
+    metadata:
+      labels:
+        app: dc-api
+    spec:
+      serviceAccountName: dc-api
+      # Distroless/static:nonroot image runs as uid/gid 65532. Explicit
+      # securityContext is required for PSA-restricted namespaces and
+      # Rancher's pod-security admission policies.
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: dc-api
+          # Marker for Flux Image Automation Controller — auto-bumped on
+          # new ghcr.io/<owner>/dc-api tags matching the ImagePolicy.
+          image: ghcr.io/wso2/dc-api:v0.9.0 # {"$imagepolicy": "flux-system:dc-api"}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: dc-api-config
+          # Individual secretKeyRef rather than bulk envFrom: secretRef so
+          # OPERATOR_SSH_KEY / OPERATOR_PASSWORD can be optional — bulk
+          # secretRef has no per-key optional flag, so missing-key cases
+          # would crashloop the pod.
+          env:
+            - { name: DCAPI_DB_URL,                       valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_DB_URL } } }
+            - { name: DCAPI_OIDC_AUDIENCE,                valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_OIDC_AUDIENCE } } }
+            - { name: DCAPI_RANCHER_TOKEN,                valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_RANCHER_TOKEN } } }
+            - { name: DCAPI_RANCHER_HARVESTER_CREDENTIAL, valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_RANCHER_HARVESTER_CREDENTIAL } } }
+            - { name: DCAPI_HARVESTER_KUBECONFIG,         valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_HARVESTER_KUBECONFIG } } }
+            - { name: DCAPI_BFF_CLIENT_ID,                valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_BFF_CLIENT_ID } } }
+            - { name: DCAPI_BFF_CLIENT_SECRET,            valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_BFF_CLIENT_SECRET } } }
+            - { name: DCAPI_BFF_SESSION_SECRET,           valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_BFF_SESSION_SECRET } } }
+            - { name: DCAPI_OPERATOR_SSH_KEY,             valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_OPERATOR_SSH_KEY, optional: true } } }
+            - { name: DCAPI_OPERATOR_PASSWORD,            valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_OPERATOR_PASSWORD, optional: true } } }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }

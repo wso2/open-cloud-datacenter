@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloud-ui
+  namespace: dc-system
+  labels: { app: cloud-ui }
+spec:
+  type: ClusterIP
+  selector: { app: cloud-ui }
+  ports:
+    - port: 80
+      targetPort: 8080
+      name: http

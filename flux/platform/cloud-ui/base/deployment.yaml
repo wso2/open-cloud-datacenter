@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloud-ui
+  namespace: dc-system
+  labels: { app: cloud-ui }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: cloud-ui }
+  template:
+    metadata:
+      labels: { app: cloud-ui }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: cloud-ui
+          # Bumped by Flux Image Automation. Overlay patches the registry org.
+          image: ghcr.io/wso2/cloud-ui:v0.9.0 # {"$imagepolicy": "flux-system:cloud-ui"}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+            # nginx briefly opens privileged sockets during worker setup
+            # before dropping to uid 101. Pod-level runAsNonRoot: true would
+            # cause PSA to reject; container-level false overrides that.
+            runAsNonRoot: false
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 200m, memory: 256Mi }
+          volumeMounts:
+            - { name: tmp,         mountPath: /tmp }
+            - { name: nginx-cache, mountPath: /var/cache/nginx }
+            - { name: nginx-run,   mountPath: /var/run }
+      volumes:
+        - { name: tmp,         emptyDir: {} }
+        - { name: nginx-cache, emptyDir: {} }
+        - { name: nginx-run,   emptyDir: {} }

@@ -9,6 +9,33 @@
 
 A self-hosted cloud provider experience built on [Harvester](https://harvesterhci.io) and [Rancher](https://rancher.com). Provision VMs and Kubernetes clusters with a single CLI command — no Terraform knowledge required.
 
+## What's on this branch
+
+| Path | What it is |
+|---|---|
+| [`dc-api/`](./dc-api) | Go REST API server — the canonical control plane. |
+| [`cloud-ui/`](./cloud-ui) | React + Fluent UI web app — the browser-shaped user surface. |
+| [`dcctl/`](./dcctl) | Cobra CLI — the kubectl-shaped user surface. |
+| [`flux/`](./flux) | **Flux GitOps deployment recipes** — `infrastructure/` (cert-manager, ingress-nginx, sealed-secrets) + `platform/` (dc-api, cloud-ui, dc-postgres, ARC bases, Image{Repository,Policy,UpdateAutomation}). Consumers Kustomize-reference this tree as a remote base. |
+| [`examples/consumer/flux/`](./examples/consumer/flux) | Per-environment overlay template the bootstrap wizard renders into a consumer repo. |
+| [`scripts/init-flux.sh`](./scripts/init-flux.sh) | Bootstrap wizard — preps a consumer for first Flux apply on a fresh cluster. |
+| [`ci/`](./ci) | Shared CI tooling (the self-hosted runner image used by sovereign-cloud's CI; legacy from before this branch's workflows moved to GitHub-hosted runners — see `.github/workflows/`). |
+| [`crds/`](./crds) | Note: managed-service operator source moved to the [`operators` branch](https://github.com/wso2/open-cloud-datacenter/tree/operators). Whatever's left here is legacy or example. |
+| [`docs/`](./docs) | Architecture, ops runbooks, API reference. |
+| [`.github/workflows/`](./.github/workflows) | CI: `dc-api.yaml`, `cloud-ui.yaml`, `contract.yaml` — build/test/publish on push; PR-time gates. Images publish to `ghcr.io/wso2/{dc-api, dc-api-webhook, cloud-ui}`. |
+
+## Consuming this branch
+
+A consumer who wants their own self-hosted cloud:
+
+1. **Run the prerequisites from the [`terraform`](https://github.com/wso2/open-cloud-datacenter/tree/terraform) branch** — modules under `platform/` and `tenancy/` stand up Rancher + Harvester + the underlying networking/storage. This branch assumes that's done.
+2. **(Optional) Build your own images.** This branch's `.github/workflows/` publishes `ghcr.io/wso2/{dc-api, dc-api-webhook, cloud-ui}:latest` on every merge to `controlplane`. If you'd rather have your own org's images, fork this repo, let your fork's workflows publish to `ghcr.io/<your-org>/*`, and retarget your Flux overlay there.
+3. **Bootstrap Flux on your cluster.** Run [`scripts/init-flux.sh init`](./scripts/init-flux.sh) — the wizard prompts for your environment specifics (hostnames, GHCR org, OIDC issuer), renders [`examples/consumer/flux/`](./examples/consumer/flux) into your consumer repo as `environments/<env>/flux/`, and sets up the GitRepository + Kustomization pointing back at this branch's `flux/platform/` as a remote base.
+4. **Seal your secrets.** `scripts/init-flux.sh seal` prompts for the 5 cluster-side secrets (postgres password, OIDC client secret, TLS cert, GHCR pull token, GitHub PAT for ARC), seals them via the cluster's sealed-secrets controller, and commits them to your consumer repo.
+5. **Apply.** Flux reconciles. dc-api + cloud-ui come up. ImageUpdateAutomation auto-rolls new images as they're published by this branch.
+
+After bootstrap, ongoing operation is hands-off: every merge to this branch's `controlplane` → image published → Flux ImagePolicy sees the new build → IUA bumps the consumer repo's image pin → Flux Kustomization rolls the cluster.
+
 ```
 dcctl create vm --name web-01 --size medium \
   --image default/image-rflb5 --network default/vm-net-100 \

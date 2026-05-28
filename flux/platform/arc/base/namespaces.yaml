@@ -1,0 +1,25 @@
+# GitHub Actions Runner Controller (ARC) namespaces.
+#
+# arc-systems    — the gha-runner-scale-set-controller pod
+# arc-runners    — the dc-runner scale-set pods + the GitHub PAT Secret
+#                  + the in-cluster deployer ServiceAccount
+#
+# The privileged PSA label on arc-runners is required because the runner
+# Helm release uses `containerMode: dind` (docker-in-docker for image
+# builds), which needs a privileged container. Without the label, PSA
+# admission silently blocks pod startup.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: arc-systems
+  labels:
+    app.kubernetes.io/part-of: arc
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: arc-runners
+  labels:
+    app.kubernetes.io/part-of: arc
+    pod-security.kubernetes.io/enforce: privileged

@@ -1,0 +1,23 @@
+# Two Flux Sources:
+#  1. open-cloud-datacenter — the shared library (this OCD repo, pinned
+#     to a release tag).
+#  2. flux-system — the consumer's own repo (where this overlay lives;
+#     auto-created by `flux_bootstrap_git` in layer 06).
+#
+# Both are watched. Image-automation writes back only to the consumer
+# repo; OCD is read-only from the cluster's POV.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: open-cloud-datacenter
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://github.com/wso2/open-cloud-datacenter
+  ref:
+    # Bump this to upgrade OCD across this env.
+    tag: v0.9.0
+  ignore: |
+    /*
+    !/flux

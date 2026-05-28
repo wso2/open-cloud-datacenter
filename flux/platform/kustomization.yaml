@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - dc-api/base
+  - dc-postgres/base
+  - cloud-ui/base
+  - arc/base
+
+# keyvault-operator is NOT here. KVI controller + OpenBao instances
+# run on the Harvester cluster (per docs/kvi-controller-design.md),
+# NOT on dcapi-controlplane (which only runs dc-api + cloud-ui +
+# dc-postgres + ARC). Multi-cluster Flux via kubeConfig.secretRef
+# would work network-wise (dcapi VMs can reach Harvester) but
+# couples blast radius. KVI gets a dedicated TF module that deploys
+# directly to harvester-dev.
+#
+# Manifests under flux/platform/keyvault-operator/base/ are kept in
+# the repo as a reference + so a future Flux instance on harvester
+# can opt in (or so the TF module can render them via kustomize).
+# dc-webhook is NOT here. It runs on the Harvester host cluster (intercepts
+# kubevirt.io VirtualMachine admission, which only lives on Harvester) and
+# is installed by the TF `02-dc-operators` layer via the OCD
+# modules/management/dc-webhook module. Don't move it to Flux unless we
+# also set up a second Flux instance targeting Harvester.

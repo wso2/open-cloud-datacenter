@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dc-postgres
+  namespace: dc-system
+spec:
+  clusterIP: None # headless — StatefulSet pods get stable DNS names
+  selector: { app: dc-postgres }
+  ports:
+    - port: 5432
+      targetPort: 5432

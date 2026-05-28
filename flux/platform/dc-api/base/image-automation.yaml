@@ -1,0 +1,41 @@
+# Flux Image Automation: watches the dc-api image registry and bumps the
+# Deployment's image tag on new releases.
+#
+# Dev envs: auto-commit to main (instant rollout).
+# Prod envs: change to push.refspec for PR-gated bumps.
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: dc-api
+  namespace: flux-system
+spec:
+  # Placeholder — overlay patches to ghcr.io/<owner>/dc-api.
+  image: ghcr.io/wso2/dc-api
+  interval: 5m
+  # Pull credentials for scanning private GHCR packages. The wizard's
+  # --seal-secrets path drops this Secret into flux-system.
+  secretRef:
+    name: ghcr-pull-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: dc-api
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: dc-api
+  # Filter on the timestamp-prefixed tag format that the OCD workflows
+  # publish: <YYYYMMDD>-<HHMMSS>-<git-sha>. The ts capture group extracts
+  # 14 decimal digits we then sort numerically — picks the most recently
+  # built image. Bare-SHA tags (the previous format) are deliberately NOT
+  # matched here; alphabetical-sort of hex SHAs is meaningless and
+  # previously pinned us on whatever SHA happened to start with "ff",
+  # missing every newer build.
+  filterTags:
+    pattern: '^(?P<ts>\d{8}-\d{6})-[a-f0-9]+$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc

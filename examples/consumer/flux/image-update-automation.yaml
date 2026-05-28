@@ -1,0 +1,50 @@
+# Flux Image Update Automation
+#
+# Watches the ImagePolicy resources (defined in flux/platform/<app>/base/)
+# and commits image-tag bumps back to this consumer repo whenever a newer
+# tag is resolved. Without this resource, image-reflector-controller scans
+# the registry but nothing ever updates the Deployment manifests.
+#
+# Scans the platform-overlay path for `# {"$imagepolicy": "..."}` markers
+# embedded in Deployment YAML, then mutates the image tag inline and
+# pushes a single commit per reconciliation round.
+#
+# Push mode for this env is "auto-commit to the same branch Flux watches"
+# — fastest iteration. Prod envs would set push.refspec instead to open
+# a PR for human review before the bump lands.
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageUpdateAutomation
+metadata:
+  name: dc-platform
+  namespace: flux-system
+spec:
+  interval: 1m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  git:
+    checkout:
+      ref:
+        # Overlay patches this to the consumer's actual branch.
+        branch: CHANGE-ME-git-branch
+    commit:
+      author:
+        name: Flux Image Automation
+        email: flux@CHANGE-ME-parent-domain
+      messageTemplate: |
+        Auto-bump image tags
+
+        Files:
+        {{ range $filename, $_ := .Updated.Files -}}
+        - {{ $filename }}
+        {{ end -}}
+
+        Images:
+        {{ range .Updated.Images -}}
+        - {{ . }}
+        {{ end -}}
+    push:
+      branch: CHANGE-ME-git-branch
+  update:
+    path: ./environments/CHANGE-ME-env/flux/platform-overlay
+    strategy: Setters

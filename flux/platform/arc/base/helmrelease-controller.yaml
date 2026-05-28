@@ -1,0 +1,23 @@
+# ARC controller. Watches AutoscalingRunnerSet CRs and reconciles them
+# into ephemeral runner pods in arc-runners. No values needed for the
+# default install.
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: arc
+  namespace: arc-systems
+spec:
+  interval: 30m
+  chartRef:
+    kind: OCIRepository
+    name: gha-runner-scale-set-controller
+    namespace: arc-systems
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3

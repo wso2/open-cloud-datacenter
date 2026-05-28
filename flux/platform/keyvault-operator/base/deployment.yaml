@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keyvault-controller-manager
+  namespace: keyvault-system
+  labels:
+    app.kubernetes.io/name: keyvault-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+      app.kubernetes.io/name: keyvault-operator
+  template:
+    metadata:
+      labels:
+        control-plane: controller-manager
+        app.kubernetes.io/name: keyvault-operator
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+    spec:
+      serviceAccountName: keyvault-controller-manager
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: manager
+          # Bumped by Flux Image Automation. Overlay patches the registry org.
+          image: ghcr.io/wso2/keyvault-operator:v0.9.0 # {"$imagepolicy": "flux-system:keyvault-operator"}
+          imagePullPolicy: IfNotPresent
+          command: ["/manager"]
+          args:
+            - "--leader-elect"
+            - "--health-probe-bind-address=:8081"
+          ports:
+            - { name: health, containerPort: 8081, protocol: TCP }
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8081 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 10m,  memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }

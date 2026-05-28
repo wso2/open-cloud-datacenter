@@ -1,0 +1,28 @@
+# dc-api Ingress. Per-env overlay patches the host + TLS secret name.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dc-api
+  namespace: dc-system
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 50m
+    # Long-poll endpoints (kubeconfig stream, reconciler SSE) need wide
+    # timeouts. nginx defaults to 60s which interrupts both.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["dcapi.placeholder.example.com"]
+      secretName: dc-api-tls
+  rules:
+    - host: dcapi.placeholder.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dc-api
+                port:
+                  number: 80

@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dc-postgres
+  namespace: dc-system
+spec:
+  serviceName: dc-postgres
+  replicas: 1
+  revisionHistoryLimit: 0
+  # Keep the PVC if the StatefulSet is deleted or scaled to 0. Default
+  # is Delete in newer K8s versions; losing this PVC drops the entire
+  # dc-api database.
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels: { app: dc-postgres }
+  template:
+    metadata:
+      labels: { app: dc-postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - { name: POSTGRES_USER, value: dc_api }
+            - { name: POSTGRES_DB,   value: dc_api }
+            - { name: PGDATA,        value: /var/lib/postgresql/data/pgdata }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: dc-postgres-secret
+                  key: password
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - { name: pgdata, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "dc_api"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec: { command: ["pg_isready", "-U", "dc_api"] }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: harvester
+        resources:
+          requests: { storage: 10Gi }

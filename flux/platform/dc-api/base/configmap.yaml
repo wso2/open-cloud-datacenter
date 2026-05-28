@@ -1,0 +1,30 @@
+# Non-secret dc-api configuration. Per-env values (hostnames, BFF URLs)
+# are patched via the cluster overlay; this base holds the shape + defaults
+# any env carries.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dc-api-config
+  namespace: dc-system
+data:
+  DCAPI_LISTEN_ADDR: ":8080"
+  DCAPI_LOG_LEVEL: "info"
+  DCAPI_RANCHER_INSECURE: "false"
+  DCAPI_HARVESTER_NAMESPACE: "default"
+  DCAPI_VM_PROVIDER: "harvester"
+  DCAPI_CLUSTER_PROVIDER: "rancher"
+  DCAPI_TENANT_GROUP_PREFIX: "dc-tenant-"
+  DCAPI_ADMIN_GROUP: "dc-admin"
+  # Placeholders — patched by per-env overlay.
+  DCAPI_OIDC_ISSUER: ""
+  DCAPI_RANCHER_URL: ""
+  DCAPI_BFF_REDIRECT_URL: ""
+  DCAPI_BFF_POST_LOGIN_REDIRECT: ""
+  DCAPI_BFF_POST_LOGOUT_REDIRECT: ""
+  DCAPI_BFF_COOKIE_DOMAIN: ""
+  DCAPI_BFF_COOKIE_SECURE: "true"
+  DCAPI_VPC_EXTERNAL_BRIDGE: ""
+  DCAPI_VPC_EXTERNAL_CIDR: ""
+  DCAPI_VPC_EXTERNAL_GATEWAY: ""
+  DCAPI_VPC_EXTERNAL_RESERVED_IPS: ""
+  DCAPI_VPC_EXTERNAL_VLAN_ID: "0"

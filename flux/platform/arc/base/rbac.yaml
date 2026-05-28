@@ -1,0 +1,55 @@
+# In-cluster deployer for the dc-runner pods.
+#
+# The runner is in-cluster, so kubectl inside a job picks up the SA's
+# mounted token automatically — no kubeconfig secret needed. The SA is
+# scoped narrowly:
+#   - In arc-runners (its own namespace): no extra cluster perms.
+#   - In dc-system (where it deploys): Role permitting CRUD on the
+#     surface CI needs (Deployments, StatefulSets, Services,
+#     ConfigMaps, PVCs, Ingresses), nothing more.
+#
+# Add new dc-* target namespaces by replicating the Role + RoleBinding
+# pair into them — don't widen this role to cluster scope.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dc-api-deployer
+  namespace: arc-runners
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dc-api-deployer
+  namespace: dc-system
+rules:
+  - apiGroups: [""]
+    resources:
+      - namespaces
+      - services
+      - configmaps
+      - persistentvolumeclaims
+    verbs: ["get", "list", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/status", "statefulsets/status"]
+    verbs: ["get"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dc-api-deployer
+  namespace: dc-system
+subjects:
+  - kind: ServiceAccount
+    name: dc-api-deployer
+    namespace: arc-runners
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dc-api-deployer
