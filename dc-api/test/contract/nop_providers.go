@@ -44,6 +44,17 @@ func (nopCluster) CreateCluster(context.Context, string, string, models.ClusterS
 func (nopCluster) GetCluster(context.Context, string) (*models.Resource, error) { return nil, errNop }
 func (nopCluster) DeleteCluster(context.Context, string) error                  { return errNop }
 func (nopCluster) GetKubeconfig(context.Context, string) (string, error)        { return "", errNop }
+func (nopCluster) AddNodePool(context.Context, string, *models.NodePool, string, string, string, string) error {
+	return errNop
+}
+func (nopCluster) ScaleNodePool(context.Context, string, string, int) error { return errNop }
+func (nopCluster) UpdateNodePoolTaintsLabels(context.Context, string, string, []models.NodePoolTaint, map[string]string) error {
+	return errNop
+}
+func (nopCluster) RemoveNodePool(context.Context, string, string, string) error { return errNop }
+func (nopCluster) GetNodePoolStatuses(context.Context, string) (map[string]models.NodePoolStatus, error) {
+	return nil, errNop
+}
 
 // ── Network ─────────────────────────────────────────────────────────────────
 type nopNetwork struct{}
