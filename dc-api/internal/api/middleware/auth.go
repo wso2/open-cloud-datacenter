@@ -70,6 +70,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"github.com/wso2/dc-api/internal/api/respond"
 	"github.com/wso2/dc-api/internal/models"
 	"golang.org/x/oauth2"
 )
@@ -366,34 +367,33 @@ func (a *Auth) Validate(next http.Handler) http.Handler {
 				}
 			}
 			if err != nil {
-				http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+				respond.Error(w, http.StatusUnauthorized, "Unauthorized: "+err.Error())
 				return
 			}
 		}
 
 		idToken, err := a.verifier.Verify(r.Context(), tokenStr)
 		if err != nil {
-			http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "Unauthorized: invalid token")
 			return
 		}
 
 		if !audienceMatches(idToken.Audience, a.audiences) {
-			http.Error(w, "Unauthorized: audience mismatch", http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "Unauthorized: audience mismatch")
 			return
 		}
 
 		var claims Claims
 		if err := idToken.Claims(&claims); err != nil {
-			http.Error(w, "Unauthorized: cannot parse claims", http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "Unauthorized: cannot parse claims")
 			return
 		}
 
 		ctx, ok := a.cfg.buildContext(r.Context(), claims, a.repo)
 		if !ok {
-			http.Error(w,
+			respond.Error(w, http.StatusForbidden,
 				fmt.Sprintf("Forbidden: user has no DC tenant group (expected group prefixed with %q or %q)",
-					a.cfg.TenantGroupPrefix, a.cfg.AdminGroup),
-				http.StatusForbidden)
+					a.cfg.TenantGroupPrefix, a.cfg.AdminGroup))
 			return
 		}
 
@@ -637,20 +637,19 @@ func (a *TestModeAuth) Validate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tokenStr, err := bearerToken(r)
 		if err != nil {
-			http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "Unauthorized: "+err.Error())
 			return
 		}
 		claims, err := verifyRS256JWT(tokenStr, a.pubKeys)
 		if err != nil {
-			http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "Unauthorized: "+err.Error())
 			return
 		}
 		ctx, ok := a.cfg.buildContext(r.Context(), *claims, a.repo)
 		if !ok {
-			http.Error(w,
+			respond.Error(w, http.StatusForbidden,
 				fmt.Sprintf("Forbidden: user has no DC tenant group (expected prefix %q or %q)",
-					a.cfg.TenantGroupPrefix, a.cfg.AdminGroup),
-				http.StatusForbidden)
+					a.cfg.TenantGroupPrefix, a.cfg.AdminGroup))
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(ctx))

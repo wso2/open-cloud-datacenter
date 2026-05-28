@@ -31,6 +31,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"github.com/wso2/dc-api/internal/api/respond"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/rbac"
 )
@@ -52,14 +53,14 @@ func (p *ProjectContext) Validate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		urlProject := chi.URLParam(r, "project_id")
 		if urlProject == "" {
-			http.Error(w, "Bad Request: project_id required in URL", http.StatusBadRequest)
+			respond.Error(w, http.StatusBadRequest, "Bad Request: project_id required in URL")
 			return
 		}
 
 		// TenantContext must have run first.
 		tenantID, ok := TenantFromContext(r.Context())
 		if !ok {
-			http.Error(w, "Internal Server Error: no tenant in context", http.StatusInternalServerError)
+			respond.Error(w, http.StatusInternalServerError, "Internal Server Error: no tenant in context")
 			return
 		}
 
@@ -68,11 +69,11 @@ func (p *ProjectContext) Validate(next http.Handler) http.Handler {
 		if err != nil {
 			log.Error().Err(err).Str("tenant", tenantID).Str("project", urlProject).
 				Msg("project_context: project uuid lookup failed")
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			respond.Error(w, http.StatusInternalServerError, "Internal Server Error")
 			return
 		}
 		if projectUUID == uuid.Nil {
-			http.Error(w, "project not found", http.StatusNotFound)
+			respond.Error(w, http.StatusNotFound, "project not found")
 			return
 		}
 
@@ -91,7 +92,7 @@ func (p *ProjectContext) Validate(next http.Handler) http.Handler {
 
 		pType, pID, ok := PrincipalFromContext(r.Context())
 		if !ok {
-			http.Error(w, "Unauthorized: no principal in context", http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "Unauthorized: no principal in context")
 			return
 		}
 
@@ -110,7 +111,7 @@ func (p *ProjectContext) Validate(next http.Handler) http.Handler {
 		if err := rbac.RequireRole(r.Context(), p.repo, pType, pID, false, chain, models.RoleViewer); err != nil {
 			// No matching assignment at project or tenant scope → 404 to avoid
 			// leaking project existence to callers with no access.
-			http.Error(w, "project not found", http.StatusNotFound)
+			respond.Error(w, http.StatusNotFound, "project not found")
 			return
 		}
 

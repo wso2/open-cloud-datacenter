@@ -12,6 +12,7 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/rs/zerolog"
+	"github.com/wso2/dc-api/internal/api/respond"
 	"golang.org/x/oauth2"
 )
 
@@ -239,12 +240,12 @@ func (s *Service) HandleMe(log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ck, err := r.Cookie(SessionCookieName)
 		if err != nil {
-			http.Error(w, "no session", http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "no session")
 			return
 		}
 		sess, err := s.codec.DecodeSession(ck.Value)
 		if err != nil {
-			http.Error(w, "session invalid", http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "session invalid")
 			return
 		}
 		// Treat past-expiry sessions as if the cookie wasn't there. Without
@@ -254,7 +255,7 @@ func (s *Service) HandleMe(log zerolog.Logger) http.HandlerFunc {
 		// AccessTokenFromCookieReq (used by the auth middleware) already
 		// applies the same check.
 		if sess.Expired() {
-			http.Error(w, "session expired", http.StatusUnauthorized)
+			respond.Error(w, http.StatusUnauthorized, "session expired")
 			return
 		}
 		// We don't re-verify the access token's signature here — the auth
@@ -375,7 +376,7 @@ func (s *Service) resolveReturnTo(returnTo string) string {
 
 func (s *Service) error(w http.ResponseWriter, log zerolog.Logger, status int, msg string, err error) {
 	log.Warn().Err(err).Msg("auth: " + msg)
-	http.Error(w, msg, status)
+	respond.Error(w, status, msg)
 }
 
 // AccessTokenFromCookie decodes a sealed cookie value and returns the
