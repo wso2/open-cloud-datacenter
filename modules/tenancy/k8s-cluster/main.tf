@@ -54,6 +54,16 @@ EOF
   ) : ""
 
   effective_chart_values = var.chart_values != "" ? var.chart_values : local.default_chart_values
+
+  # Generated machine_global_config. ingress-controller is omitted when using
+  # the RKE2 default (ingress-nginx) to keep the config minimal.
+  _ingress_line = var.ingress_controller != "ingress-nginx" ? "\ningress-controller: ${var.ingress_controller}" : ""
+
+  default_machine_global_config = <<-YAML
+    cni: ${var.cni}
+    disable-kube-proxy: false
+    etcd-expose-metrics: false${local._ingress_line}
+  YAML
 }
 
 # Registry auth secrets — created only for configs that supply username/password.
@@ -195,11 +205,7 @@ resource "rancher2_cluster_v2" "this" {
   dynamic "rke_config" {
     for_each = var.manage_rke_config ? [1] : []
     content {
-      machine_global_config = var.machine_global_config != null ? var.machine_global_config : <<-YAML
-        cni: ${var.cni}
-        disable-kube-proxy: false
-        etcd-expose-metrics: false
-      YAML
+      machine_global_config = coalesce(var.machine_global_config, local.default_machine_global_config)
 
       dynamic "machine_selector_config" {
         for_each = var.enable_harvester_cloud_provider ? [1] : []
