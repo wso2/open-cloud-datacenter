@@ -3982,6 +3982,9 @@ components:
       description: Tenant identifier (slug, e.g. "iam-platform")
       schema:
         type: string
+        pattern: '^[a-z][a-z0-9-]{0,30}[a-z0-9]$'
+        minLength: 2
+        maxLength: 32
         example: iam-platform
 
     ProjectID:
@@ -3991,6 +3994,9 @@ components:
       description: Project identifier (slug, e.g. "platform-infra")
       schema:
         type: string
+        pattern: '^[a-z][a-z0-9-]{0,18}[a-z0-9]$'
+        minLength: 2
+        maxLength: 20
         example: platform-infra
 
     VNetID:

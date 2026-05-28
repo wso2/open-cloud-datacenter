@@ -19,6 +19,7 @@ package middleware
 import (
 	"context"
 	"net/http"
+	"regexp"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -26,6 +27,14 @@ import (
 	"github.com/wso2/dc-api/internal/api/respond"
 	"github.com/wso2/dc-api/internal/models"
 )
+
+// tenantIDPattern matches the canonical tenant slug — mirrors the
+// `^[a-z][a-z0-9-]{0,30}[a-z0-9]$` pattern declared in openapi.yaml on the
+// `tenant_id` path parameter. Validated here so a non-compliant client (or
+// a malformed URL) doesn't get a 500 from the slug → tenant_uuid DB lookup
+// (Postgres rejects null bytes and other non-text characters in TEXT
+// columns; the slug input would surface as "Internal Server Error").
+var tenantIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}[a-z0-9]$`)
 
 // TenantContext validates the URL tenant_id against the authenticated
 // principal's permissions and injects both the slug and the canonical
@@ -70,6 +79,10 @@ func (t *TenantContext) Validate(next http.Handler) http.Handler {
 		urlTenant := chi.URLParam(r, "tenant_id")
 		if urlTenant == "" {
 			respond.Error(w, http.StatusBadRequest, "Bad Request: tenant_id required in URL")
+			return
+		}
+		if !tenantIDPattern.MatchString(urlTenant) {
+			respond.Error(w, http.StatusBadRequest, "Bad Request: tenant_id must match ^[a-z][a-z0-9-]{0,30}[a-z0-9]$")
 			return
 		}
 

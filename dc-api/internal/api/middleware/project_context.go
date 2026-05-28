@@ -27,6 +27,7 @@ package middleware
 import (
 	"context"
 	"net/http"
+	"regexp"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -35,6 +36,12 @@ import (
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/rbac"
 )
+
+// projectIDPattern matches the canonical project slug — mirrors the
+// `^[a-z][a-z0-9-]{0,18}[a-z0-9]$` pattern declared in openapi.yaml on the
+// `project_id` path parameter. Same defense-in-depth as tenantIDPattern in
+// tenant_context.go.
+var projectIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,18}[a-z0-9]$`)
 
 // ProjectContext validates the URL project_id within the active tenant and
 // injects both the slug and the canonical project_uuid into the request context.
@@ -54,6 +61,10 @@ func (p *ProjectContext) Validate(next http.Handler) http.Handler {
 		urlProject := chi.URLParam(r, "project_id")
 		if urlProject == "" {
 			respond.Error(w, http.StatusBadRequest, "Bad Request: project_id required in URL")
+			return
+		}
+		if !projectIDPattern.MatchString(urlProject) {
+			respond.Error(w, http.StatusBadRequest, "Bad Request: project_id must match ^[a-z][a-z0-9-]{0,18}[a-z0-9]$")
 			return
 		}
 
