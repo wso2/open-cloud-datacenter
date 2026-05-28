@@ -1,0 +1,51 @@
+name: contract-tests
+
+# Schemathesis-based contract tests against an in-process dc-api with
+# all backends nopped out. Pre-merge gate: a handler diverging from
+# openapi.yaml fails the build.
+#
+# Scope is the subset of operations that don't need a real Harvester /
+# Rancher cluster. The contract test in dc-api/test/contract/contract_test.go
+# owns the include-tag filter (today: health, keyvaults, members,
+# projects, service-accounts, tenants).
+
+on:
+  pull_request:
+    paths:
+      - 'dc-api/**'
+      - '.github/workflows/contract.yaml'
+  push:
+    branches: [controlplane]
+    paths:
+      - 'dc-api/**'
+      - '.github/workflows/contract.yaml'
+  workflow_dispatch:
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: dc-api/go.mod
+          cache-dependency-path: dc-api/go.sum
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install schemathesis
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'schemathesis==4.4.4'
+          schemathesis --version
+
+      - name: Run contract test
+        working-directory: dc-api
+        # 10m outer ceiling — the test's own context timeout (8m) is the
+        # primary kill switch; this gives go test enough margin to print
+        # output, tear down testcontainers, and exit cleanly without
+        # being SIGKILLed itself.
+        run: go test -tags contract -timeout 10m -v ./test/contract/...
