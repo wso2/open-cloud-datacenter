@@ -1,0 +1,97 @@
+name: cloud-ui
+
+# Build, type-check, lint, and publish the cloud-ui SPA image. Runs on
+# GitHub-hosted runners. Triggers on cloud-ui/** changes AND on
+# dc-api/openapi.yaml — the UI's generated TypeScript types are derived
+# from the spec, so a spec change requires a UI rebuild even if no
+# cloud-ui file moved.
+
+on:
+  pull_request:
+    paths:
+      - 'cloud-ui/**'
+      - 'dc-api/openapi.yaml'
+      - '.github/workflows/cloud-ui.yaml'
+  push:
+    branches: [controlplane]
+    paths:
+      - 'cloud-ui/**'
+      - 'dc-api/openapi.yaml'
+      - '.github/workflows/cloud-ui.yaml'
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/wso2/cloud-ui
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: cloud-ui/pnpm-lock.yaml
+
+      - name: Install
+        run: cd cloud-ui && pnpm install --frozen-lockfile
+
+      - name: Generate types from openapi.yaml
+        run: cd cloud-ui && pnpm gen:api
+
+      - name: Type-check
+        run: cd cloud-ui && pnpm exec tsc --noEmit -p tsconfig.app.json
+
+      - name: Lint
+        run: cd cloud-ui && pnpm lint
+
+  build-and-push:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Dockerfile context is the repo root so the build can copy from
+      # both cloud-ui/ and dc-api/openapi.yaml. Matches sovereign-cloud's
+      # context pattern.
+      - name: Build and push cloud-ui
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./cloud-ui/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha,scope=cloud-ui
+          cache-to: type=gha,mode=max,scope=cloud-ui
+
+      - name: Summary
+        run: |
+          {
+            echo "### cloud-ui published"
+            echo
+            echo "- \`${{ env.IMAGE }}:latest\`"
+            echo "- \`${{ env.IMAGE }}:${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
