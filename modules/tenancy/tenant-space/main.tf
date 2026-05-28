@@ -314,3 +314,29 @@ resource "rancher2_project_role_template_binding" "shared_image_access" {
   user_principal_id  = each.value.user_principal_id
   user_id            = each.value.user_id
 }
+
+# ── CI/CD bot users ───────────────────────────────────────────────────────────
+# Optional per-tenant machine identities for Terraform/CI pipelines.
+# Only instantiated when bot_users is non-empty — all existing tenant spaces
+# that omit this variable are completely unaffected.
+# Uses only the unaliased rancher2 and random providers — no kubernetes needed.
+
+module "bot_user" {
+  for_each = { for b in var.bot_users : b.name => b }
+  source   = "../rancher-bot-user"
+
+  name                       = "${var.project_name}-${each.value.name}"
+  password                   = each.value.password
+  cluster_id                 = var.cluster_id
+  project_id                 = rancher2_project.this.id
+  cluster_role_template_ids  = each.value.cluster_role_template_ids
+  project_role_template_ids  = each.value.project_role_template_ids
+  can_provision_clusters     = each.value.can_provision_clusters
+  token_ttl                  = each.value.token_ttl
+  token_rotation_version     = each.value.token_rotation_version
+  password_rotation_version  = each.value.password_rotation_version
+  enable_shared_image_access = each.value.enable_shared_image_access
+  shared_image_project_name  = each.value.shared_image_project_name
+
+  depends_on = [rancher2_namespace.this]
+}

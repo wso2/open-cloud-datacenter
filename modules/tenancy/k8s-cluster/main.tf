@@ -369,3 +369,69 @@ resource "rancher2_cloud_credential" "harvester" {
     ignore_changes = [harvester_credential_config[0].kubeconfig_content]
   }
 }
+
+# ── Cluster membership ────────────────────────────────────────────────────────
+
+locals {
+  # Stable map key encodes which identity field is set so that switching identity
+  # type (e.g. email → user_id) produces a different key and triggers destroy+create
+  # rather than a silent in-place update with stale state.
+  _members = {
+    for m in var.cluster_members :
+    "${coalesce(
+      m.email != null ? "email:${m.email}" : null,
+      m.name != null ? "name:${m.type}:${m.name}" : null,
+      m.user_id != null ? "user_id:${m.user_id}" : null,
+      m.user_principal_id != null ? "user_principal_id:${m.user_principal_id}" : null,
+      m.group_principal_id != null ? "group_principal_id:${m.group_principal_id}" : null,
+    )}:${m.role}" => m
+  }
+}
+
+# Resolves email or name → full Rancher principal ID.
+# email entries always use type = "user"; name entries use the configured type.
+# Not created for user_id / user_principal_id / group_principal_id entries.
+data "rancher2_principal" "member" {
+  for_each = { for k, m in local._members : k => m if m.email != null || m.name != null }
+  name     = each.value.email != null ? each.value.email : each.value.name
+  type     = each.value.email != null ? "user" : each.value.type
+}
+
+resource "rancher2_cluster_role_template_binding" "member" {
+  for_each = local._members
+
+  name = substr(
+    replace(
+      replace(lower("${var.cluster_name}-${replace(each.key, ":", "-")}"), "/[^a-z0-9-]/", "-"),
+      "/-{2,}/", "-"
+    ),
+    0, 63
+  )
+
+  cluster_id       = rancher2_cluster_v2.this.cluster_v1_id
+  role_template_id = each.value.role
+
+  # user_principal_id covers:
+  #   - email lookup (data source result, always type = "user")
+  #   - name-based user lookup (data source result)
+  #   - explicit user_principal_id (e.g. "local://u-427g5iiyyg")
+  #   - bare user_id, wrapped to "local://<id>"
+  user_principal_id = (
+    each.value.user_principal_id != null ? each.value.user_principal_id :
+    each.value.user_id != null ? "local://${each.value.user_id}" :
+    each.value.email != null ? data.rancher2_principal.member[each.key].id :
+    each.value.name != null && each.value.type == "user" ? data.rancher2_principal.member[each.key].id :
+    null
+  )
+
+  # group_principal_id covers:
+  #   - explicit group_principal_id (e.g. "genericoidc_group://my-group")
+  #   - name-based group lookup (data source result)
+  group_principal_id = (
+    each.value.group_principal_id != null ? each.value.group_principal_id :
+    each.value.name != null && each.value.type == "group" ? data.rancher2_principal.member[each.key].id :
+    null
+  )
+
+  depends_on = [rancher2_cluster_v2.this]
+}

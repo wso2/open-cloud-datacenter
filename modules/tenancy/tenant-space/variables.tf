@@ -274,6 +274,68 @@ variable "vyos_api_key" {
   default     = null
 }
 
+# ── CI/CD bot users — all optional ───────────────────────────────────────────
+# When bot_users is non-empty, one rancher-bot-user sub-module is instantiated
+# per entry. Each bot gets a dedicated Rancher local user, scoped RBAC
+# bindings, a rancher2_custom_user_token, and a kubernetes_secret in the
+# tenant namespace for pipeline token retrieval.
+#
+# All existing tenant spaces that omit bot_users are completely unaffected.
+#
+# Requires the kubernetes.harvester provider to be configured in the caller.
+# The token secret is named '<project_name>-<name>-rancher-token' and stored
+# in token_namespace (defaults to the first workload namespace).
+#
+# Example:
+#   bot_users = [
+#     {
+#       name                      = "pipeline"
+#       cluster_role_template_ids = [module.cluster_roles.vm_creator_role_id]
+#       project_role_template_ids = ["project-member-restricted"]
+#       can_provision_clusters    = true
+#     },
+#   ]
+
+variable "bot_users" {
+  type = list(object({
+    name                      = string
+    password                  = optional(string)
+    cluster_role_template_ids = optional(list(string), [])
+    project_role_template_ids = optional(list(string), [])
+    can_provision_clusters    = optional(bool, false)
+    token_ttl                 = optional(number, 7776000)
+    token_rotation_version    = optional(number, 1)
+    password_rotation_version = optional(number, 1)
+    enable_shared_image_access = optional(bool, true)
+    shared_image_project_name  = optional(string, "shared")
+  }))
+  description = <<-EOT
+    Optional list of CI/CD bot users to provision for this tenant space. Each entry
+    creates a Rancher local user, scoped RBAC bindings, an API token, and a
+    kubernetes_secret in the tenant namespace so pipelines can retrieve the token
+    via their namespace-scoped kubeconfig.
+
+    name                      - Bot username suffix. Prefixed with <project_name>- in all
+                                Rancher resource names. Must be lowercase alphanumeric with hyphens.
+    password                  - Optional explicit password. When null (default), a 40-char
+                                random password is generated and stored only in TF state.
+    cluster_role_template_ids - Role template IDs for cluster-level bindings (e.g. vm_creator).
+    project_role_template_ids - Role template IDs for project-level bindings (e.g. "project-member-restricted").
+    can_provision_clusters    - When true, adds a custom global role granting the verbs needed to
+                                provision rancher2_cluster_v2 resources (workaround for upstream 403 bug).
+    token_ttl                 - Token TTL in seconds. 0 = never expires.
+
+    Tokens are surfaced via the bot_user_tokens output (sensitive). The caller is responsible
+    for distributing them to tenant teams (e.g. via a combined credentials output).
+  EOT
+  default     = []
+
+  validation {
+    condition     = length(var.bot_users) == length(distinct([for b in var.bot_users : b.name]))
+    error_message = "Each bot_users entry must have a unique name within this tenant space."
+  }
+}
+
 # ── Storage network ───────────────────────────────────────────────────────────
 # Creates a harvester_network attached to a dedicated storage cluster network
 # (typically a separate physical NIC, e.g. enp2s0) rather than the VM network.

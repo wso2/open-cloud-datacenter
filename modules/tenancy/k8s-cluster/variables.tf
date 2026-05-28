@@ -323,3 +323,89 @@ variable "chart_values" {
   description = "Custom Helm chart values to pass to RKE2"
   default     = ""
 }
+
+# ── Cluster membership ────────────────────────────────────────────────────────
+# Optional list of users/groups to bind to this cluster after provisioning.
+# Defaults to [] — omitting it leaves no additional bindings and does not
+# affect any existing clusters.
+#
+# Identity fields (set exactly one per entry):
+#
+#   email              — User email address resolved via data "rancher2_principal"
+#                        with type = "user". Cleaner than name when you know the
+#                        identity is a user and have their email address.
+#                        Same caveat as name: unreliable if the account has never
+#                        logged in or if multiple Rancher accounts share the email.
+#                        Example: "dev@wso2.com"
+#
+#   name               — Generic display name / email resolved via data "rancher2_principal".
+#                        Use with type = "group" for group lookups.
+#                        Example: "platform-team"  (with type = "group")
+#
+#   user_id            — Bare Rancher user ID (no scheme prefix). Most reliable
+#                        for local users — immune to duplicate-account ambiguity.
+#                        Find it in Rancher UI → Users & Authentication → user row,
+#                        or from: rancher2_user.this.id
+#                        Example: "u-427g5iiyyg"
+#
+#   user_principal_id  — Full Rancher principal ID for a user account.
+#                        Local Rancher users:  "local://u-427g5iiyyg"
+#                        OIDC / SAML users:    "genericoidc_user://email@example.com"
+#
+#   group_principal_id — Full Rancher principal ID for a group.
+#                        OIDC / SAML groups:   "genericoidc_group://my-group-name"
+#                        AD groups:            "activedirectory_group://CN=my-group,DC=corp"
+#
+# role defaults to "cluster-member". Use "cluster-owner" to grant full
+# cluster admin. Any custom role template ID is also accepted.
+#
+# Examples:
+#   cluster_members = [
+#     # Email lookup — convenient when one Rancher account exists for the address
+#     { email = "dev@wso2.com" },
+#
+#     # Bare user ID — avoids lookup, immune to duplicate accounts
+#     { user_id = "u-427g5iiyyg", role = "cluster-owner" },
+#
+#     # Full user principal ID — local Rancher user
+#     { user_principal_id = "local://u-427g5iiyyg" },
+#
+#     # OIDC user by full principal ID
+#     { user_principal_id = "genericoidc_user://dev@wso2.com", role = "cluster-owner" },
+#
+#     # Group by full principal ID
+#     { group_principal_id = "genericoidc_group://platform-team", role = "cluster-owner" },
+#
+#     # Group name lookup
+#     { name = "platform-team", type = "group", role = "cluster-owner" },
+#   ]
+
+variable "cluster_members" {
+  type = list(object({
+    email              = optional(string)         # user email — resolved via data source (type = "user")
+    name               = optional(string)         # display name — resolved via data source, use with type
+    type               = optional(string, "user") # "user" or "group" — only meaningful with name
+    user_id            = optional(string)         # bare user ID, e.g. "u-427g5iiyyg"
+    user_principal_id  = optional(string)         # full user principal, e.g. "local://u-427g5iiyyg"
+    group_principal_id = optional(string)         # full group principal, e.g. "genericoidc_group://my-group"
+    role               = optional(string, "cluster-member")
+  }))
+  default     = []
+  description = "Optional cluster role bindings. Set exactly one of: email, name, user_id, user_principal_id, or group_principal_id. role defaults to cluster-member."
+
+  validation {
+    condition = alltrue([
+      for m in var.cluster_members :
+      length(compact([m.email, m.name, m.user_id, m.user_principal_id, m.group_principal_id])) == 1
+    ])
+    error_message = "Each cluster_members entry must set exactly one of: email, name, user_id, user_principal_id, or group_principal_id."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in var.cluster_members :
+      m.name != null || m.type == "user"
+    ])
+    error_message = "type (\"user\" or \"group\") is only meaningful with name-based lookup. For email, user_id, user_principal_id, or group_principal_id entries, omit type or leave it as the default."
+  }
+}
