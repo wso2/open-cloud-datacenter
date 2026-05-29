@@ -169,6 +169,8 @@ paths:
                     $ref: "#/components/schemas/TenantCap"
                   available:
                     $ref: "#/components/schemas/TenantCap"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -196,6 +198,8 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -230,6 +234,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
         "500":
@@ -254,6 +260,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -298,7 +306,8 @@ paths:
           content:
             application/json:
               schema:
-                oneOf:
+                anyOf:
+                  - $ref: "#/components/schemas/Error"
                   - $ref: "#/components/schemas/QuotaExceededError"
                   - type: object
                     required: [error, message, requested, in_use]
@@ -331,6 +340,8 @@ paths:
       responses:
         "204":
           description: Project deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1253,6 +1264,8 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/RoleAssignment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -1377,6 +1390,8 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/ServiceAccount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -2950,6 +2965,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
         "500":
@@ -2968,8 +2985,12 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/KeyVault"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -2997,6 +3018,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/KeyVault"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -3017,6 +3040,8 @@ paths:
       responses:
         "204":
           description: Key Vault deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -3062,6 +3087,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/KeyVaultCredentials"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -3135,6 +3162,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/KeyVaultCredentials"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -3223,6 +3252,7 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/PrivateEndpoint"
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
@@ -3253,6 +3283,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PrivateEndpoint"
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
@@ -3269,6 +3300,7 @@ paths:
       responses:
         "204":
           description: Endpoint deleted
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
