@@ -1,0 +1,37 @@
+name: "📁 Epic"
+description: Track a large body of work that spans multiple issues.
+labels: ["Type/Epic"]
+title: "[Epic]: "
+
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the epic and the problem it solves.
+    validations:
+      required: true
+  - type: textarea
+    id: goals
+    attributes:
+      label: Goals / Scope
+      description: What is in scope for this epic, and what is explicitly out of scope?
+    validations:
+      required: false
+  - type: textarea
+    id: children
+    attributes:
+      label: Child Issues / Tasks
+      description: Checklist of the issues that make up this epic.
+      placeholder: |
+        - [ ] #123
+        - [ ] #124
+    validations:
+      required: false
+  - type: input
+    id: designdoc
+    attributes:
+      label: Design Document
+      description: Link to the design document, if one exists.
+    validations:
+      required: false

@@ -1,0 +1,36 @@
+name: "🚀 Improvement"
+description: Suggest an improvement to existing functionality.
+labels: ["Type/Improvement"]
+title: "[Improvement]: "
+
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the platform does this relate to?
+      options:
+        - Control Plane (dc-api)
+        - Cloud UI
+        - CLI (dcctl)
+        - Terraform Modules
+        - Operators
+        - Docs
+        - Other
+      multiple: false
+    validations:
+      required: true
+  - type: textarea
+    id: limitation
+    attributes:
+      label: Current Limitation
+      description: Describe the current behavior and why it falls short.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested Improvement
+      description: Describe the improvement you would like to see.
+    validations:
+      required: true

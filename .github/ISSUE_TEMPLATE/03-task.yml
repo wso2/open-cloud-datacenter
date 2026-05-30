@@ -1,0 +1,36 @@
+name: "✍️ Task"
+description: Track a concrete unit of work.
+labels: ["Type/Task"]
+title: "[Task]: "
+
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the platform does this task touch?
+      options:
+        - Control Plane (dc-api)
+        - Cloud UI
+        - CLI (dcctl)
+        - Terraform Modules
+        - Operators
+        - Docs
+        - Other
+      multiple: false
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of what needs to be done.
+    validations:
+      required: true
+  - type: input
+    id: related
+    attributes:
+      label: Related Issues
+      description: Link any related issues or epics (e.g. "Part of #123").
+    validations:
+      required: false

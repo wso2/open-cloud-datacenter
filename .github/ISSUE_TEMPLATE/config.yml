@@ -1,0 +1,6 @@
+# Set to false to require every new issue to use one of the forms above.
+blank_issues_enabled: true
+contact_links:
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/wso2/open-cloud-datacenter/security/advisories/new
+    about: Please report security issues privately via a draft advisory — do not open a public issue.
