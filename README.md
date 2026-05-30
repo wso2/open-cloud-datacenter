@@ -1,112 +1,68 @@
-# Open Cloud Data Center
+# Open Cloud Datacenter (OCD)
 
-The Open Cloud Data Center initiative is focused on providing a standardized, scalable, and customizable cloud datacenter infrastructure.
+Turn an on-prem datacenter into a self-service cloud. OCD is an open, modular control plane and module set for running compute, Kubernetes clusters, and networking on your own hardware — without public-cloud lock-in.
 
-## Overview
+- **Sovereignty** — full control over your data and infrastructure.
+- **Portability** — move workloads across on-prem hardware and providers.
+- **Cost-efficiency** — optimize resource usage and avoid vendor lock-in.
+- **Community-driven** — built on open standards and collaborative development.
 
-The Open Cloud Data Center simplifies the deployment and management of cloud infrastructure through a modular, open-source architecture.
+> ℹ️ **This `main` branch is the index — it carries no code.** The work lives on three branches, mapped below. `main` is intentionally kept as the front door + roadmap.
 
-**Why choose Open Cloud Data Center?**
-- **Sovereignty**: Complete control over your data and infrastructure.
-- **Portability**: Move workloads across cloud providers or on-premises hardware.
-- **Cost-Efficiency**: Optimize resource usage and avoid vendor lock-in.
-- **Community-Driven**: Built on open standards and collaborative development.
+## How this repo is organized
 
----
+```text
+              ┌─────────────────────────────────────────────┐
+              │          Open Cloud Datacenter (OCD)         │
+              │   turn an on-prem datacenter into a cloud    │
+              └───────────────────────┬─────────────────────┘
+                          branch = layer of the stack
+      ┌───────────────────────────────┼───────────────────────────────┐
+      ▼                               ▼                               ▼
+┌──────────────┐              ┌──────────────────┐            ┌────────────────┐
+│  terraform   │   Phase 1    │   controlplane   │  Phase 2   │   operators    │
+│  IaC modules │   Platform   │  DC-API · dcctl  │  Cloud     │  K8s operators │
+│  Harvester + │   Foundation │  cloud-ui (web)  │  Control   │  DBaaS, Key    │
+│  Rancher,    │ ─ consumed ─▶│  REST/CLI/UI     │◀─ backed ─ │  Vault, …      │
+│  net/backup/ │     by       │  cloud facade    │     by     │                │
+│  monitoring  │              │                  │            │                │
+└──────────────┘              └──────────────────┘            └────────────────┘
+      ▲
+      └─ main (this branch): index + roadmap only — no code
 
-## Quick Start
-
-```bash
-git clone https://github.com/wso2/open-cloud-datacenter.git
-cd open-cloud-datacenter
+  request flow:  user → dcctl / cloud-ui → DC-API → Harvester (VMs)
+                                                   → Rancher (clusters)
+                                                   → operators · PostgreSQL (state)
 ```
 
-Reference any module directly from GitHub in your Terraform configuration:
+| Branch | Phase | What's here |
+|---|---|---|
+| **[`terraform`](https://github.com/wso2/open-cloud-datacenter/tree/terraform)** | Phase 1 — Platform Foundation | Terraform / IaC modules wrapping the Harvester + Rancher providers: tenancy, networks, backup, monitoring. Start here to provision the platform. |
+| **[`controlplane`](https://github.com/wso2/open-cloud-datacenter/tree/controlplane)** | Phase 2 — Cloud Control Plane | The cloud facade — **DC-API** (REST), **dcctl** (CLI), **cloud-ui** (web). Detailed plan in [`MILESTONES.md`](https://github.com/wso2/open-cloud-datacenter/blob/controlplane/MILESTONES.md). |
+| **[`operators`](https://github.com/wso2/open-cloud-datacenter/tree/operators)** | Supporting | Kubernetes operators (Database, Key Vault, …) that back the control-plane services. |
+| `main` | — | This index + roadmap. No code. |
 
-```hcl
-module "bootstrap" {
-  source = "github.com/wso2/open-cloud-datacenter//modules/bootstrap?ref=v0.4.5"
+## Roadmap
 
-  ubuntu_image_id        = "default/ubuntu-22-04"
-  vm_password            = var.vm_password
-  rancher_hostname       = "rancher.example.internal"
-  rancher_admin_password = var.rancher_admin_password
-  ippool_subnet          = "192.168.10.0/24"
-  ippool_gateway         = "192.168.10.1"
-  ippool_start           = "192.168.10.10"
-  ippool_end             = "192.168.10.10"
-}
-```
+### Phase 1 — Platform Foundation · `terraform`
 
----
+- **Tenancy & identity** — tenant isolation; Asgardeo OIDC claim-based RBAC (no local Rancher users); per-tenant quotas (CPU / memory / storage) at the project and namespace level.
+- **Terraform modules** — wrap the Harvester & Rancher providers for easy provisioning; modules to provision database instances.
+- **Network abstraction** — VLAN-backed networks in Harvester; load-balancer services via kube-vip with per-environment IP pools.
+- **Backup** — etcd backups to object storage; full Kubernetes backup via Velero.
+- **Monitoring** — a single Grafana stack covering Harvester HCI and tenant clusters; Alertmanager routing.
 
-## Modules
+### Phase 2 — Cloud Control Plane · `controlplane`
 
-The following reusable Terraform modules are available under `modules/`. See the architecture overview in [docs/architecture.md](docs/architecture.md) for how they relate to each other.
+Phase 1 gives tenants a Terraform-consumable sandbox; Phase 2 delivers a **cloud experience** — a REST API (DC-API), a CLI, and eventually a portal — that abstracts away Harvester, Rancher, and Kubernetes. The interface resembles a public cloud, with the Phase 1 platform as the backend. Detailed milestones live in [`MILESTONES.md`](https://github.com/wso2/open-cloud-datacenter/blob/controlplane/MILESTONES.md).
 
-### Bootstrap
-
-| Module | Description |
-|--------|-------------|
-| [modules/bootstrap](modules/bootstrap/README.md) | Provisions an RKE2-based Rancher server on Harvester HCI via cloud-init, with a Load Balancer and IP pool for external access. |
-
-### Identity
-
-| Module | Description |
-|--------|-------------|
-| [modules/identity/rancher-oidc](modules/identity/rancher-oidc/README.md) | Configures Rancher to use a generic OIDC provider for user authentication. |
-| [modules/identity/providers/asgardeo](modules/identity/providers/asgardeo/README.md) | Presets for integrating WSO2 Asgardeo as the identity provider. |
-
-### Management
-
-| Module | Description |
-|--------|-------------|
-| [modules/management/networking](modules/management/networking/README.md) | Creates and manages VLAN-backed Harvester networks for tenant and management workloads. |
-| [modules/management/storage](modules/management/storage/README.md) | Downloads and registers OS images into Harvester HCI, making them available for VM provisioning. |
-| [modules/management/cluster-roles](modules/management/cluster-roles/README.md) | Defines custom Rancher role templates (e.g. `vm-metrics-observer`) shared across tenant projects. |
-| [modules/management/tenant-space](modules/management/tenant-space/README.md) | Full team onboarding: creates a Rancher project, namespace, resource quotas, and role bindings. |
-| [modules/management/rbac](modules/management/rbac/README.md) | Lightweight module for bulk creating projects and namespaces without advanced role bindings. |
-| [modules/management/harvester-integration](modules/management/harvester-integration/README.md) | Registers the Harvester HCI cluster into Rancher, enabling the UI extension and cloud credential. |
-
-### Monitoring
-
-| Module | Description |
-|--------|-------------|
-| [modules/monitoring](modules/monitoring/README.md) | Deploys a full monitoring stack (Prometheus / Alertmanager / Calert) with Google Chat notification support. |
-
-### Workloads
-
-| Module | Description |
-|--------|-------------|
-| [modules/workloads/k8s-cluster](modules/workloads/k8s-cluster/README.md) | Provisions a tenant RKE2 Kubernetes cluster on Harvester HCI via Rancher's machine provisioning API. |
-| [modules/workloads/vm](modules/workloads/vm/README.md) | Provisions standalone virtual machines on Harvester HCI with support for multiple disks and cloud-init. |
-
----
-
-## Deployment Phases
-
-The modules are designed to be applied in sequence across five phases:
-
-1. **Phase 0 — Bootstrap** (`modules/bootstrap`): Deploy RKE2 + Rancher inside Harvester.
-2. **Phase 1 — Rancher Auth**: Connect the Rancher provider using the bootstrapped endpoint and password.
-3. **Phase 2 — Management** (`modules/management/*`): Register Harvester into Rancher and configure shared resources (networks, images, roles).
-4. **Phase 3 — Identity & Monitoring** (`modules/identity/*`, `modules/monitoring`): Configure OIDC authentication and observability.
-5. **Phase 4 — Workloads** (`modules/workloads/*`): Provision tenant Kubernetes clusters or standalone VMs on demand.
-
-See [docs/architecture.md](docs/architecture.md) for a detailed breakdown.
-
----
-
-## Reporting Product Issues
-
-- **GitHub Issues**: [Report bugs or request features](https://github.com/wso2/open-cloud-datacenter/issues)
-
----
-
-## Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](docs/CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+- **M1 — Compute & cluster provisioning API** — a facade API for provisioning compute and Kubernetes clusters.
+- **M1.5 — Full RBAC** — integrate an external identity provider.
+- **M2 — Storage & networking** — network load balancers; a Kube-OVN virtual-network model (VPC, default gateway, DHCP, DNS); Longhorn-based storage.
+- **M3 — Platform services (as-a-Service)** — **Database**, **Key Vault**, **Registry**, and **Cache** *(planned)*.
+- **M4 — Self-service portal** — a React-based web UI.
+- **M5 — Tenant & project hierarchy** — an organization hierarchy for managing infrastructure.
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+Licensed under the terms in [LICENSE](LICENSE). See also [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
