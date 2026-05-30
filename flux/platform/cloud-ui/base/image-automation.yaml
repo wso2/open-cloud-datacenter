@@ -22,7 +22,7 @@ spec:
   # ../dc-api/base/image-automation.yaml for the full rationale on why
   # alphabetical-sort of hex SHAs was broken.
   filterTags:
-    pattern: '^(?P<ts>\d{8}-\d{6})-[a-f0-9]+$'
-    extract: '$ts'
+    pattern: '^(?P<ts>\d{8})-(?P<tm>\d{6})-[a-f0-9]+$'
+    extract: '$ts$tm'
   policy:
     numerical: { order: asc }
