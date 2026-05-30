@@ -17,7 +17,9 @@ services:
       POSTGRES_PASSWORD: dc_dev_password
       POSTGRES_DB: dc_api
     ports:
-      - "5432:5432"             # reachable at localhost:5432 from DC-API on your Mac
+      # Host port is overridable via DC_PG_PORT (default 5432) so a local-stack
+      # dev DB can avoid colliding with a system Postgres already on 5432.
+      - "${DC_PG_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

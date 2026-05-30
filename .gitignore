@@ -25,6 +25,9 @@ kubeconfig
 # dcctl local state
 ~/.dcctl/
 
+# Local dev-loop overrides (per-developer cluster context/namespace/hostnames)
+scripts/dev-up.env
+
 # Terraform (if any TF files are added)
 *.tfstate
 *.tfstate.backup
