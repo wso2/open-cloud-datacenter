@@ -112,14 +112,14 @@ func clientForServiceAccount(t *testing.T, tenantID string, role models.Role) (*
 	// Insert role_assignments row.
 	_, err = env.DB.Pool().Exec(ctx, `
 		INSERT INTO role_assignments
-			(principal_type, principal_id, scope_type, scope_id, scope_uuid, role, granted_by)
+			(principal_type, principal_id, scope_type, scope_id, scope_uuid, role_definition, granted_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		string(models.PrincipalTypeServiceAccount),
 		saID.String(),
 		string(models.ScopeTypeTenant),
 		tenantID,
 		tenantUUID,
-		string(role),
+		models.RoleDefinitionForRole(role),
 		"test-setup",
 	)
 	require.NoError(t, err, "clientForServiceAccount: insert role_assignments row")

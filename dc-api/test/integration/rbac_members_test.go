@@ -257,13 +257,13 @@ func TestMembers_ListExcludesServiceAccounts(t *testing.T) {
 	fakeSAID := fmt.Sprintf("sa-%s", randomName("sa"))
 	_, err := subEnv.DB.Pool().Exec(ctx, `
 		INSERT INTO role_assignments
-			(principal_type, principal_id, scope_type, scope_id, role, granted_by)
+			(principal_type, principal_id, scope_type, scope_id, role_definition, granted_by)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
 		string(models.PrincipalTypeServiceAccount),
 		fakeSAID,
 		string(models.ScopeTypeTenant),
 		tenantID,
-		string(models.RoleMember),
+		models.RoleDefinitionForRole(models.RoleMember),
 		"test-setup",
 	)
 	require.NoError(t, err, "insert service_account role_assignment")

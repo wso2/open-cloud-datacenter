@@ -42,10 +42,9 @@ type ScopeType string
 const (
 	ScopeTypeTenant  ScopeType = "tenant"
 	ScopeTypeProject ScopeType = "project"
-	// Future M5 values (not yet used — listed here for discoverability):
-	//   ScopeTypeSubscription  ScopeType = "subscription"
-	//   ScopeTypeResourceGroup ScopeType = "resource_group"
-	//   ScopeTypeResource      ScopeType = "resource"
+	// ScopeTypeResource is the narrowest scope (RBAC v2): a role bound to a
+	// single resource by its UUID. See docs/rbac-v2.md §5.3.
+	ScopeTypeResource ScopeType = "resource"
 )
 
 // Role is the permission level granted within a scope.
@@ -58,6 +57,56 @@ const (
 	RoleMember Role = "member"
 	RoleViewer Role = "viewer"
 )
+
+// ─────────────────────── RBAC v2 storage bridge ─────────────────────────────
+//
+// RBAC v2 stores a role-definition KEY in role_assignments.role_definition
+// instead of the v1 owner/member/viewer rank. These three keys are the built-in
+// roles the v1 ranks map onto (see docs/rbac-v2.md §4.1); the literals mirror
+// the rbac package's built-in catalog (rbac.RoleOwner / RoleContributor /
+// RoleReader) — a unit test asserts they stay in sync. The mapping helpers are a
+// transitional bridge: the in-memory model still carries the v1 Role rank
+// (consumed by the rank-based enforcement path), while persistence speaks the
+// v2 key. P1 retires this bridge when handlers adopt action-based checks and the
+// model carries the key directly.
+const (
+	RoleDefOwner       = "Owner"
+	RoleDefContributor = "Contributor"
+	RoleDefReader      = "Reader"
+)
+
+// RoleDefinitionForRole maps a v1 rank role to its v2 built-in role-definition
+// key (the value persisted in role_assignments.role_definition). Returns "" for
+// an unknown role.
+func RoleDefinitionForRole(r Role) string {
+	switch r {
+	case RoleOwner:
+		return RoleDefOwner
+	case RoleMember:
+		return RoleDefContributor
+	case RoleViewer:
+		return RoleDefReader
+	default:
+		return ""
+	}
+}
+
+// RoleForRoleDefinition maps a persisted role-definition key back to the v1 rank
+// role used by the (transitional) rank-based enforcement path. Keys outside the
+// three built-ins above — future per-resource-type or custom roles — map to ""
+// (rank 0); those are only meaningful to the v2 action engine, not the rank path.
+func RoleForRoleDefinition(key string) Role {
+	switch key {
+	case RoleDefOwner:
+		return RoleOwner
+	case RoleDefContributor:
+		return RoleMember
+	case RoleDefReader:
+		return RoleViewer
+	default:
+		return ""
+	}
+}
 
 // ─────────────────────────── Value objects ──────────────────────────────────
 

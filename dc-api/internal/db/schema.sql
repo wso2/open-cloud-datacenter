@@ -441,15 +441,16 @@ CREATE TABLE IF NOT EXISTS peering_transit_cidrs (
 -- service_accounts: DC-API-issued long-lived tokens for CI/CD principals.
 
 CREATE TABLE IF NOT EXISTS role_assignments (
-    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    principal_type TEXT NOT NULL,
-    principal_id   TEXT NOT NULL,
-    scope_type     TEXT NOT NULL,
-    scope_id       TEXT NOT NULL,
-    role           TEXT NOT NULL,
-    granted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    granted_by     TEXT NOT NULL,
-    UNIQUE (principal_type, principal_id, scope_type, scope_id, role)
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    principal_type  TEXT NOT NULL,
+    principal_id    TEXT NOT NULL,
+    scope_type      TEXT NOT NULL,                -- 'tenant' | 'project' | 'resource' (RBAC v2)
+    scope_id        TEXT NOT NULL,
+    role_definition TEXT NOT NULL,                -- RBAC v2: built-in role key or custom role_definitions.id
+    granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    granted_by      TEXT NOT NULL
+    -- Uniqueness is a CREATE UNIQUE INDEX in the RBAC v2 migration block below
+    -- (one statement serves both fresh installs and the in-place column rename).
 );
 
 CREATE INDEX IF NOT EXISTS idx_role_assignments_principal ON role_assignments (principal_type, principal_id);
@@ -623,6 +624,55 @@ CREATE INDEX IF NOT EXISTS idx_private_endpoints_tenant_uuid         ON private_
 -- reference. For scope_type='tenant' it points at tenants.tenant_uuid.
 ALTER TABLE role_assignments ADD COLUMN IF NOT EXISTS scope_uuid UUID;
 CREATE INDEX IF NOT EXISTS idx_role_assignments_scope_uuid ON role_assignments (scope_uuid);
+
+-- ─────────────────────────── RBAC v2 (action-based roles) ───────────────────
+-- Clean break from the v1 owner/member/viewer rank (no production users):
+-- role_assignments.role becomes role_definition, holding a role-definition key —
+-- a built-in ('Owner','Contributor','Reader', plus the per-resource-type roles)
+-- or a custom role_definitions.id. scope_type also gains 'resource' (free TEXT,
+-- no DDL). See docs/rbac-v2.md §8. One-time in-place conversion, no retention.
+ALTER TABLE role_assignments ADD COLUMN IF NOT EXISTS role_definition TEXT;
+-- Backfill from the v1 column only on upgraded DBs (fresh installs never had it,
+-- so referencing `role` unconditionally would error — guard on its existence).
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'role_assignments' AND column_name = 'role') THEN
+        UPDATE role_assignments
+           SET role_definition = CASE role
+               WHEN 'owner'  THEN 'Owner'
+               WHEN 'member' THEN 'Contributor'
+               WHEN 'viewer' THEN 'Reader'
+               ELSE role_definition
+           END
+         WHERE role_definition IS NULL;
+    END IF;
+END $$;
+-- Retire the v1 rank column (also drops the old inline UNIQUE that referenced it).
+ALTER TABLE role_assignments DROP COLUMN IF EXISTS role;
+-- New uniqueness keyed on role_definition (serves fresh + migrated installs).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_role_assignments_principal_scope_roledef
+    ON role_assignments (principal_type, principal_id, scope_type, scope_id, role_definition);
+
+-- Custom (tenant-owned) role definitions. Built-ins live in the Go registry and
+-- are resolved by reserved key first; this table holds user-defined roles that
+-- the engine resolves identically. UI/CRUD ships in a later phase — the table is
+-- created now so the foundation is in place. See docs/rbac-v2.md §8.1.
+CREATE TABLE IF NOT EXISTS role_definitions (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_uuid       UUID NOT NULL,
+    name              TEXT NOT NULL,
+    description       TEXT,
+    actions           JSONB NOT NULL DEFAULT '[]',
+    not_actions       JSONB NOT NULL DEFAULT '[]',
+    data_actions      JSONB NOT NULL DEFAULT '[]',
+    not_data_actions  JSONB NOT NULL DEFAULT '[]',
+    assignable_scopes JSONB NOT NULL DEFAULT '[]',
+    created_by        TEXT NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_uuid, name)
+);
+CREATE INDEX IF NOT EXISTS idx_role_definitions_tenant_uuid ON role_definitions (tenant_uuid);
 
 -- ─────────────────────────── M2.5 Projects hierarchy ─────────────────────────
 -- Tenant → Project → Resource. Project is the workspace boundary: own

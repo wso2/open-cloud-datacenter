@@ -36,7 +36,7 @@ import (
 func (r *Repository) CreateRoleAssignment(ctx context.Context, ra models.RoleAssignment) (*models.RoleAssignment, error) {
 	const q = `
 		INSERT INTO role_assignments
-			(principal_type, principal_id, scope_type, scope_id, scope_uuid, role, granted_by, display_alias)
+			(principal_type, principal_id, scope_type, scope_id, scope_uuid, role_definition, granted_by, display_alias)
 		VALUES
 			($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''))
 		RETURNING id, granted_at`
@@ -47,7 +47,7 @@ func (r *Repository) CreateRoleAssignment(ctx context.Context, ra models.RoleAss
 		string(ra.ScopeType),
 		ra.ScopeID,
 		ra.ScopeUUID,
-		string(ra.Role),
+		models.RoleDefinitionForRole(ra.Role),
 		ra.GrantedBy,
 		ra.DisplayAlias,
 	).Scan(&ra.ID, &ra.GrantedAt)
@@ -66,6 +66,7 @@ func scanRoleAssignment(scanner interface{ Scan(dest ...any) error }) (models.Ro
 	var ra models.RoleAssignment
 	var displayAlias *string
 	var scopeUUID *uuid.UUID // nullable — pre-6a rows may have NULL
+	var roleDef string       // RBAC v2: role_definition key; mapped back to the v1 rank below
 	if err := scanner.Scan(
 		&ra.ID,
 		&ra.PrincipalType,
@@ -73,13 +74,14 @@ func scanRoleAssignment(scanner interface{ Scan(dest ...any) error }) (models.Ro
 		&ra.ScopeType,
 		&ra.ScopeID,
 		&scopeUUID,
-		&ra.Role,
+		&roleDef,
 		&ra.GrantedAt,
 		&ra.GrantedBy,
 		&displayAlias,
 	); err != nil {
 		return ra, err
 	}
+	ra.Role = models.RoleForRoleDefinition(roleDef)
 	if scopeUUID != nil {
 		ra.ScopeUUID = *scopeUUID
 	}
@@ -94,7 +96,7 @@ func scanRoleAssignment(scanner interface{ Scan(dest ...any) error }) (models.Ro
 // as a 404.
 func (r *Repository) GetRoleAssignment(ctx context.Context, id uuid.UUID) (*models.RoleAssignment, error) {
 	const q = `
-		SELECT id, principal_type, principal_id, scope_type, scope_id, scope_uuid, role,
+		SELECT id, principal_type, principal_id, scope_type, scope_id, scope_uuid, role_definition,
 		       granted_at, granted_by, display_alias
 		FROM   role_assignments
 		WHERE  id = $1`
@@ -114,7 +116,7 @@ func (r *Repository) GetRoleAssignment(ctx context.Context, id uuid.UUID) (*mode
 // walk helper to compute effective role.
 func (r *Repository) ListRoleAssignmentsForPrincipal(ctx context.Context, principalType models.PrincipalType, principalID string) ([]models.RoleAssignment, error) {
 	const q = `
-		SELECT id, principal_type, principal_id, scope_type, scope_id, scope_uuid, role,
+		SELECT id, principal_type, principal_id, scope_type, scope_id, scope_uuid, role_definition,
 		       granted_at, granted_by, display_alias
 		FROM   role_assignments
 		WHERE  principal_type = $1 AND principal_id = $2
@@ -142,7 +144,7 @@ func (r *Repository) ListRoleAssignmentsForPrincipal(ctx context.Context, princi
 // membership-management handlers.
 func (r *Repository) ListRoleAssignmentsForScope(ctx context.Context, scopeType models.ScopeType, scopeID string) ([]models.RoleAssignment, error) {
 	const q = `
-		SELECT id, principal_type, principal_id, scope_type, scope_id, scope_uuid, role,
+		SELECT id, principal_type, principal_id, scope_type, scope_id, scope_uuid, role_definition,
 		       granted_at, granted_by, display_alias
 		FROM   role_assignments
 		WHERE  scope_type = $1 AND scope_id = $2
@@ -294,7 +296,7 @@ func (r *Repository) ListServiceAccountsForTenant(ctx context.Context, tenantUUI
 // Returns "" if no role_assignments row exists.
 func (r *Repository) GetRoleForServiceAccount(ctx context.Context, saID uuid.UUID, tenantID string) (models.Role, error) {
 	const q = `
-		SELECT role
+		SELECT role_definition
 		FROM   role_assignments
 		WHERE  principal_type = 'service_account'
 		  AND  principal_id   = $1
@@ -303,15 +305,15 @@ func (r *Repository) GetRoleForServiceAccount(ctx context.Context, saID uuid.UUI
 		ORDER  BY CASE scope_type WHEN 'project' THEN 0 ELSE 1 END
 		LIMIT  1`
 
-	var role string
-	err := r.pool.QueryRow(ctx, q, saID.String(), tenantID).Scan(&role)
+	var roleDef string
+	err := r.pool.QueryRow(ctx, q, saID.String(), tenantID).Scan(&roleDef)
 	if err == pgx.ErrNoRows {
 		return "", nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("db get role for SA %s in tenant %s: %w", saID, tenantID, err)
 	}
-	return models.Role(role), nil
+	return models.RoleForRoleDefinition(roleDef), nil
 }
 
 // ListServiceAccountsByProject returns all service accounts for a project, newest first.
@@ -472,7 +474,7 @@ func (r *Repository) CountOwnersForTenant(ctx context.Context, tenantID string) 
 		WHERE  scope_type      = 'tenant'
 		  AND  scope_id        = $1
 		  AND  principal_type  = 'user'
-		  AND  role            = 'owner'`,
+		  AND  role_definition = 'Owner'`,
 		tenantID,
 	).Scan(&count)
 	if err != nil {
@@ -571,7 +573,7 @@ func (r *Repository) CreateServiceAccountWithRole(
 	// Insert the role_assignments row scoped to project or tenant.
 	const raQ = `
 		INSERT INTO role_assignments
-			(principal_type, principal_id, scope_type, scope_id, scope_uuid, role, granted_by)
+			(principal_type, principal_id, scope_type, scope_id, scope_uuid, role_definition, granted_by)
 		VALUES
 			($1, $2, $3, $4, $5, $6, $7)`
 
@@ -581,7 +583,7 @@ func (r *Repository) CreateServiceAccountWithRole(
 		string(scopeType),
 		scopeID,
 		scopeUUID,
-		string(role),
+		models.RoleDefinitionForRole(role),
 		grantedBy,
 	); err != nil {
 		return nil, fmt.Errorf("db insert role assignment for SA: %w", err)
