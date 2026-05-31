@@ -81,13 +81,17 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "INTEGRATION SETUP FAILED: %v\n", err)
 		os.Exit(1)
 	}
-	scrubStaleTestResources(ctx, env.KubeClient)
+	if env.KubeClient != nil { // nil in cluster-free (nop) mode
+		scrubStaleTestResources(ctx, env.KubeClient)
+	}
 	code := m.Run()
 	// Always clean up resources we created during this run, regardless of pass/fail.
 	// Without this, namespaces accumulate forever — the startup scrub only catches
 	// >1h old leftovers, which leaves a window where back-to-back runs pile up
 	// before being garbage-collected.
-	cleanupTestResources(ctx, env.KubeClient)
+	if env.KubeClient != nil { // nil in cluster-free (nop) mode
+		cleanupTestResources(ctx, env.KubeClient)
+	}
 	if env.pgContainer != nil {
 		_ = env.pgContainer.Terminate(ctx)
 	}
@@ -98,6 +102,9 @@ func TestMain(m *testing.M) {
 }
 
 func newTestEnv(ctx context.Context) (*TestEnv, error) {
+	if nopMode() {
+		return newNopTestEnv(ctx)
+	}
 	pgc, err := tcpostgres.Run(ctx,
 		"postgres:16-alpine",
 		tcpostgres.WithDatabase("dc_api_test"),
@@ -244,6 +251,9 @@ func newTestEnv(ctx context.Context) (*TestEnv, error) {
 // Callers must call subEnv.Server.Close() when done (typically via t.Cleanup).
 func newSubEnv(t *testing.T, cfg middleware.AuthConfig) *TestEnv {
 	t.Helper()
+	if nopMode() {
+		return newNopSubEnv(t, cfg)
+	}
 	kubeconfigRaw, err := loadKubeconfig()
 	if err != nil {
 		t.Fatalf("newSubEnv: load kubeconfig: %v", err)
@@ -379,11 +389,14 @@ func configureF20(ctx context.Context, netProvider *kubeovn.Client) (providers.V
 }
 
 func preflight(ctx context.Context) error {
-	if os.Getenv("KUBECONFIG") == "" {
-		return fmt.Errorf("KUBECONFIG not set — export KUBECONFIG=$HOME/.kube/config")
-	}
-	if os.Getenv("KUBE_CONTEXT") == "" {
-		return fmt.Errorf("KUBE_CONTEXT not set — export KUBE_CONTEXT=harvester-dev")
+	// Cluster-free mode needs no kubeconfig (only Docker, for the Postgres container).
+	if !nopMode() {
+		if os.Getenv("KUBECONFIG") == "" {
+			return fmt.Errorf("KUBECONFIG not set — export KUBECONFIG=$HOME/.kube/config")
+		}
+		if os.Getenv("KUBE_CONTEXT") == "" {
+			return fmt.Errorf("KUBE_CONTEXT not set — export KUBE_CONTEXT=harvester-dev")
+		}
 	}
 	// Honour DOCKER_HOST if set (covers remote/colima/lima/non-default sockets).
 	dockerOK := false
