@@ -33,6 +33,7 @@ import (
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
+	"github.com/wso2/dc-api/internal/rbac"
 )
 
 // NSGHandler handles all /v1/security-groups endpoints.
@@ -144,7 +145,7 @@ func (h *NSGHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionNSGWrite) {
 		return
 	}
 
@@ -301,7 +302,7 @@ func (h *NSGHandler) List(w http.ResponseWriter, r *http.Request) {
 // UpdateRules handles PUT /v1/security-groups/{sg_id}/rules.
 // Replaces the complete rule set. Synchronous: returns 200.
 func (h *NSGHandler) UpdateRules(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -311,7 +312,7 @@ func (h *NSGHandler) UpdateRules(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionNSGWrite) {
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "sg_id"))
@@ -370,7 +371,7 @@ func (h *NSGHandler) UpdateRules(w http.ResponseWriter, r *http.Request) {
 // Delete handles DELETE /v1/security-groups/{sg_id}.
 // Synchronous: returns 204. Rejects if attachments exist.
 func (h *NSGHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -380,7 +381,7 @@ func (h *NSGHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionNSGDelete) {
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "sg_id"))
@@ -438,7 +439,7 @@ func (h *NSGHandler) Attach(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionNSGWrite) {
 		return
 	}
 	sgID, err := uuid.Parse(chi.URLParam(r, "sg_id"))
@@ -539,7 +540,7 @@ func (h *NSGHandler) Attach(w http.ResponseWriter, r *http.Request) {
 // Detach handles DELETE /v1/security-groups/{sg_id}/attachments/{attachment_id}.
 // Synchronous: returns 204.
 func (h *NSGHandler) Detach(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -549,7 +550,7 @@ func (h *NSGHandler) Detach(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionNSGWrite) {
 		return
 	}
 	sgID, err := uuid.Parse(chi.URLParam(r, "sg_id"))

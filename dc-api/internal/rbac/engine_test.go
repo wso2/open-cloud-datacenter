@@ -76,6 +76,11 @@ func TestBuiltinRolePermissions(t *testing.T) {
 		{"contrib cannot write roledefs", RoleContributor, ActionRoleDefinitionWrite, false, false},
 		{"contrib can read assignments", RoleContributor, ActionRoleAssignmentRead, false, true},
 		{"contrib no secret data", RoleContributor, ActionSecretRead, true, false},
+		{"contrib cannot create SA", RoleContributor, ActionServiceAccountWrite, false, false},
+		{"contrib cannot create project", RoleContributor, ActionProjectWrite, false, false},
+		{"contrib cannot delete project", RoleContributor, ActionProjectDelete, false, false},
+		{"contrib can read project", RoleContributor, ActionProjectRead, false, true},
+		{"contrib cannot change quota", RoleContributor, ActionQuotaWrite, false, false},
 
 		// Reader: */read control only; no writes; no data.
 		{"reader vm read", RoleReader, ActionVMRead, false, true},

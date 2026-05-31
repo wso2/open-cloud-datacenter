@@ -22,6 +22,7 @@ import (
 	"github.com/wso2/dc-api/internal/providers"
 	"github.com/wso2/dc-api/internal/providers/common"
 	"github.com/wso2/dc-api/internal/providers/kubeovn"
+	"github.com/wso2/dc-api/internal/rbac"
 )
 
 // SubnetHandler handles all /v1/vnets/{vnet_id}/subnets endpoints.
@@ -89,7 +90,7 @@ func (h *SubnetHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionSubnetWrite) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())
@@ -325,12 +326,12 @@ func (h *SubnetHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /v1/vnets/{vnet_id}/subnets/{subnet_id}.
 func (h *SubnetHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionSubnetDelete) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())

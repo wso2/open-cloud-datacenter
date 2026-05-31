@@ -26,6 +26,7 @@ import (
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
+	"github.com/wso2/dc-api/internal/rbac"
 )
 
 // PrivateDnsZoneHandler handles all /v1/vnets/{vnet_id}/dns-zones endpoints.
@@ -160,7 +161,7 @@ func (h *PrivateDnsZoneHandler) CreateZone(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionDNSZoneWrite) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())
@@ -283,7 +284,7 @@ func (h *PrivateDnsZoneHandler) ListZones(w http.ResponseWriter, r *http.Request
 // DeleteZone handles DELETE /v1/vnets/{vnet_id}/dns-zones/{zone_id}.
 // Async: returns 202.
 func (h *PrivateDnsZoneHandler) DeleteZone(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -293,7 +294,7 @@ func (h *PrivateDnsZoneHandler) DeleteZone(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionDNSZoneDelete) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())
@@ -386,7 +387,7 @@ func (h *PrivateDnsZoneHandler) UpsertRecord(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionDNSZoneWrite) {
 		return
 	}
 
@@ -525,7 +526,7 @@ func (h *PrivateDnsZoneHandler) UpdateRecord(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionDNSZoneWrite) {
 		return
 	}
 	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID)
@@ -592,7 +593,7 @@ func (h *PrivateDnsZoneHandler) UpdateRecord(w http.ResponseWriter, r *http.Requ
 // DeleteRecord handles DELETE /v1/vnets/{vnet_id}/dns-zones/{zone_id}/records/{record_id}.
 // Synchronous: returns 204.
 func (h *PrivateDnsZoneHandler) DeleteRecord(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -602,7 +603,7 @@ func (h *PrivateDnsZoneHandler) DeleteRecord(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionDNSZoneWrite) {
 		return
 	}
 	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID)

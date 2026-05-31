@@ -34,6 +34,7 @@ import (
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
 	"github.com/wso2/dc-api/internal/providers/common"
+	"github.com/wso2/dc-api/internal/rbac"
 )
 
 // ClusterHandler handles all /v1/clusters endpoints.
@@ -316,7 +317,7 @@ func (h *ClusterHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionClusterWrite) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())
@@ -609,7 +610,7 @@ func (h *ClusterHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE .../clusters/{id}.
 func (h *ClusterHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -619,7 +620,7 @@ func (h *ClusterHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionClusterDelete) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())
@@ -700,7 +701,7 @@ func (h *ClusterHandler) AddNodePool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionClusterWrite) {
 		return
 	}
 
@@ -820,12 +821,12 @@ func (h *ClusterHandler) GetNodePool(w http.ResponseWriter, r *http.Request) {
 // System pool taints/labels are refused (system pool must remain taint-free so
 // the cluster can always schedule system workloads).
 func (h *ClusterHandler) ScaleOrUpdateNodePool(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionClusterWrite) {
 		return
 	}
 
@@ -934,12 +935,12 @@ func (h *ClusterHandler) ScaleOrUpdateNodePool(w http.ResponseWriter, r *http.Re
 // deleting immediately, the goroutine calls provider.RemoveNodePool which drains
 // then removes the pool from the Rancher CR, then deletes the DB row.
 func (h *ClusterHandler) RemoveNodePool(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionClusterWrite) {
 		return
 	}
 

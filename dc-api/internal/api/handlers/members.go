@@ -36,6 +36,7 @@ import (
 	"github.com/wso2/dc-api/internal/api/middleware"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
+	"github.com/wso2/dc-api/internal/rbac"
 )
 
 // MemberHandler handles all /v1/tenants/{tenant_id}/members endpoints.
@@ -117,7 +118,7 @@ func (h *MemberHandler) Invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionRoleAssignmentWrite) {
 		return
 	}
 
@@ -228,7 +229,7 @@ func (h *MemberHandler) Remove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionRoleAssignmentDelete) {
 		return
 	}
 

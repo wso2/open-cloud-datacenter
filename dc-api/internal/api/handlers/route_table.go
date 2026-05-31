@@ -30,6 +30,7 @@ import (
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
+	"github.com/wso2/dc-api/internal/rbac"
 )
 
 // RouteTableHandler handles all /v1/vnets/{vnet_id}/route-tables endpoints.
@@ -144,7 +145,7 @@ func (h *RouteTableHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionRouteTableWrite) {
 		return
 	}
 
@@ -306,7 +307,7 @@ func (h *RouteTableHandler) List(w http.ResponseWriter, r *http.Request) {
 // UpdateRoutes handles PUT /v1/vnets/{vnet_id}/route-tables/{rt_id}.
 // Synchronous: replaces all route entries and returns 200.
 func (h *RouteTableHandler) UpdateRoutes(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -316,7 +317,7 @@ func (h *RouteTableHandler) UpdateRoutes(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionRouteTableWrite) {
 		return
 	}
 	vnetID, err := uuid.Parse(chi.URLParam(r, "vnet_id"))
@@ -378,7 +379,7 @@ func (h *RouteTableHandler) UpdateRoutes(w http.ResponseWriter, r *http.Request)
 // Delete handles DELETE /v1/vnets/{vnet_id}/route-tables/{rt_id}.
 // Synchronous: returns 204 No Content.
 func (h *RouteTableHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -388,7 +389,7 @@ func (h *RouteTableHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionRouteTableDelete) {
 		return
 	}
 	vnetID, err := uuid.Parse(chi.URLParam(r, "vnet_id"))
@@ -443,7 +444,7 @@ func (h *RouteTableHandler) Associate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionRouteTableWrite) {
 		return
 	}
 	vnetID, err := uuid.Parse(chi.URLParam(r, "vnet_id"))
@@ -517,7 +518,7 @@ func (h *RouteTableHandler) Associate(w http.ResponseWriter, r *http.Request) {
 
 // Disassociate handles DELETE /v1/vnets/{vnet_id}/route-tables/{rt_id}/associations/{assoc_id}.
 func (h *RouteTableHandler) Disassociate(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -527,7 +528,7 @@ func (h *RouteTableHandler) Disassociate(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionRouteTableWrite) {
 		return
 	}
 	vnetID, err := uuid.Parse(chi.URLParam(r, "vnet_id"))

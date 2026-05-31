@@ -39,13 +39,17 @@ var builtinRoles = map[string]RoleDefinition{
 	RoleContributor: {
 		Key:         RoleContributor,
 		DisplayName: "Contributor",
-		Description: "Create, update, and delete all resources. Cannot grant access or read secret/credential data.",
+		Description: "Create, update, and delete all resources. Cannot manage access or service accounts, create/delete projects, change quotas, or read secret/credential data.",
 		Actions:     []string{"*"},
 		NotActions: []string{
-			"authorization/roleAssignments/write",
-			"authorization/roleAssignments/delete",
-			"authorization/roleDefinitions/write",
-			"authorization/roleDefinitions/delete",
+			// No access management (role assignments / definitions) or service
+			// accounts — that is Owner / User Access Administrator territory.
+			"authorization/*/write",
+			"authorization/*/delete",
+			// No project lifecycle or quota changes — Owner only.
+			"resourcemanager/projects/write",
+			"resourcemanager/projects/delete",
+			"resourcemanager/quotas/write",
 		},
 		Builtin: true,
 	},

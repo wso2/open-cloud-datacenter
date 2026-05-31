@@ -30,6 +30,7 @@ import (
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
+	"github.com/wso2/dc-api/internal/rbac"
 )
 
 // PeeringHandler handles all /v1/vnets/{vnet_id}/peerings endpoints.
@@ -97,7 +98,7 @@ func (h *PeeringHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionPeeringWrite) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())
@@ -325,12 +326,12 @@ func (h *PeeringHandler) List(w http.ResponseWriter, r *http.Request) {
 // Delete handles DELETE /v1/vnets/{vnet_id}/peerings/{peering_id}.
 // Async: marks DELETING, spawns goroutine, returns 202.
 func (h *PeeringHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionPeeringDelete) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())

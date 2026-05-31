@@ -42,6 +42,7 @@ import (
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
+	"github.com/wso2/dc-api/internal/rbac"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -193,7 +194,7 @@ func (h *VMHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionVMWrite) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())
@@ -443,7 +444,7 @@ func (h *VMHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /v1/virtual-machines/{id}.
 func (h *VMHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -453,7 +454,7 @@ func (h *VMHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionVMDelete) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())

@@ -34,6 +34,7 @@ import (
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
+	"github.com/wso2/dc-api/internal/rbac"
 )
 
 // ProjectHandler handles all /v1/tenants/{tenant_id}/projects endpoints.
@@ -166,7 +167,7 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionProjectWrite) {
 		return
 	}
 	tenantUUID, ok := middleware.TenantUUIDFromContext(r.Context())
@@ -293,7 +294,7 @@ func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionProjectDelete) {
 		return
 	}
 	projectID := chi.URLParam(r, "project_id")
@@ -362,7 +363,7 @@ func (h *ProjectHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionProjectWrite) {
 		return
 	}
 	projectID := chi.URLParam(r, "project_id")

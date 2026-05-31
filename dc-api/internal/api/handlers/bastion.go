@@ -16,6 +16,7 @@ import (
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
+	"github.com/wso2/dc-api/internal/rbac"
 )
 
 // BastionHandler handles all /v1/bastions endpoints (F10).
@@ -147,7 +148,7 @@ func (h *BastionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionBastionWrite) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())
@@ -336,7 +337,7 @@ func (h *BastionHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *BastionHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -346,7 +347,7 @@ func (h *BastionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionBastionDelete) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())

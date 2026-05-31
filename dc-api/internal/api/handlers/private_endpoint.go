@@ -37,6 +37,7 @@ import (
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers/common"
 	"github.com/wso2/dc-api/internal/providers/endpoints"
+	"github.com/wso2/dc-api/internal/rbac"
 )
 
 // TargetLookup is the per-service shim that confirms the parent resource
@@ -142,7 +143,7 @@ func (h *PrivateEndpointHandler) Create(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionPrivateEndpointWrite) {
 		return
 	}
 
@@ -306,7 +307,7 @@ func (h *PrivateEndpointHandler) Create(w http.ResponseWriter, r *http.Request) 
 
 // List handles GET /v1/<service>/{target_id}/private-endpoints.
 func (h *PrivateEndpointHandler) List(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -316,7 +317,7 @@ func (h *PrivateEndpointHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionPrivateEndpointRead) {
 		return
 	}
 	targetID, err := uuid.Parse(chi.URLParam(r, h.targetParam))
@@ -349,7 +350,7 @@ func (h *PrivateEndpointHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Get handles GET /v1/<service>/{target_id}/private-endpoints/{ep_id}.
 func (h *PrivateEndpointHandler) Get(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -359,7 +360,7 @@ func (h *PrivateEndpointHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionPrivateEndpointRead) {
 		return
 	}
 
@@ -387,7 +388,7 @@ func (h *PrivateEndpointHandler) Get(w http.ResponseWriter, r *http.Request) {
 // Delete handles DELETE /v1/<service>/{target_id}/private-endpoints/{ep_id}.
 // Synchronous — runs Teardown then deletes the row.
 func (h *PrivateEndpointHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -397,7 +398,7 @@ func (h *PrivateEndpointHandler) Delete(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionPrivateEndpointDelete) {
 		return
 	}
 

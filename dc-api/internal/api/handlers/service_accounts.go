@@ -42,6 +42,7 @@ import (
 	"github.com/wso2/dc-api/internal/api/middleware"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
+	"github.com/wso2/dc-api/internal/rbac"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -185,7 +186,7 @@ func (h *ServiceAccountHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionServiceAccountWrite) {
 		return
 	}
 
@@ -378,7 +379,7 @@ func (h *ServiceAccountHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionServiceAccountDelete) {
 		return
 	}
 
