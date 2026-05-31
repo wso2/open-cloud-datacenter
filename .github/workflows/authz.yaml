@@ -1,0 +1,51 @@
+name: authz-tests
+
+# Cluster-free RBAC / authorization integration tests.
+#
+# Runs the pure-authz subset of dc-api/test/integration with
+# DCAPI_TEST_NOP=1: every backend provider is a no-op, the DB is a
+# testcontainers Postgres, and no kubeconfig is needed. These tests assert
+# only on HTTP status codes — authorization is decided in the handler before
+# any provider call — so they gate the permission model on every PR without a
+# real Harvester / KubeOVN cluster.
+#
+# Scope: the role × verb matrix, membership, service-account, tenant,
+# option-D, and phase-6a suites. Resource tests (vnet/subnet/vm/cluster/...)
+# genuinely provision on the cluster and are deliberately NOT in scope here.
+
+on:
+  pull_request:
+    paths:
+      - 'dc-api/**'
+      - '.github/workflows/authz.yaml'
+  push:
+    branches: [controlplane]
+    paths:
+      - 'dc-api/**'
+      - '.github/workflows/authz.yaml'
+  workflow_dispatch:
+
+jobs:
+  authz:
+    runs-on: ubuntu-latest
+    env:
+      # Build the integration env with all-nop backends — no kubeconfig.
+      DCAPI_TEST_NOP: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: dc-api/go.mod
+          cache-dependency-path: dc-api/go.sum
+
+      - name: RBAC / authorization integration tests (cluster-free)
+        working-directory: dc-api
+        # ubuntu-latest ships a running Docker daemon at the default socket,
+        # so testcontainers spins up Postgres with no extra configuration
+        # (same as the contract job). 12m outer ceiling for compile + the
+        # single shared Postgres container + the ~35 status-code assertions.
+        run: |
+          go test -tags integration -timeout 12m -v \
+            -run 'TestRBAC_|TestMembers_|TestServiceAccountAPI_|TestTenants_|TestOptionD_|TestPhase6a' \
+            ./test/integration/...
