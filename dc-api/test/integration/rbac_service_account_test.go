@@ -141,7 +141,7 @@ func clientForServiceAccount(t *testing.T, tenantID string, role models.Role) (*
 // owner role can list, create, and delete VNets.
 func TestRBAC_ServiceAccount_OwnerCanDoEverything(t *testing.T) {
 	t.Parallel()
-	tenantID := "test-sa-owner-" + randomName("t")
+	tenantID := randomTenantID("sa-owner")
 	if !strings.HasPrefix(tenantID, "test-") {
 		tenantID = "test-" + tenantID
 	}
@@ -179,7 +179,7 @@ func TestRBAC_ServiceAccount_OwnerCanDoEverything(t *testing.T) {
 // member role can create but not delete VNets.
 func TestRBAC_ServiceAccount_MemberCannotDelete(t *testing.T) {
 	t.Parallel()
-	tenantID := "test-sa-member-" + randomName("t")
+	tenantID := randomTenantID("sa-member")
 	if !strings.HasPrefix(tenantID, "test-") {
 		tenantID = "test-" + tenantID
 	}
@@ -226,7 +226,7 @@ func TestRBAC_ServiceAccount_InvalidTokenReturns401(t *testing.T) {
 	// ── Valid format but wrong secret → 401 ──────────────────────────────────
 	// Create a real SA, then send a token with the correct lookup_id but a
 	// corrupted secret. The bcrypt comparison will fail.
-	tenantID := "test-sa-invalid-" + randomName("t")
+	tenantID := randomTenantID("sa-invalid")
 	// Generate a token solely for its lookup_id; we will NOT use the matching secret.
 	_, lookupID, _ := generateSAToken(t)
 	tokenHash := hashSecret(t, "correct-secret-that-we-will-not-send")
@@ -265,7 +265,7 @@ func TestRBAC_ServiceAccount_InvalidTokenReturns401(t *testing.T) {
 // SA request, the last_used column is set to a non-nil, recent timestamp.
 func TestRBAC_ServiceAccount_LastUsedUpdated(t *testing.T) {
 	t.Parallel()
-	tenantID := "test-sa-lastused-" + randomName("t")
+	tenantID := randomTenantID("sa-lastused")
 
 	client, saID := clientForServiceAccount(t, tenantID, models.RoleMember)
 	ctx := context.Background()

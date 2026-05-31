@@ -35,7 +35,7 @@ func TestMembers_OwnerCanInviteAndList(t *testing.T) {
 	t.Parallel()
 	subEnv := rbacSubEnv(t)
 
-	tenantID := "test-tenant-members-invite-" + randomName("t")
+	tenantID := randomTenantID("members-invite")
 	ownerSub := "sub-owner-invite-" + randomName("u")
 	inviteeSub := "sub-invitee-" + randomName("u")
 
@@ -90,7 +90,7 @@ func TestMembers_MemberCannotInvite(t *testing.T) {
 	t.Parallel()
 	subEnv := rbacSubEnv(t)
 
-	tenantID := "test-tenant-members-noinvite-" + randomName("t")
+	tenantID := randomTenantID("members-noinvite")
 	memberSub := "sub-member-noinvite-" + randomName("u")
 	someUserSub := "sub-target-" + randomName("u")
 
@@ -113,7 +113,7 @@ func TestMembers_OwnerCanRemoveOtherMember(t *testing.T) {
 	t.Parallel()
 	subEnv := rbacSubEnv(t)
 
-	tenantID := "test-tenant-members-remove-" + randomName("t")
+	tenantID := randomTenantID("members-remove")
 	ownerSub := "sub-owner-remove-" + randomName("u")
 	inviteeSub := "sub-invitee-remove-" + randomName("u")
 
@@ -150,7 +150,7 @@ func TestMembers_CannotRemoveLastOwner(t *testing.T) {
 	t.Parallel()
 	subEnv := rbacSubEnv(t)
 
-	tenantID := "test-tenant-members-lastowner-" + randomName("t")
+	tenantID := randomTenantID("members-lastowner")
 	ownerSub := "sub-owner-last-" + randomName("u")
 
 	insertRole(t, subEnv, ownerSub, tenantID, models.RoleOwner)
@@ -179,7 +179,7 @@ func TestMembers_InviteDuplicateReturnsConflict(t *testing.T) {
 	t.Parallel()
 	subEnv := rbacSubEnv(t)
 
-	tenantID := "test-tenant-members-dup-" + randomName("t")
+	tenantID := randomTenantID("members-dup")
 	ownerSub := "sub-owner-dup-" + randomName("u")
 	inviteeSub := "sub-invitee-dup-" + randomName("u")
 
@@ -209,8 +209,8 @@ func TestMembers_CrossTenantOpsReturn404(t *testing.T) {
 	t.Parallel()
 	subEnv := rbacSubEnv(t)
 
-	tenantA := "test-tenant-a-xcomp-" + randomName("t")
-	tenantB := "test-tenant-b-xcomp-" + randomName("t")
+	tenantA := randomTenantID("xcomp-a")
+	tenantB := randomTenantID("xcomp-b")
 	ownerSub := "sub-owner-xcomp-" + randomName("u")
 
 	insertRole(t, subEnv, ownerSub, tenantA, models.RoleOwner)
@@ -246,7 +246,7 @@ func TestMembers_ListExcludesServiceAccounts(t *testing.T) {
 	t.Parallel()
 	subEnv := rbacSubEnv(t)
 
-	tenantID := "test-tenant-members-nosa-" + randomName("t")
+	tenantID := randomTenantID("members-nosa")
 	ownerSub := "sub-owner-nosa-" + randomName("u")
 
 	insertRole(t, subEnv, ownerSub, tenantID, models.RoleOwner)

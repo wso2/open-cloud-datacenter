@@ -57,8 +57,8 @@ func TestOptionD_PlatformAdminSubsPromotesWithoutGroup(t *testing.T) {
 	envAdminSub := "sub-env-admin-" + suffix
 	subEnv := optionDSubEnv(t, envAdminSub)
 
-	tenantA := "test-optd-env-a-" + suffix
-	tenantB := "test-optd-env-b-" + suffix
+	tenantA := randomTenantID("optd-env-a")
+	tenantB := randomTenantID("optd-env-b")
 	insertRole(t, subEnv, "seed-a-"+suffix, tenantA, models.RoleOwner)
 	insertRole(t, subEnv, "seed-b-"+suffix, tenantB, models.RoleMember)
 
@@ -92,7 +92,7 @@ func TestOptionD_DisplayAliasRoundTrip(t *testing.T) {
 	t.Parallel()
 	subEnv := optionDSubEnv(t)
 
-	tenantID := "test-optd-alias-" + randomName("t")
+	tenantID := randomTenantID("optd-alias")
 	ownerSub := "sub-optd-alias-owner-" + randomName("u")
 	inviteeSub := "sub-optd-alias-invitee-" + randomName("u")
 	alias := "alice-laptop"
@@ -134,7 +134,7 @@ func TestOptionD_InviteUpsertsTenantsRegistry(t *testing.T) {
 	adminSub := "sub-optd-inv-admin-" + suffix
 	subEnv := optionDSubEnv(t, adminSub)
 
-	tenantID := "test-optd-inv-reg-" + suffix
+	tenantID := randomTenantID("optd-inv-reg")
 	ownerSub := "sub-optd-inv-owner-" + suffix
 	inviteeSub := "sub-optd-inv-invitee-" + suffix
 

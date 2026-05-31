@@ -25,6 +25,23 @@ func randomName(suffix string) string {
 	return fmt.Sprintf("test-%x-%s", b, suffix)
 }
 
+// randomTenantID returns a unique tenant slug for tests that satisfies the
+// production tenant-id validation `^[a-z][a-z0-9-]{0,30}[a-z0-9]$` (max 32
+// chars). randomName() can't be used for tenants: its `test-<8hex>-<suffix>`
+// form, concatenated after a descriptive prefix, overflows 32 chars and is
+// rejected with HTTP 400. The "test-" prefix is preserved (cleanup and the
+// HasPrefix helpers rely on it); the label is truncated and the random token
+// kept to 6 hex chars so the total never exceeds 32.
+func randomTenantID(label string) string {
+	b := make([]byte, 3)
+	_, _ = rand.Read(b)
+	const maxLabel = 32 - len("test-") - len("-") - 6 // 20
+	if len(label) > maxLabel {
+		label = label[:maxLabel]
+	}
+	return fmt.Sprintf("test-%s-%x", label, b)
+}
+
 // defaultProjectID is the project slug created by clientForTenant for every
 // test tenant. Tests that don't care about project granularity use this.
 const defaultProjectID = "default"

@@ -28,7 +28,7 @@ func TestTenants_Member_SingleTenant(t *testing.T) {
 	t.Parallel()
 	subEnv := rbacSubEnv(t)
 
-	tenantID := "test-tenant-list-single-" + randomName("t")
+	tenantID := randomTenantID("list-single")
 	userSub := "sub-list-single-" + randomName("u")
 	insertRole(t, subEnv, userSub, tenantID, models.RoleMember)
 
@@ -58,8 +58,8 @@ func TestTenants_Member_MultiTenant(t *testing.T) {
 	userSub := "sub-list-multi-" + suffix
 	// Use a sortable prefix so the expected order is deterministic regardless
 	// of randomName.
-	tenantA := "test-tenant-list-multi-a-" + suffix
-	tenantB := "test-tenant-list-multi-b-" + suffix
+	tenantA := randomTenantID("list-multi-a")
+	tenantB := randomTenantID("list-multi-b")
 
 	insertRole(t, subEnv, userSub, tenantA, models.RoleOwner)
 	insertRole(t, subEnv, userSub, tenantB, models.RoleViewer)
@@ -89,7 +89,7 @@ func TestTenants_Member_MultipleRolesSameTenant(t *testing.T) {
 	t.Parallel()
 	subEnv := rbacSubEnv(t)
 
-	tenantID := "test-tenant-list-multirole-" + randomName("t")
+	tenantID := randomTenantID("list-multirole")
 	userSub := "sub-list-multirole-" + randomName("u")
 	insertRole(t, subEnv, userSub, tenantID, models.RoleOwner)
 	insertRole(t, subEnv, userSub, tenantID, models.RoleMember)
@@ -115,8 +115,8 @@ func TestTenants_Admin_SeesAllTenantsAsOwner(t *testing.T) {
 	subEnv := rbacSubEnv(t)
 
 	suffix := randomName("admin")
-	tenantA := "test-tenant-admin-list-a-" + suffix
-	tenantB := "test-tenant-admin-list-b-" + suffix
+	tenantA := randomTenantID("admin-list-a")
+	tenantB := randomTenantID("admin-list-b")
 
 	// Seed both tenants with assignments under different (non-admin) users.
 	// The admin should see both tenants in their list.

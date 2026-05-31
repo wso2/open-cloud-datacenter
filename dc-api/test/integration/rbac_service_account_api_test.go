@@ -96,7 +96,7 @@ func memberClientForSATests(t *testing.T, tenantID string) *APIClient {
 //   - The captured token can authenticate a real API call (GET /v1/vnets → 200).
 func TestServiceAccountAPI_OwnerCanCreate_GetTokenOnce(t *testing.T) {
 	t.Parallel()
-	tenantID := "test-sa-api-create-" + randomName("t")
+	tenantID := randomTenantID("sa-api-create")
 	owner := ownerClientForSATests(t, tenantID)
 	ctx := context.Background()
 
@@ -142,7 +142,7 @@ func TestServiceAccountAPI_OwnerCanCreate_GetTokenOnce(t *testing.T) {
 // receives 403 when attempting to create a service account.
 func TestServiceAccountAPI_MemberCannotCreate(t *testing.T) {
 	t.Parallel()
-	tenantID := "test-sa-api-member-create-" + randomName("t")
+	tenantID := randomTenantID("sa-api-mbr-create")
 	member := memberClientForSATests(t, tenantID)
 	ctx := context.Background()
 
@@ -158,7 +158,7 @@ func TestServiceAccountAPI_MemberCannotCreate(t *testing.T) {
 //   - GET list → 2 items, no "token" or "token_hash" in any item.
 func TestServiceAccountAPI_OwnerCanList_ExcludesTokenFields(t *testing.T) {
 	t.Parallel()
-	tenantID := "test-sa-api-list-" + randomName("t")
+	tenantID := randomTenantID("sa-api-list")
 	owner := ownerClientForSATests(t, tenantID)
 	ctx := context.Background()
 
@@ -194,7 +194,7 @@ func TestServiceAccountAPI_OwnerCanList_ExcludesTokenFields(t *testing.T) {
 // two SAs with the same name in the same tenant returns 409.
 func TestServiceAccountAPI_DuplicateNameReturnsConflict(t *testing.T) {
 	t.Parallel()
-	tenantID := "test-sa-api-dup-" + randomName("t")
+	tenantID := randomTenantID("sa-api-dup")
 	owner := ownerClientForSATests(t, tenantID)
 	ctx := context.Background()
 
@@ -214,7 +214,7 @@ func TestServiceAccountAPI_DuplicateNameReturnsConflict(t *testing.T) {
 //   - The captured token no longer authenticates → 401.
 func TestServiceAccountAPI_OwnerCanDelete_TokenStopsWorking(t *testing.T) {
 	t.Parallel()
-	tenantID := "test-sa-api-delete-" + randomName("t")
+	tenantID := randomTenantID("sa-api-delete")
 	owner := ownerClientForSATests(t, tenantID)
 	ctx := context.Background()
 
@@ -250,8 +250,8 @@ func TestServiceAccountAPI_OwnerCanDelete_TokenStopsWorking(t *testing.T) {
 // tenant A cannot POST / GET / DELETE service accounts on tenant B's namespace.
 func TestServiceAccountAPI_CrossTenantOpsReturn404(t *testing.T) {
 	t.Parallel()
-	tenantA := "test-sa-api-cross-a-" + randomName("t")
-	tenantB := "test-sa-api-cross-b-" + randomName("t")
+	tenantA := randomTenantID("sa-api-cross-a")
+	tenantB := randomTenantID("sa-api-cross-b")
 
 	ownerA := ownerClientForSATests(t, tenantA)
 	ownerB := ownerClientForSATests(t, tenantB)
@@ -289,7 +289,7 @@ func TestServiceAccountAPI_CrossTenantOpsReturn404(t *testing.T) {
 // the transactional delete is exercised correctly.
 func TestServiceAccountAPI_DeleteRemovesRoleAssignments(t *testing.T) {
 	t.Parallel()
-	tenantID := "test-sa-api-del-ra-" + randomName("t")
+	tenantID := randomTenantID("sa-api-del-ra")
 	owner := ownerClientForSATests(t, tenantID)
 	ctx := context.Background()
 
