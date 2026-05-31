@@ -629,6 +629,26 @@ func (n *nopClusterProvider) GetKubeconfig(_ context.Context, _ string) (string,
 	return "", fmt.Errorf("nop")
 }
 
+// AKS-style node-pool methods. The integration twin of the contract-test fix in
+// commit 6be7d15: the multi-pool refactor grew the ClusterProvider interface but
+// this nop was missed (integration tests aren't in CI). All return the nop error
+// — never invoked by the suites that use this provider.
+func (n *nopClusterProvider) AddNodePool(_ context.Context, _ string, _ *models.NodePool, _, _, _, _ string) error {
+	return fmt.Errorf("nop")
+}
+func (n *nopClusterProvider) ScaleNodePool(_ context.Context, _, _ string, _ int) error {
+	return fmt.Errorf("nop")
+}
+func (n *nopClusterProvider) UpdateNodePoolTaintsLabels(_ context.Context, _, _ string, _ []models.NodePoolTaint, _ map[string]string) error {
+	return fmt.Errorf("nop")
+}
+func (n *nopClusterProvider) RemoveNodePool(_ context.Context, _, _, _ string) error {
+	return fmt.Errorf("nop")
+}
+func (n *nopClusterProvider) GetNodePoolStatuses(_ context.Context, _ string) (map[string]models.NodePoolStatus, error) {
+	return nil, fmt.Errorf("nop")
+}
+
 // Compile-time interface checks.
 var _ providers.ComputeProvider = &nopComputeProvider{}
 var _ providers.ClusterProvider = &nopClusterProvider{}

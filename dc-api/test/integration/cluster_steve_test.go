@@ -36,6 +36,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers/harvester"
 	"github.com/wso2/dc-api/internal/providers/rancher"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -278,7 +279,15 @@ func TestClusterSteve_FullLifecycle_LiveCluster(t *testing.T) {
 		NodeMemoryGB: 8,
 		NodeDiskGB:   60,
 		NodeImage:    imageID,
-		NodeCount:    1,
+		// SystemPool is required since the AKS-style multi-pool refactor; the flat
+		// NodeCPU/MemoryGB/DiskGB above carry its resolved compute.
+		SystemPool: &models.NodePool{
+			Name:                "system",
+			Role:                models.NodePoolRoleSystem,
+			Size:                "medium",
+			Count:               1,
+			HarvesterConfigName: "nc-" + clusterName + "-system",
+		},
 		// No TenantSubnetNAD for this test — we use the legacy single-NIC path
 		// because setting up a live VNet + Subnet within the test would require
 		// the full networking stack. The SA bootstrap skips when TenantSubnetNAD
