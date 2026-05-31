@@ -34,6 +34,25 @@ import (
 // the handler should convert that to 409 Conflict.
 // Phase 6a: also writes scope_uuid so role lookups can use the immutable UUID.
 func (r *Repository) CreateRoleAssignment(ctx context.Context, ra models.RoleAssignment) (*models.RoleAssignment, error) {
+	// RBAC v2 keys scopes by UUID and the engine matches assignments by
+	// scope_uuid, so it must be populated at write time — not left to the
+	// Phase-6a backfill (which only runs on boot). When a caller leaves it unset
+	// for a tenant-scoped grant, resolve it from the tenant slug here. Project-
+	// and resource-scoped callers pass the UUID from request context.
+	if ra.ScopeUUID == uuid.Nil && ra.ScopeType == models.ScopeTypeTenant {
+		tu, err := r.GetTenantUUIDBySlug(ctx, ra.ScopeID)
+		if err != nil {
+			return nil, fmt.Errorf("db create role assignment: resolve tenant uuid for %q: %w", ra.ScopeID, err)
+		}
+		ra.ScopeUUID = tu
+	}
+
+	// Prefer an explicit v2 role-definition key; fall back to mapping the v1 rank.
+	roleDef := ra.RoleDefinition
+	if roleDef == "" {
+		roleDef = models.RoleDefinitionForRole(ra.Role)
+	}
+
 	const q = `
 		INSERT INTO role_assignments
 			(principal_type, principal_id, scope_type, scope_id, scope_uuid, role_definition, granted_by, display_alias)
@@ -47,7 +66,7 @@ func (r *Repository) CreateRoleAssignment(ctx context.Context, ra models.RoleAss
 		string(ra.ScopeType),
 		ra.ScopeID,
 		ra.ScopeUUID,
-		models.RoleDefinitionForRole(ra.Role),
+		roleDef,
 		ra.GrantedBy,
 		ra.DisplayAlias,
 	).Scan(&ra.ID, &ra.GrantedAt)
@@ -82,6 +101,7 @@ func scanRoleAssignment(scanner interface{ Scan(dest ...any) error }) (models.Ro
 		return ra, err
 	}
 	ra.Role = models.RoleForRoleDefinition(roleDef)
+	ra.RoleDefinition = roleDef // RBAC v2 key, consumed by requireAction / the engine
 	if scopeUUID != nil {
 		ra.ScopeUUID = *scopeUUID
 	}

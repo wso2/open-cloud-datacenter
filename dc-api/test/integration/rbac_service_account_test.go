@@ -175,9 +175,10 @@ func TestRBAC_ServiceAccount_OwnerCanDoEverything(t *testing.T) {
 		"SA owner must receive 202 on DELETE /v1/vnets/{id}")
 }
 
-// TestRBAC_ServiceAccount_MemberCannotDelete verifies that an SA with the
-// member role can create but not delete VNets.
-func TestRBAC_ServiceAccount_MemberCannotDelete(t *testing.T) {
+// TestRBAC_ServiceAccount_MemberCanDelete verifies that an SA with the member
+// role (→ Contributor in v2) can create AND delete VNets. Under v1 member could
+// not delete; v2 grants delete to Contributor.
+func TestRBAC_ServiceAccount_MemberCanDelete(t *testing.T) {
 	t.Parallel()
 	tenantID := randomTenantID("sa-member")
 	if !strings.HasPrefix(tenantID, "test-") {
@@ -199,11 +200,11 @@ func TestRBAC_ServiceAccount_MemberCannotDelete(t *testing.T) {
 
 	vnetID := createResp.Resource.ID
 
-	// ── DELETE /v1/vnets/{id} must return 403 ────────────────────────────────
+	// ── DELETE /v1/vnets/{id} must return 202 (v2: Contributor can delete) ───
 	_, deleteStatus, err := client.DeleteVNet(ctx, vnetID)
 	require.NoError(t, err)
-	require.Equal(t, http.StatusForbidden, deleteStatus,
-		"SA member must receive 403 on DELETE /v1/vnets/{id}")
+	require.Equal(t, http.StatusAccepted, deleteStatus,
+		"SA member (Contributor) must receive 202 on DELETE under RBAC v2")
 }
 
 // TestRBAC_ServiceAccount_InvalidTokenReturns401 verifies that malformed or

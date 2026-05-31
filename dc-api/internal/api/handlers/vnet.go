@@ -28,6 +28,7 @@ import (
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
+	"github.com/wso2/dc-api/internal/rbac"
 )
 
 // VNetHandler handles all /v1/vnets endpoints.
@@ -123,7 +124,7 @@ func (h *VNetHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionVNetWrite) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())
@@ -277,12 +278,11 @@ func (h *VNetHandler) List(w http.ResponseWriter, r *http.Request) {
 // Delete handles DELETE /v1/tenants/{tid}/projects/{pid}/vnets/{vnet_id}.
 // Returns 409 if the VNet has active dependents (subnets, route tables, peerings).
 func (h *VNetHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
-	if !ok {
+	if _, ok := middleware.TenantFromContext(r.Context()); !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleOwner) {
+	if !requireAction(w, r, h.repo, rbac.ActionVNetDelete) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())

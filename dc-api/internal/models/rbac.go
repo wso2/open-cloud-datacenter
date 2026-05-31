@@ -142,6 +142,13 @@ type RoleAssignment struct {
 	// read back on every SELECT. M5 will use it for other scope_types too.
 	ScopeUUID     uuid.UUID     `json:"scope_uuid"`
 	Role          Role          `json:"role"`
+	// RoleDefinition is the RBAC v2 role-definition key persisted in the
+	// role_definition column — a built-in key ("Contributor",
+	// "VirtualMachineContributor", …) or a custom role_definitions.id. Populated
+	// on read; the v2 action engine resolves it. Role above is the rank derived
+	// from it for the transitional rank-based path (retired as handlers move to
+	// requireAction).
+	RoleDefinition string       `json:"role_definition,omitempty"`
 	GrantedAt     time.Time     `json:"granted_at"`
 	GrantedBy     string        `json:"granted_by"` // principal_id of the granter
 	// DisplayAlias is an admin-set mnemonic shown by cloud-ui instead of

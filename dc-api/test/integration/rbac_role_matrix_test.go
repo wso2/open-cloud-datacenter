@@ -2,14 +2,18 @@
 
 package integration
 
-// rbac_role_matrix_test.go — M1.5 Chunk 4 integration tests.
+// rbac_role_matrix_test.go — RBAC role × verb matrix integration tests.
 //
-// These tests verify the role × verb matrix enforced by requireTenantRole:
+// VNet's create/delete handlers route through the RBAC v2 action engine
+// (requireAction), so these tests verify the v2 matrix on VNet:
 //
-//   viewer  — can GET/LIST, cannot CREATE or DELETE
-//   member  — can GET/LIST + CREATE, cannot DELETE
-//   owner   — can do everything
+//   viewer  (→ Reader)      — can GET/LIST, cannot CREATE or DELETE
+//   member  (→ Contributor) — can GET/LIST + CREATE + DELETE
+//   owner   (→ Owner)       — can do everything
 //   admin   — platform-admin JWT bypasses all role checks
+//
+// NOTE (v2): member (Contributor) CAN now delete resources. The v1 model gated
+// delete on owner; v2 grants delete to Contributor (Azure-Contributor parity).
 //
 // Each test spins up a fresh httptest.Server via newSubEnv with
 // AutoProvisionMembers=false so the test controls exactly which role_assignment
@@ -97,6 +101,12 @@ func setupTenantProject(t *testing.T, subEnv *TestEnv, tenantID string) {
 func insertRole(t *testing.T, subEnv *TestEnv, sub, tenantID string, role models.Role) {
 	t.Helper()
 	ctx := context.Background()
+	// UPSERT the tenant FIRST so CreateRoleAssignment can resolve its scope_uuid
+	// (the v2 action engine matches assignments by scope_uuid). This also mirrors
+	// the tenant into the registry so admin-list tests see it.
+	if _, err := subEnv.DB.UpsertTenant(ctx, tenantID, tenantID, "dc-tenant-"+tenantID, "test-rbac-matrix"); err != nil {
+		require.NoError(t, err, "insertRole: UpsertTenant")
+	}
 	_, err := subEnv.DB.CreateRoleAssignment(ctx, models.RoleAssignment{
 		ID:            uuid.New(),
 		PrincipalType: models.PrincipalTypeUser,
@@ -109,10 +119,6 @@ func insertRole(t *testing.T, subEnv *TestEnv, sub, tenantID string, role models
 	// Ignore duplicate-key errors (idempotent).
 	if err != nil && !strings.Contains(err.Error(), "23505") && !strings.Contains(err.Error(), "duplicate key") {
 		require.NoError(t, err, "insertRole")
-	}
-	// Mirror the same tenant into the registry so admin-list tests see it.
-	if _, err := subEnv.DB.UpsertTenant(ctx, tenantID, tenantID, "dc-tenant-"+tenantID, "test-rbac-matrix"); err != nil {
-		require.NoError(t, err, "insertRole: UpsertTenant")
 	}
 }
 
@@ -172,9 +178,10 @@ func TestRBAC_Viewer_CanRead_CannotMutate(t *testing.T) {
 		"viewer must receive 403 on DELETE /v1/tenants/{tenantID}/vnets/{id}")
 }
 
-// TestRBAC_Member_CanCreateAndUpdate_CannotDelete verifies that a user with
-// only the member role can list and create VNets but cannot delete them.
-func TestRBAC_Member_CanCreateAndUpdate_CannotDelete(t *testing.T) {
+// TestRBAC_Member_CanCreateAndDelete verifies that a user with the member role
+// (→ Contributor in v2) can list, create, AND delete VNets. Under v1 member
+// could not delete; v2 grants delete to Contributor.
+func TestRBAC_Member_CanCreateAndDelete(t *testing.T) {
 	t.Parallel()
 	subEnv := rbacSubEnv(t)
 
@@ -210,12 +217,14 @@ func TestRBAC_Member_CanCreateAndUpdate_CannotDelete(t *testing.T) {
 
 	vnetID := createResp.Resource.ID
 
-	// ── DELETE /v1/tenants/{tenantID}/vnets/{id} must return 403 ─────────────
+	// ── DELETE /v1/tenants/{tenantID}/vnets/{id} must return 202 (v2 change) ──
+	// The VNet was just created (status PENDING, empty BackendUID) so the handler
+	// removes it directly without waiting for KubeOVN.
 
 	_, deleteStatus, err := client.DeleteVNet(ctx, vnetID)
 	require.NoError(t, err)
-	require.Equal(t, http.StatusForbidden, deleteStatus,
-		"member must receive 403 on DELETE /v1/tenants/{tenantID}/vnets/{id}")
+	require.Equal(t, http.StatusAccepted, deleteStatus,
+		"member (Contributor) must receive 202 on DELETE under RBAC v2")
 }
 
 // TestRBAC_Owner_CanDoEverything verifies that a user with the owner role can
