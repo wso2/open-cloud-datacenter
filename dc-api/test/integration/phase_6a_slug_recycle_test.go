@@ -134,10 +134,16 @@ func TestPhase6a_SlugRecycle(t *testing.T) {
 	// VNet row is intentionally left orphaned with old project_uuid — this is the
 	// state the isolation check below must protect against.
 
+	// Remove ALL of Tenant A's tenant-scope role assignments, not just the
+	// explicitly-granted user. With AutoProvisionMembers=true the JWT's first
+	// request also minted an autoprovision row keyed to the token's sub (which is
+	// the slug) at scope_uuid=uuidA. A real tenant deletion clears every
+	// assignment for that tenant; deleting by the immutable scope_uuid does the
+	// same and stops a stale-uuid orphan from surviving the slug recycle (which
+	// the UUID-keyed RBAC gate would otherwise — correctly — reject).
 	_, err = env.DB.Pool().Exec(ctx,
-		`DELETE FROM role_assignments
-		 WHERE scope_type = 'tenant' AND scope_id = $1 AND principal_id = $2`,
-		slug, userSubA,
+		`DELETE FROM role_assignments WHERE scope_type = 'tenant' AND scope_uuid = $1`,
+		uuidA,
 	)
 	require.NoError(t, err, "remove Tenant A role assignments")
 

@@ -5,7 +5,7 @@
 // without ever touching the OpenBao backend or its AppRole credentials
 // directly. dc-api is the trusted broker:
 //
-//	user → JWT → dc-api ─── RBAC check (RequireRole)
+//	user → JWT → dc-api ─── RBAC check (requireAction)
 //	                    └── proxy to OpenBao using the per-Backend root token
 //
 // SECURITY INVARIANT: the root token MUST NEVER appear in any HTTP response,

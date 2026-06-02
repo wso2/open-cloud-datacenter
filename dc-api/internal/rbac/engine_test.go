@@ -267,3 +267,39 @@ func TestRoleDefinitionBridgeMatchesBuiltins(t *testing.T) {
 		}
 	}
 }
+
+// TestHasGrantInChain covers the coarse "standing in this scope" gate used by the
+// tenant/project context middleware: any assignment whose scope is in the chain
+// grants entry, regardless of which action it would permit (per-action checks run
+// later in the handler). A grant in a sibling project gives no standing.
+func TestHasGrantInChain(t *testing.T) {
+	tenantID := uuid.New()
+	projectID := uuid.New()
+	otherProjectID := uuid.New()
+
+	chain := []ScopeRef{
+		{Type: models.ScopeTypeProject, UUID: projectID},
+		{Type: models.ScopeTypeTenant, UUID: tenantID},
+	}
+
+	cases := []struct {
+		name string
+		a    []Assignment
+		want bool
+	}{
+		{"tenant grant gives standing in the project",
+			[]Assignment{{RoleDefKey: RoleReader, ScopeType: models.ScopeTypeTenant, ScopeUUID: tenantID}}, true},
+		{"project grant gives standing in that project",
+			[]Assignment{{RoleDefKey: RoleVirtualMachineContributor, ScopeType: models.ScopeTypeProject, ScopeUUID: projectID}}, true},
+		{"any role key counts — standing is not action-specific",
+			[]Assignment{{RoleDefKey: RoleNetworkContributor, ScopeType: models.ScopeTypeTenant, ScopeUUID: tenantID}}, true},
+		{"grant in a sibling project gives no standing",
+			[]Assignment{{RoleDefKey: RoleReader, ScopeType: models.ScopeTypeProject, ScopeUUID: otherProjectID}}, false},
+		{"no assignments → no standing", nil, false},
+	}
+	for _, c := range cases {
+		if got := HasGrantInChain(c.a, chain); got != c.want {
+			t.Errorf("%s: HasGrantInChain = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

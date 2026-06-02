@@ -112,16 +112,42 @@ func (p *ProjectContext) Validate(next http.Handler) http.Handler {
 		// the generic RBAC walk below — the SA token sets its own principal_type
 		// and principal_id; the walk checks the assignments the same way as for users.
 
-		// Build the scope chain: project → tenant (broadest wins).
-		// A tenant owner is implicitly a project owner — encoding this via the
-		// chain means a single ListRoleAssignmentsForPrincipal call covers both.
-		chain := []models.Scope{
-			{Type: models.ScopeTypeProject, ID: urlProject},
-			{Type: models.ScopeTypeTenant, ID: tenantID},
+		// Resolve the tenant UUID injected by TenantContext. Scopes are keyed by
+		// UUID, never slug: project slugs are only unique within a tenant, so a
+		// slug-keyed match would leak a project grant across tenants.
+		tenantUUID, ok := TenantUUIDFromContext(r.Context())
+		if !ok {
+			respond.Error(w, http.StatusInternalServerError, "Internal Server Error: no tenant uuid in context")
+			return
 		}
-		if err := rbac.RequireRole(r.Context(), p.repo, pType, pID, false, chain, models.RoleViewer); err != nil {
-			// No matching assignment at project or tenant scope → 404 to avoid
-			// leaking project existence to callers with no access.
+
+		// Build the scope chain by UUID: project → tenant (broadest wins). A
+		// tenant owner is implicitly a project owner — encoding this via the chain
+		// means one ListRoleAssignmentsForPrincipal call covers both. Holding ANY
+		// grant in the chain is the bar to enter the project; the per-action checks
+		// in each handler decide what the caller may actually do.
+		assignments, err := p.repo.ListRoleAssignmentsForPrincipal(r.Context(), pType, pID)
+		if err != nil {
+			log.Error().Err(err).Str("tenant", tenantID).Str("project", urlProject).
+				Msg("project_context: list role assignments failed")
+			respond.Error(w, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+		ras := make([]rbac.Assignment, 0, len(assignments))
+		for _, a := range assignments {
+			ras = append(ras, rbac.Assignment{
+				RoleDefKey: a.RoleDefinition,
+				ScopeType:  a.ScopeType,
+				ScopeUUID:  a.ScopeUUID,
+			})
+		}
+		chain := []rbac.ScopeRef{
+			{Type: models.ScopeTypeProject, UUID: projectUUID},
+			{Type: models.ScopeTypeTenant, UUID: tenantUUID},
+		}
+		if !rbac.HasGrantInChain(ras, chain) {
+			// No grant at project or tenant scope → 404 to avoid leaking project
+			// existence to callers with no access.
 			respond.Error(w, http.StatusNotFound, "project not found")
 			return
 		}

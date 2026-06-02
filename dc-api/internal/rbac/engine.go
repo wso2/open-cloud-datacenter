@@ -4,8 +4,9 @@
 // HTTP or PostgreSQL. Given a principal's role assignments and a target scope
 // chain, it decides whether an action is permitted. See docs/rbac-v2.md §6.
 //
-// This is additive to the v1 helpers in rbac.go (RolePower/EffectiveRole/
-// RequireRole), which remain until the handlers are migrated in a later chunk.
+// The pure helpers it exposes (Authorize, HasGrantInChain) are the only
+// authorization path in dc-api: every handler and the tenant/project context
+// middleware decide access through this engine.
 package rbac
 
 import (
@@ -80,6 +81,26 @@ func Authorize(
 			continue // unknown/deleted role definition grants nothing
 		}
 		if def.Permits(action, isData) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasGrantInChain reports whether the principal holds ANY role assignment whose
+// scope is an ancestor-or-self of the target (i.e. appears in chain). It is the
+// coarse "does this principal have standing in this scope at all" gate the
+// tenant/project context middleware uses to choose 404-vs-proceed — the v2
+// successor to the v1 "at least Viewer" floor.
+//
+// It deliberately does not resolve roles or check a specific action: holding any
+// assignment in the chain is enough to ENTER the scope. Per-action authorization
+// is still enforced by each handler via Authorize, so a principal who may enter a
+// project but lacks (say) compute/virtualMachines/write is still denied by the VM
+// handler.
+func HasGrantInChain(assignments []Assignment, chain []ScopeRef) bool {
+	for _, a := range assignments {
+		if scopeInChain(a.ScopeType, a.ScopeUUID, chain) {
 			return true
 		}
 	}

@@ -10,9 +10,6 @@
 //   - ScopeType today only takes the value "tenant". When M5 lands
 //     ("subscription", "resource_group", "resource") the constant list grows
 //     but existing DB rows are unaffected.
-//   - Scope is a small value object pairing a ScopeType with its ID string.
-//     The RBAC helper in Chunk 2 will walk a []Scope chain (narrow → broad) to
-//     compute an effective role.
 package models
 
 import (
@@ -106,20 +103,6 @@ func RoleForRoleDefinition(key string) Role {
 	default:
 		return ""
 	}
-}
-
-// ─────────────────────────── Value objects ──────────────────────────────────
-
-// Scope pairs a scope type with its identifier string. Used by the RBAC
-// helper (Chunk 2) when walking the scope chain for a request:
-//
-//	chain := []Scope{{ScopeTypeTenant, tenantID}}
-//	effective, err := rbac.EffectiveRole(ctx, repo, principal, chain)
-//
-// In M5 the chain will have up to four entries (resource → RG → sub → tenant).
-type Scope struct {
-	Type ScopeType
-	ID   string
 }
 
 // ─────────────────────────── Role Assignment ────────────────────────────────
