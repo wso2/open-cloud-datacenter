@@ -435,6 +435,13 @@ func preflight(ctx context.Context) error {
 	if !dockerOK {
 		return fmt.Errorf("Docker socket not found — start Docker Desktop / Rancher Desktop / Colima / Lima, or set DOCKER_HOST")
 	}
+	// Cluster-free (nop) mode stops here: the suite runs against testcontainers
+	// Postgres + all-nop backends, so it needs no kubeconfig and no live KubeOVN
+	// cluster. Without this, the KubeOVN probe below would require a real cluster
+	// even in nop mode — exactly what the cluster-free CI authz gate must avoid.
+	if nopMode() {
+		return nil
+	}
 	kubeconfigRaw, err := loadKubeconfig()
 	if err != nil {
 		return err
