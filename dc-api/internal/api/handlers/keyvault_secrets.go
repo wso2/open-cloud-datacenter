@@ -42,6 +42,7 @@ import (
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
 	"github.com/wso2/dc-api/internal/providers/kvi"
+	"github.com/wso2/dc-api/internal/rbac"
 )
 
 const (
@@ -240,8 +241,8 @@ func (h *KeyVaultSecretsHandler) ListKeyVaultSecrets(w http.ResponseWriter, r *h
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	// viewer is the minimum role for list — no value is returned.
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleViewer) {
+	// readMetadata is the minimum action for list — no value is returned.
+	if !requireAction(w, r, h.repo, rbac.ActionSecretReadMetadata) {
 		return
 	}
 
@@ -371,7 +372,7 @@ func (h *KeyVaultSecretsHandler) GetKeyVaultSecret(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionSecretRead) {
 		return
 	}
 
@@ -486,7 +487,7 @@ func (h *KeyVaultSecretsHandler) PutKeyVaultSecret(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionSecretWrite) {
 		return
 	}
 
@@ -570,7 +571,7 @@ func (h *KeyVaultSecretsHandler) DeleteKeyVaultSecret(w http.ResponseWriter, r *
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionSecretDelete) {
 		return
 	}
 
@@ -644,7 +645,7 @@ func (h *KeyVaultSecretsHandler) RestoreKeyVaultSecret(w http.ResponseWriter, r 
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionSecretWrite) {
 		return
 	}
 

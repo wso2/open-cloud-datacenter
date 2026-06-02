@@ -100,16 +100,16 @@ var builtinRoles = map[string]RoleDefinition{
 	RoleKeyVaultSecretsOfficer: {
 		Key:         RoleKeyVaultSecretsOfficer,
 		DisplayName: "Key Vault Secrets Officer",
-		Description: "Create, read, and delete secret values. Cannot manage the vault lifecycle.",
-		Actions:     []string{"keyvault/vaults/read"},
+		Description: "Create, read, and delete secret values, and list secret names. Cannot manage the vault lifecycle.",
+		Actions:     []string{"keyvault/vaults/read", "keyvault/vaults/secrets/readMetadata"},
 		DataActions: []string{"keyvault/vaults/secrets/*"},
 		Builtin:     true,
 	},
 	RoleKeyVaultSecretsUser: {
 		Key:         RoleKeyVaultSecretsUser,
 		DisplayName: "Key Vault Secrets User",
-		Description: "Read secret values only.",
-		Actions:     []string{"keyvault/vaults/read"},
+		Description: "Read secret values and list secret names.",
+		Actions:     []string{"keyvault/vaults/read", "keyvault/vaults/secrets/readMetadata"},
 		DataActions: []string{"keyvault/vaults/secrets/read"},
 		Builtin:     true,
 	},
@@ -123,8 +123,9 @@ var builtinRoles = map[string]RoleDefinition{
 	RoleDatabaseContributor: {
 		Key:         RoleDatabaseContributor,
 		DisplayName: "Database Contributor",
-		Description: "Full control of managed database servers.",
+		Description: "Full control of managed database servers, including reading connection credentials.",
 		Actions:     []string{"database/*"},
+		DataActions: []string{"database/servers/credentials/read"},
 		Builtin:     true,
 	},
 	RoleDatabaseReader: {

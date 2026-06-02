@@ -47,6 +47,7 @@ import (
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
 	"github.com/wso2/dc-api/internal/providers/common"
+	"github.com/wso2/dc-api/internal/rbac"
 )
 
 const (
@@ -129,7 +130,7 @@ func (h *KeyVaultHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionVaultWrite) {
 		return
 	}
 
@@ -241,7 +242,7 @@ func (h *KeyVaultHandler) driveKVI(
 //
 // In KVI mode: overlays the live CR status onto the DB row before returning.
 func (h *KeyVaultHandler) Get(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -251,7 +252,7 @@ func (h *KeyVaultHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionVaultRead) {
 		return
 	}
 
@@ -319,7 +320,7 @@ func (h *KeyVaultHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionVaultRead) {
 		return
 	}
 	kvs, err := h.repo.ListKeyVaults(r.Context(), tenantUUID)
@@ -361,7 +362,7 @@ func (h *KeyVaultHandler) List(w http.ResponseWriter, r *http.Request) {
 // In KVI mode: deletes the KVI CR (operator finalizer runs the upstream
 // AppRole/policy/mount cleanup async) and drops the DB row immediately.
 func (h *KeyVaultHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -371,7 +372,7 @@ func (h *KeyVaultHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionVaultDelete) {
 		return
 	}
 
@@ -436,7 +437,7 @@ func (h *KeyVaultHandler) Delete(w http.ResponseWriter, r *http.Request) {
 //   - The CR's status.phase must be Ready. Returns 409 with a message
 //     pointing at the GET /{id} endpoint to poll otherwise.
 func (h *KeyVaultHandler) Credentials(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -446,7 +447,7 @@ func (h *KeyVaultHandler) Credentials(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionVaultCredentialsRead) {
 		return
 	}
 	if h.kvi == nil {
@@ -569,7 +570,7 @@ func (h *KeyVaultHandler) Credentials(w http.ResponseWriter, r *http.Request) {
 // value will hit 403 on the next AppRole login and must be rotated to the
 // new value.
 func (h *KeyVaultHandler) RotateCredentials(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -579,7 +580,7 @@ func (h *KeyVaultHandler) RotateCredentials(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionVaultWrite) {
 		return
 	}
 	if h.kvi == nil {

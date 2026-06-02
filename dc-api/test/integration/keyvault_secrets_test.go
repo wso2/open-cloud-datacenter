@@ -67,6 +67,29 @@ func viewerClientForRaw(t *testing.T, tenantID string) *APIClient {
 	return NewAPIClientForProject(env.BaseURL, token, tenantID, defaultProjectID)
 }
 
+// memberClientForRaw creates a member-role (→ Contributor) API client for a raw
+// tenant slug. Used to verify the v2 data-plane split: a member can list secret
+// names (readMetadata, matched by Contributor's "*") but cannot read or write
+// secret values (DataActions, which Contributor does not have).
+func memberClientForRaw(t *testing.T, tenantID string) *APIClient {
+	t.Helper()
+	memberSub := "member-" + tenantID
+	token, err := env.JWT.MintTokenWithGroups(memberSub, memberSub, []string{})
+	require.NoError(t, err, "memberClientForRaw: mint JWT")
+	_, err = env.DB.CreateRoleAssignment(context.Background(), models.RoleAssignment{
+		PrincipalType: models.PrincipalTypeUser,
+		PrincipalID:   memberSub,
+		ScopeType:     models.ScopeTypeTenant,
+		ScopeID:       tenantID,
+		Role:          models.RoleMember,
+		GrantedBy:     "test-fixture",
+	})
+	if err != nil && !strings.Contains(err.Error(), "23505") && !strings.Contains(err.Error(), "duplicate key") {
+		require.NoError(t, err, "memberClientForRaw: insert member role")
+	}
+	return NewAPIClientForProject(env.BaseURL, token, tenantID, defaultProjectID)
+}
+
 // viewerClientForTenant creates an API client with the viewer role for the
 // given tenant. The viewer client uses a different sub ("viewer-<tenantID>")
 // so RBAC tests can distinguish it from the owner.
@@ -264,8 +287,10 @@ func sharedKV(t *testing.T) (client *APIClient, kvID string, skip bool) {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-// TestKeyVaultSecrets_RBAC verifies that the viewer role can list but not
-// read/write/delete secrets, and that member can do all four operations.
+// TestKeyVaultSecrets_RBAC verifies the RBAC v2 data-plane split for secrets:
+// viewer (Reader) is denied everything; member (Contributor) can list secret
+// names (readMetadata) but cannot read/write secret VALUES (DataActions); owner
+// can do everything (dataActions: *).
 func TestKeyVaultSecrets_RBAC(t *testing.T) {
 	if !kviOperatorAvailable() {
 		t.Skip("KVI operator not available on cluster — skipping secret CRUD tests")
@@ -278,32 +303,39 @@ func TestKeyVaultSecrets_RBAC(t *testing.T) {
 	}
 
 	viewerClient := viewerClientForRaw(t, kviSharedTenant)
+	memberClient := memberClientForRaw(t, kviSharedTenant)
 
 	// unique key names to avoid collision with other tests running sequentially
 	testKey := "rbac-test-key"
 
-	// ── Viewer CAN list (200) ─────────────────────────────────────────────────
-	listResp, body, status, err := viewerClient.ListKeyVaultSecrets(ctx, kvID, "", 0)
+	// ── Viewer (Reader): denied on everything. Secret names are readMetadata (a
+	//    Key Vault role action, not generic */read); values are DataActions. ────
+	_, body, status, err := viewerClient.ListKeyVaultSecrets(ctx, kvID, "", 0)
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, status, "viewer list: body=%s", ErrorBody(body))
-	require.NotNil(t, listResp.Items)
-
-	// ── Viewer CANNOT put (403) ───────────────────────────────────────────────
+	require.Equal(t, http.StatusForbidden, status, "viewer list must 403 (v2): body=%s", ErrorBody(body))
 	_, body, status, err = viewerClient.PutKeyVaultSecret(ctx, kvID, testKey, PutKeyVaultSecretRequest{Value: "v"})
 	require.NoError(t, err)
 	require.Equal(t, http.StatusForbidden, status, "viewer put must 403: body=%s", ErrorBody(body))
-
-	// ── Viewer CANNOT get (403) ───────────────────────────────────────────────
 	_, body, status, err = viewerClient.GetKeyVaultSecret(ctx, kvID, testKey, 0)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusForbidden, status, "viewer get must 403: body=%s", ErrorBody(body))
-
-	// ── Viewer CANNOT delete (403) ────────────────────────────────────────────
 	body, status, err = viewerClient.DeleteKeyVaultSecret(ctx, kvID, testKey)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusForbidden, status, "viewer delete must 403: body=%s", ErrorBody(body))
 
-	// ── Owner (member+) CAN put, get, list, delete ────────────────────────────
+	// ── Member (Contributor): the data-plane split. CAN list secret names, but
+	//    CANNOT read or write the secret VALUES. ───────────────────────────────
+	_, body, status, err = memberClient.ListKeyVaultSecrets(ctx, kvID, "", 0)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status, "member CAN list secret names (v2): body=%s", ErrorBody(body))
+	_, body, status, err = memberClient.GetKeyVaultSecret(ctx, kvID, testKey, 0)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusForbidden, status, "member must NOT read secret values (v2 split): body=%s", ErrorBody(body))
+	_, body, status, err = memberClient.PutKeyVaultSecret(ctx, kvID, testKey, PutKeyVaultSecretRequest{Value: "v"})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusForbidden, status, "member must NOT write secret values (v2 split): body=%s", ErrorBody(body))
+
+	// ── Owner (dataActions: *) CAN put, get, list. ────────────────────────────
 	putResp, body, status, err := ownerClient.PutKeyVaultSecret(ctx, kvID, testKey, PutKeyVaultSecretRequest{Value: "hello"})
 	require.NoError(t, err)
 	// Accept 201 (new key) or 200 (key from prior run; soft-delete preserves metadata).
@@ -318,17 +350,17 @@ func TestKeyVaultSecrets_RBAC(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, "owner get: body=%s", ErrorBody(body))
 	require.Equal(t, "hello", getResp.Value)
 
-	// Viewer CAN see the key in the list after the owner wrote it.
-	listResp, body, status, err = viewerClient.ListKeyVaultSecrets(ctx, kvID, "", 0)
+	// Owner can list and see the key it wrote.
+	oListResp, body, status, err := ownerClient.ListKeyVaultSecrets(ctx, kvID, "", 0)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status)
 	found := false
-	for _, s := range listResp.Items {
+	for _, s := range oListResp.Items {
 		if s.Name == testKey {
 			found = true
 		}
 	}
-	require.True(t, found, "viewer list must show the key the owner wrote")
+	require.True(t, found, "owner list must show the key it wrote")
 
 	// Cleanup: delete the key we wrote.
 	body, status, err = ownerClient.DeleteKeyVaultSecret(ctx, kvID, testKey)

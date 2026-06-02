@@ -125,6 +125,17 @@ func TestBuiltinRolePermissions(t *testing.T) {
 		{"db contrib delete", RoleDatabaseContributor, ActionDBServerDelete, false, true},
 		{"db reader read", RoleDatabaseReader, ActionDBServerRead, false, true},
 		{"db reader write denied", RoleDatabaseReader, ActionDBServerWrite, false, false},
+
+		// Data-plane split: vault/DB credentials + secret-name listing.
+		{"owner reads vault creds", RoleOwner, ActionVaultCredentialsRead, true, true},
+		{"kv admin reads vault creds", RoleKeyVaultAdministrator, ActionVaultCredentialsRead, true, true},
+		{"contrib no vault creds", RoleContributor, ActionVaultCredentialsRead, true, false},
+		{"reader no vault creds", RoleReader, ActionVaultCredentialsRead, true, false},
+		{"db contrib reads db creds", RoleDatabaseContributor, ActionDBCredentialsRead, true, true},
+		{"contrib no db creds", RoleContributor, ActionDBCredentialsRead, true, false},
+		{"owner reads db creds", RoleOwner, ActionDBCredentialsRead, true, true},
+		{"secrets user lists names", RoleKeyVaultSecretsUser, ActionSecretReadMetadata, false, true},
+		{"reader cannot list secret names", RoleReader, ActionSecretReadMetadata, false, false},
 	}
 	for _, c := range cases {
 		if got := permits(t, c.role, c.action, c.isData); got != c.want {

@@ -78,6 +78,8 @@ const (
 	ActionSecretWrite        = "keyvault/vaults/secrets/write"        // DataAction
 	ActionSecretDelete       = "keyvault/vaults/secrets/delete"       // DataAction
 	ActionSecretReadMetadata = "keyvault/vaults/secrets/readMetadata" // control (names, not values)
+
+	ActionVaultCredentialsRead = "keyvault/vaults/credentials/read" // DataAction (vault connection creds)
 )
 
 // ── Database provider ────────────────────────────────────────────────────────
@@ -128,6 +130,7 @@ var dataActions = map[string]struct{}{
 	ActionSecretRead:            {},
 	ActionSecretWrite:           {},
 	ActionSecretDelete:          {},
+	ActionVaultCredentialsRead:  {},
 	ActionDBCredentialsRead:     {},
 }
 
@@ -157,7 +160,7 @@ var allActions = []string{
 	ActionProviderNetworkRead,
 	// keyvault
 	ActionVaultRead, ActionVaultWrite, ActionVaultDelete,
-	ActionSecretRead, ActionSecretWrite, ActionSecretDelete, ActionSecretReadMetadata,
+	ActionSecretRead, ActionSecretWrite, ActionSecretDelete, ActionSecretReadMetadata, ActionVaultCredentialsRead,
 	// database
 	ActionDBServerRead, ActionDBServerWrite, ActionDBServerDelete, ActionDBCredentialsRead,
 	// authorization

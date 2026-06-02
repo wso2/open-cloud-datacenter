@@ -47,6 +47,7 @@ import (
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
 	"github.com/wso2/dc-api/internal/providers/common"
+	"github.com/wso2/dc-api/internal/rbac"
 )
 
 // DatabaseHandler handles /v1/tenants/{tid}/projects/{pid}/databases.
@@ -169,7 +170,7 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionDBServerWrite) {
 		return
 	}
 
@@ -309,7 +310,7 @@ func (h *DatabaseHandler) driveProvisioner(
 // In provisioner-wired mode: overlays the live CR status onto the DB row
 // before returning.
 func (h *DatabaseHandler) Get(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -319,7 +320,7 @@ func (h *DatabaseHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionDBServerRead) {
 		return
 	}
 
@@ -365,7 +366,7 @@ func (h *DatabaseHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionDBServerRead) {
 		return
 	}
 	_, projectUUID, ok := lookupProjectUUID(w, r)
@@ -395,7 +396,7 @@ func (h *DatabaseHandler) List(w http.ResponseWriter, r *http.Request) {
 // finalizer handles VM/DataVolume/Secret teardown async) and drops the DB
 // row immediately.
 func (h *DatabaseHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -405,7 +406,7 @@ func (h *DatabaseHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionDBServerDelete) {
 		return
 	}
 
@@ -468,7 +469,7 @@ func (h *DatabaseHandler) Delete(w http.ResponseWriter, r *http.Request) {
 //   - The CR's status.phase must be Ready. 409 with a pointer to GET /{id}
 //     otherwise.
 func (h *DatabaseHandler) Credentials(w http.ResponseWriter, r *http.Request) {
-	tenantID, ok := middleware.TenantFromContext(r.Context())
+	_, ok := middleware.TenantFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant in context")
 		return
@@ -478,7 +479,7 @@ func (h *DatabaseHandler) Credentials(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	if !requireTenantRole(w, r, h.repo, tenantID, models.RoleMember) {
+	if !requireAction(w, r, h.repo, rbac.ActionDBCredentialsRead) {
 		return
 	}
 	if h.provisioner == nil {
