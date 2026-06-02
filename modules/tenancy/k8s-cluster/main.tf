@@ -50,6 +50,9 @@ locals {
 harvester-cloud-provider:
   clusterName: ${var.cluster_name}
   cloudConfigPath: /var/lib/rancher/rke2/etc/config-files/cloud-provider-config
+  global:
+    cattle:
+      clusterName: ${var.cluster_name}
 EOF
   ) : ""
 
