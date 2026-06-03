@@ -337,6 +337,11 @@ func (h *ClusterHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 
 	// Quota check
 	quota, err := h.repo.GetQuota(r.Context(), tenantID)
@@ -372,7 +377,7 @@ func (h *ClusterHandler) Create(w http.ResponseWriter, r *http.Request) {
 		vnetUUID, _ := uuid.Parse(req.VNetID)
 		subnetUUID, _ := uuid.Parse(req.SubnetID)
 
-		vnet, err := h.repo.GetVNetByTenant(r.Context(), vnetUUID, tenantUUID)
+		vnet, err := h.repo.GetVNet(r.Context(), vnetUUID, tenantUUID, projectUUID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "vnet not found")
 			return
@@ -527,6 +532,11 @@ func (h *ClusterHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 
 	rawID := chi.URLParam(r, "id")
 	id, err := uuid.Parse(rawID)
@@ -535,7 +545,7 @@ func (h *ClusterHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resource, err := h.repo.Get(r.Context(), id, tenantUUID)
+	resource, err := h.repo.GetForProject(r.Context(), id, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "cluster not found")
 		return
@@ -554,6 +564,11 @@ func (h *ClusterHandler) GetKubeconfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 
 	rawID := chi.URLParam(r, "id")
 	id, err := uuid.Parse(rawID)
@@ -562,7 +577,7 @@ func (h *ClusterHandler) GetKubeconfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resource, err := h.repo.Get(r.Context(), id, tenantUUID)
+	resource, err := h.repo.GetForProject(r.Context(), id, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "cluster not found")
 		return
@@ -592,8 +607,13 @@ func (h *ClusterHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 
-	resources, err := h.repo.ListByTenant(r.Context(), tenantUUID, models.ResourceTypeCluster)
+	resources, err := h.repo.ListByProject(r.Context(), tenantUUID, projectUUID, models.ResourceTypeCluster)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list clusters")
 		return
@@ -620,6 +640,11 @@ func (h *ClusterHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionClusterDelete) {
 		return
 	}
@@ -632,7 +657,7 @@ func (h *ClusterHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resource, err := h.repo.Get(r.Context(), id, tenantUUID)
+	resource, err := h.repo.GetForProject(r.Context(), id, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "cluster not found")
 		return
@@ -710,6 +735,11 @@ func (h *ClusterHandler) AddNodePool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 
 	var req AddNodePoolRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -727,7 +757,7 @@ func (h *ClusterHandler) AddNodePool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cluster must be ACTIVE before we can add a pool.
-	resource, err := h.repo.Get(r.Context(), clusterID, tenantUUID)
+	resource, err := h.repo.GetForProject(r.Context(), clusterID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "cluster not found")
 		return
@@ -1098,6 +1128,12 @@ func (h *ClusterHandler) asyncRemovePool(clusterID uuid.UUID, clusterName string
 // it belongs to the caller's tenant, and returns its ID and name.
 // On failure it writes an appropriate error response and returns ok=false.
 func (h *ClusterHandler) resolveCluster(w http.ResponseWriter, r *http.Request, tenantUUID uuid.UUID) (clusterID uuid.UUID, clusterName string, ok bool) {
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return uuid.Nil, "", false
+	}
+
 	rawID := chi.URLParam(r, "id")
 	id, err := uuid.Parse(rawID)
 	if err != nil {
@@ -1105,7 +1141,7 @@ func (h *ClusterHandler) resolveCluster(w http.ResponseWriter, r *http.Request, 
 		return uuid.Nil, "", false
 	}
 
-	resource, err := h.repo.Get(r.Context(), id, tenantUUID)
+	resource, err := h.repo.GetForProject(r.Context(), id, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "cluster not found")
 		return uuid.Nil, "", false

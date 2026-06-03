@@ -112,13 +112,13 @@ func dnsRecordToResponse(rec *models.DnsRecord) dnsRecordResponse {
 
 // requireActiveVNetForZone fetches + tenant-checks the VNet (via tenantUUID).
 // Phase 6a: uses UUID (immutable) instead of slug for the DB WHERE clause.
-func (h *PrivateDnsZoneHandler) requireActiveVNetForZone(w http.ResponseWriter, r *http.Request, tenantUUID uuid.UUID) (*models.VNet, bool) {
+func (h *PrivateDnsZoneHandler) requireActiveVNetForZone(w http.ResponseWriter, r *http.Request, tenantUUID, projectUUID uuid.UUID) (*models.VNet, bool) {
 	vnetID, err := uuid.Parse(chi.URLParam(r, "vnet_id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid VNet ID")
 		return nil, false
 	}
-	vnet, err := h.repo.GetVNetByTenant(r.Context(), vnetID, tenantUUID)
+	vnet, err := h.repo.GetVNet(r.Context(), vnetID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "VNet not found")
 		return nil, false
@@ -161,12 +161,17 @@ func (h *PrivateDnsZoneHandler) CreateZone(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionDNSZoneWrite) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())
 
-	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID)
+	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID, projectUUID)
 	if !ok {
 		return
 	}
@@ -241,7 +246,12 @@ func (h *PrivateDnsZoneHandler) GetZone(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID)
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
+	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID, projectUUID)
 	if !ok {
 		return
 	}
@@ -265,7 +275,12 @@ func (h *PrivateDnsZoneHandler) ListZones(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID)
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
+	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID, projectUUID)
 	if !ok {
 		return
 	}
@@ -294,12 +309,17 @@ func (h *PrivateDnsZoneHandler) DeleteZone(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionDNSZoneDelete) {
 		return
 	}
 	userID, _ := middleware.UserFromContext(r.Context())
 
-	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID)
+	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID, projectUUID)
 	if !ok {
 		return
 	}
@@ -387,11 +407,16 @@ func (h *PrivateDnsZoneHandler) UpsertRecord(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionDNSZoneWrite) {
 		return
 	}
 
-	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID)
+	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID, projectUUID)
 	if !ok {
 		return
 	}
@@ -452,7 +477,12 @@ func (h *PrivateDnsZoneHandler) GetRecord(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID)
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
+	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID, projectUUID)
 	if !ok {
 		return
 	}
@@ -486,7 +516,12 @@ func (h *PrivateDnsZoneHandler) ListRecords(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID)
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
+	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID, projectUUID)
 	if !ok {
 		return
 	}
@@ -526,10 +561,15 @@ func (h *PrivateDnsZoneHandler) UpdateRecord(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionDNSZoneWrite) {
 		return
 	}
-	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID)
+	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID, projectUUID)
 	if !ok {
 		return
 	}
@@ -603,10 +643,15 @@ func (h *PrivateDnsZoneHandler) DeleteRecord(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionDNSZoneWrite) {
 		return
 	}
-	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID)
+	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID, projectUUID)
 	if !ok {
 		return
 	}

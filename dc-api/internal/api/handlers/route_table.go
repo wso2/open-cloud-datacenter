@@ -111,13 +111,13 @@ func dtosToRouteRules(dtos []routeRuleDTO) []models.RouteRule {
 // requireActiveVNet fetches the VNet, enforces tenant isolation by UUID, and
 // returns 409 if not ACTIVE. Phase 6a: uses tenantUUID (immutable) for the DB
 // WHERE clause instead of the mutable slug.
-func (h *RouteTableHandler) requireActiveVNet(w http.ResponseWriter, r *http.Request, tenantUUID uuid.UUID) (*models.VNet, bool) {
+func (h *RouteTableHandler) requireActiveVNet(w http.ResponseWriter, r *http.Request, tenantUUID, projectUUID uuid.UUID) (*models.VNet, bool) {
 	vnetID, err := uuid.Parse(chi.URLParam(r, "vnet_id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid VNet ID")
 		return nil, false
 	}
-	vnet, err := h.repo.GetVNetByTenant(r.Context(), vnetID, tenantUUID)
+	vnet, err := h.repo.GetVNet(r.Context(), vnetID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "VNet not found")
 		return nil, false
@@ -145,11 +145,16 @@ func (h *RouteTableHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionRouteTableWrite) {
 		return
 	}
 
-	vnet, ok := h.requireActiveVNet(w, r, tenantUUID)
+	vnet, ok := h.requireActiveVNet(w, r, tenantUUID, projectUUID)
 	if !ok {
 		return
 	}
@@ -248,6 +253,11 @@ func (h *RouteTableHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	vnetID, err := uuid.Parse(chi.URLParam(r, "vnet_id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid VNet ID")
@@ -259,7 +269,7 @@ func (h *RouteTableHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.repo.GetVNetByTenant(r.Context(), vnetID, tenantUUID)
+	_, err = h.repo.GetVNet(r.Context(), vnetID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "VNet not found")
 		return
@@ -280,13 +290,18 @@ func (h *RouteTableHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	vnetID, err := uuid.Parse(chi.URLParam(r, "vnet_id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid VNet ID")
 		return
 	}
 
-	_, err = h.repo.GetVNetByTenant(r.Context(), vnetID, tenantUUID)
+	_, err = h.repo.GetVNet(r.Context(), vnetID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "VNet not found")
 		return
@@ -317,6 +332,11 @@ func (h *RouteTableHandler) UpdateRoutes(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionRouteTableWrite) {
 		return
 	}
@@ -331,7 +351,7 @@ func (h *RouteTableHandler) UpdateRoutes(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	_, err = h.repo.GetVNetByTenant(r.Context(), vnetID, tenantUUID)
+	_, err = h.repo.GetVNet(r.Context(), vnetID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "VNet not found")
 		return
@@ -389,6 +409,11 @@ func (h *RouteTableHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionRouteTableDelete) {
 		return
 	}
@@ -403,7 +428,7 @@ func (h *RouteTableHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.repo.GetVNetByTenant(r.Context(), vnetID, tenantUUID)
+	_, err = h.repo.GetVNet(r.Context(), vnetID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "VNet not found")
 		return
@@ -444,6 +469,11 @@ func (h *RouteTableHandler) Associate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionRouteTableWrite) {
 		return
 	}
@@ -458,7 +488,7 @@ func (h *RouteTableHandler) Associate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.repo.GetVNetByTenant(r.Context(), vnetID, tenantUUID)
+	_, err = h.repo.GetVNet(r.Context(), vnetID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "VNet not found")
 		return
@@ -528,6 +558,11 @@ func (h *RouteTableHandler) Disassociate(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionRouteTableWrite) {
 		return
 	}
@@ -547,7 +582,7 @@ func (h *RouteTableHandler) Disassociate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	_, err = h.repo.GetVNetByTenant(r.Context(), vnetID, tenantUUID)
+	_, err = h.repo.GetVNet(r.Context(), vnetID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "VNet not found")
 		return

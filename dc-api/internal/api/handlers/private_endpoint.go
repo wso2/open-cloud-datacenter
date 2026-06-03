@@ -143,6 +143,11 @@ func (h *PrivateEndpointHandler) Create(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionPrivateEndpointWrite) {
 		return
 	}
@@ -188,7 +193,7 @@ func (h *PrivateEndpointHandler) Create(w http.ResponseWriter, r *http.Request) 
 
 	// Verify VNet + subnet ownership and state.
 	// Phase 6a: GetVNet now takes tenantUUID for WHERE clause isolation.
-	vnet, err := h.repo.GetVNetByTenant(r.Context(), vnetUUID, tenantUUID)
+	vnet, err := h.repo.GetVNet(r.Context(), vnetUUID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "vnet not found")
 		return

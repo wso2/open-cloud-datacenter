@@ -190,6 +190,22 @@ func (r *Repository) Get(ctx context.Context, id uuid.UUID, tenantUUID uuid.UUID
 	return &res, nil
 }
 
+// GetForProject fetches a resource by ID scoped to BOTH its tenant and the
+// active project. A resource that exists in the tenant but a different project
+// is reported as not found — the immutable filter that keeps one project's VMs
+// and clusters out of another's. Mirrors Get's not-found error so handlers 404
+// uniformly.
+func (r *Repository) GetForProject(ctx context.Context, id, tenantUUID, projectUUID uuid.UUID) (*models.Resource, error) {
+	res, err := r.Get(ctx, id, tenantUUID)
+	if err != nil {
+		return nil, err
+	}
+	if res.ProjectUUID != projectUUID {
+		return nil, fmt.Errorf("resource %s not found", id)
+	}
+	return res, nil
+}
+
 // GetResourceLocationByUUID resolves a resource's immutable UUID to its parent
 // tenant slug and project UUID, searching every resource type — compute
 // resources (VMs, clusters), key vaults, and databases — because a

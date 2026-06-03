@@ -128,12 +128,17 @@ func mountPath(tenantUUID, vaultUUID uuid.UUID) string {
 func (h *KeyVaultSecretsHandler) resolveVault(
 	w http.ResponseWriter, r *http.Request, tenantUUID uuid.UUID,
 ) *models.KeyVault {
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return nil
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid key vault id")
 		return nil
 	}
-	kv, err := h.repo.GetKeyVault(r.Context(), id)
+	kv, err := h.repo.GetKeyVault(r.Context(), id, tenantUUID, projectUUID)
 	if errors.Is(err, db.ErrKeyVaultNotFound) {
 		writeError(w, http.StatusNotFound, "key vault not found")
 		return nil

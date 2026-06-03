@@ -148,6 +148,11 @@ func (h *BastionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionBastionWrite) {
 		return
 	}
@@ -190,7 +195,7 @@ func (h *BastionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	vnetUUID, _ := uuid.Parse(req.VNetID)
 	subnetUUID, _ := uuid.Parse(req.SubnetID)
 
-	vnet, err := h.repo.GetVNetByTenant(r.Context(), vnetUUID, tenantUUID)
+	vnet, err := h.repo.GetVNet(r.Context(), vnetUUID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "vnet not found")
 		return
@@ -305,12 +310,17 @@ func (h *BastionHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid resource ID format")
 		return
 	}
-	resource, err := h.repo.Get(r.Context(), id, tenantUUID)
+	resource, err := h.repo.GetForProject(r.Context(), id, tenantUUID, projectUUID)
 	if err != nil || resource.Type != models.ResourceTypeBastion {
 		writeError(w, http.StatusNotFound, "bastion not found")
 		return
@@ -324,7 +334,12 @@ func (h *BastionHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
-	resources, err := h.repo.ListByTenant(r.Context(), tenantUUID, models.ResourceTypeBastion)
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
+	resources, err := h.repo.ListByProject(r.Context(), tenantUUID, projectUUID, models.ResourceTypeBastion)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list bastions")
 		return
@@ -347,6 +362,11 @@ func (h *BastionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionBastionDelete) {
 		return
 	}
@@ -357,7 +377,7 @@ func (h *BastionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid resource ID format")
 		return
 	}
-	resource, err := h.repo.Get(r.Context(), id, tenantUUID)
+	resource, err := h.repo.GetForProject(r.Context(), id, tenantUUID, projectUUID)
 	if err != nil || resource.Type != models.ResourceTypeBastion {
 		writeError(w, http.StatusNotFound, "bastion not found")
 		return

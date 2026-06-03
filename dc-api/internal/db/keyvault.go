@@ -48,20 +48,20 @@ func (r *Repository) CreateKeyVault(ctx context.Context, kv *models.KeyVault) (*
 // rows so handlers can map directly to 404 without string-matching pgx errors.
 // M2.5: includes project_id, project_uuid in SELECT.
 // 9d: includes credentials_consumed_at for the shown-once GET .../credentials.
-func (r *Repository) GetKeyVault(ctx context.Context, id uuid.UUID) (*models.KeyVault, error) {
+func (r *Repository) GetKeyVault(ctx context.Context, id, tenantUUID, projectUUID uuid.UUID) (*models.KeyVault, error) {
 	const q = `
 		SELECT id, tenant_id, tenant_uuid, project_id, project_uuid,
 		       name, soft_delete_days, status, message,
 		       credentials_consumed_at, created_at, updated_at
 		FROM   key_vaults
-		WHERE  id = $1`
+		WHERE  id = $1 AND tenant_uuid = $2 AND project_uuid = $3`
 
 	var kv models.KeyVault
 	var message, projectID *string
-	var projectUUID *uuid.UUID
-	err := r.pool.QueryRow(ctx, q, id).Scan(
+	var projectUUIDCol *uuid.UUID
+	err := r.pool.QueryRow(ctx, q, id, tenantUUID, projectUUID).Scan(
 		&kv.ID, &kv.TenantID, &kv.TenantUUID,
-		&projectID, &projectUUID,
+		&projectID, &projectUUIDCol,
 		&kv.Name, &kv.SoftDeleteDays,
 		&kv.Status, &message,
 		&kv.CredentialsConsumedAt, &kv.CreatedAt, &kv.UpdatedAt,
@@ -78,8 +78,8 @@ func (r *Repository) GetKeyVault(ctx context.Context, id uuid.UUID) (*models.Key
 	if projectID != nil {
 		kv.ProjectID = *projectID
 	}
-	if projectUUID != nil {
-		kv.ProjectUUID = *projectUUID
+	if projectUUIDCol != nil {
+		kv.ProjectUUID = *projectUUIDCol
 	}
 	return &kv, nil
 }

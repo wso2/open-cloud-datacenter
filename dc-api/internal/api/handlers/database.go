@@ -320,6 +320,11 @@ func (h *DatabaseHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionDBServerRead) {
 		return
 	}
@@ -329,7 +334,7 @@ func (h *DatabaseHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid database id")
 		return
 	}
-	d, err := h.repo.GetDatabase(r.Context(), id)
+	d, err := h.repo.GetDatabase(r.Context(), id, tenantUUID, projectUUID)
 	if errors.Is(err, db.ErrDatabaseNotFound) {
 		writeError(w, http.StatusNotFound, "database not found")
 		return
@@ -406,6 +411,11 @@ func (h *DatabaseHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionDBServerDelete) {
 		return
 	}
@@ -417,7 +427,7 @@ func (h *DatabaseHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Tenant scope guard — fetch first so we don't delete another tenant's row.
-	d, err := h.repo.GetDatabase(r.Context(), id)
+	d, err := h.repo.GetDatabase(r.Context(), id, tenantUUID, projectUUID)
 	if errors.Is(err, db.ErrDatabaseNotFound) {
 		writeError(w, http.StatusNotFound, "database not found")
 		return
@@ -479,6 +489,11 @@ func (h *DatabaseHandler) Credentials(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionDBCredentialsRead) {
 		return
 	}
@@ -493,7 +508,7 @@ func (h *DatabaseHandler) Credentials(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid database id")
 		return
 	}
-	d, err := h.repo.GetDatabase(r.Context(), id)
+	d, err := h.repo.GetDatabase(r.Context(), id, tenantUUID, projectUUID)
 	if errors.Is(err, db.ErrDatabaseNotFound) {
 		writeError(w, http.StatusNotFound, "database not found")
 		return

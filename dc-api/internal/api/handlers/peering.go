@@ -108,6 +108,11 @@ func (h *PeeringHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 
 	vnetID, err := uuid.Parse(chi.URLParam(r, "vnet_id"))
 	if err != nil {
@@ -116,7 +121,7 @@ func (h *PeeringHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch initiating VNet.
-	vnet, err := h.repo.GetVNetByTenant(r.Context(), vnetID, tenantUUID)
+	vnet, err := h.repo.GetVNet(r.Context(), vnetID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "VNet not found")
 		return
@@ -267,6 +272,11 @@ func (h *PeeringHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	vnetID, err := uuid.Parse(chi.URLParam(r, "vnet_id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid VNet ID")
@@ -278,7 +288,7 @@ func (h *PeeringHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.repo.GetVNetByTenant(r.Context(), vnetID, tenantUUID)
+	_, err = h.repo.GetVNet(r.Context(), vnetID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "VNet not found")
 		return
@@ -299,13 +309,18 @@ func (h *PeeringHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	vnetID, err := uuid.Parse(chi.URLParam(r, "vnet_id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid VNet ID")
 		return
 	}
 
-	_, err = h.repo.GetVNetByTenant(r.Context(), vnetID, tenantUUID)
+	_, err = h.repo.GetVNet(r.Context(), vnetID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "VNet not found")
 		return
@@ -352,8 +367,13 @@ func (h *PeeringHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 
-	vnet, err := h.repo.GetVNetByTenant(r.Context(), vnetID, tenantUUID)
+	vnet, err := h.repo.GetVNet(r.Context(), vnetID, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "VNet not found")
 		return

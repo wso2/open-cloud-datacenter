@@ -252,6 +252,11 @@ func (h *KeyVaultHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionVaultRead) {
 		return
 	}
@@ -261,7 +266,7 @@ func (h *KeyVaultHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid key vault id")
 		return
 	}
-	kv, err := h.repo.GetKeyVault(r.Context(), id)
+	kv, err := h.repo.GetKeyVault(r.Context(), id, tenantUUID, projectUUID)
 	if errors.Is(err, db.ErrKeyVaultNotFound) {
 		writeError(w, http.StatusNotFound, "key vault not found")
 		return
@@ -320,10 +325,15 @@ func (h *KeyVaultHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionVaultRead) {
 		return
 	}
-	kvs, err := h.repo.ListKeyVaults(r.Context(), tenantUUID)
+	kvs, err := h.repo.ListKeyVaultsByProject(r.Context(), tenantUUID, projectUUID)
 	if err != nil {
 		h.log.Error().Err(err).Str("tenant", tenantID).Msg("list key_vaults")
 		writeError(w, http.StatusInternalServerError, "failed to list key vaults")
@@ -372,6 +382,11 @@ func (h *KeyVaultHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionVaultDelete) {
 		return
 	}
@@ -383,7 +398,7 @@ func (h *KeyVaultHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Tenant scope guard — fetch first so we don't delete another tenant's row.
-	kv, err := h.repo.GetKeyVault(r.Context(), id)
+	kv, err := h.repo.GetKeyVault(r.Context(), id, tenantUUID, projectUUID)
 	if errors.Is(err, db.ErrKeyVaultNotFound) {
 		writeError(w, http.StatusNotFound, "key vault not found")
 		return
@@ -447,6 +462,11 @@ func (h *KeyVaultHandler) Credentials(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionVaultCredentialsRead) {
 		return
 	}
@@ -461,7 +481,7 @@ func (h *KeyVaultHandler) Credentials(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid key vault id")
 		return
 	}
-	kv, err := h.repo.GetKeyVault(r.Context(), id)
+	kv, err := h.repo.GetKeyVault(r.Context(), id, tenantUUID, projectUUID)
 	if errors.Is(err, db.ErrKeyVaultNotFound) {
 		writeError(w, http.StatusNotFound, "key vault not found")
 		return
@@ -580,6 +600,11 @@ func (h *KeyVaultHandler) RotateCredentials(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionVaultWrite) {
 		return
 	}
@@ -594,7 +619,7 @@ func (h *KeyVaultHandler) RotateCredentials(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "invalid key vault id")
 		return
 	}
-	kv, err := h.repo.GetKeyVault(r.Context(), id)
+	kv, err := h.repo.GetKeyVault(r.Context(), id, tenantUUID, projectUUID)
 	if errors.Is(err, db.ErrKeyVaultNotFound) {
 		writeError(w, http.StatusNotFound, "key vault not found")
 		return
@@ -749,7 +774,15 @@ type KeyVaultTargetLookup struct{ Repo *db.Repository }
 // mismatch both return (false, nil) so the caller emits 404 (no leak).
 // Phase 6a: accepts tenantUUID (immutable) instead of the mutable slug.
 func (l *KeyVaultTargetLookup) Exists(ctx context.Context, tenantUUID uuid.UUID, id uuid.UUID) (bool, error) {
-	kv, err := l.Repo.GetKeyVault(ctx, id)
+	// These routes run under ProjectContext middleware, so the project UUID is
+	// always present on the request context. Scope the lookup to it so a vault
+	// in another project of the same tenant returns not-found (no cross-project
+	// leak). A missing project context yields (false, nil) → the caller's 404.
+	projectUUID, ok := middleware.ProjectUUIDFromContext(ctx)
+	if !ok {
+		return false, nil
+	}
+	kv, err := l.Repo.GetKeyVault(ctx, id, tenantUUID, projectUUID)
 	if errors.Is(err, db.ErrKeyVaultNotFound) {
 		return false, nil
 	}

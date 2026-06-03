@@ -58,7 +58,7 @@ func (r *Repository) CreateDatabase(ctx context.Context, d *models.Database) (*m
 // GetDatabase fetches a Database by ID. Returns ErrDatabaseNotFound on
 // missing rows so handlers can map directly to 404 without string-matching
 // pgx errors.
-func (r *Repository) GetDatabase(ctx context.Context, id uuid.UUID) (*models.Database, error) {
+func (r *Repository) GetDatabase(ctx context.Context, id, tenantUUID, projectUUID uuid.UUID) (*models.Database, error) {
 	const q = `
 		SELECT id, tenant_id, tenant_uuid, project_id, project_uuid,
 		       name, engine, engine_version, instance_class, allocated_storage_gb,
@@ -67,13 +67,13 @@ func (r *Repository) GetDatabase(ctx context.Context, id uuid.UUID) (*models.Dat
 		       endpoint_address, endpoint_port,
 		       credentials_consumed_at, created_at, updated_at
 		FROM   databases
-		WHERE  id = $1`
+		WHERE  id = $1 AND tenant_uuid = $2 AND project_uuid = $3`
 
 	d := &models.Database{}
 	var engine, networkMode, status string
 	var engineVersion, nadRef, message, endpointAddress *string
 	var endpointPort *int
-	err := r.pool.QueryRow(ctx, q, id).Scan(
+	err := r.pool.QueryRow(ctx, q, id, tenantUUID, projectUUID).Scan(
 		&d.ID, &d.TenantID, &d.TenantUUID, &d.ProjectID, &d.ProjectUUID,
 		&d.Name, &engine, &engineVersion, &d.InstanceClass, &d.AllocatedStorageGB,
 		&networkMode, &d.VNetID, &d.SubnetID, &nadRef,

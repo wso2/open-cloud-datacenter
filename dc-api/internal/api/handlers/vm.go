@@ -228,6 +228,11 @@ func (h *VMHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 
 	// ── Step 2: enforce quota ─────────────────────────────────────────────────
 	// We check BEFORE hitting Harvester — fail fast, no wasted API calls.
@@ -283,7 +288,7 @@ func (h *VMHandler) Create(w http.ResponseWriter, r *http.Request) {
 		vnetUUID, _ := uuid.Parse(req.VNetID)    // already validated above
 		subnetUUID, _ := uuid.Parse(req.SubnetID) // already validated above
 
-		vnet, err := h.repo.GetVNetByTenant(r.Context(), vnetUUID, tenantUUID)
+		vnet, err := h.repo.GetVNet(r.Context(), vnetUUID, tenantUUID, projectUUID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "vnet not found")
 			return
@@ -322,7 +327,7 @@ func (h *VMHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var dnsSrvIP string
 	if req.VNetID != "" {
 		vnetUUID2, _ := uuid.Parse(req.VNetID)
-		if vnet2, err2 := h.repo.GetVNetByTenant(r.Context(), vnetUUID2, tenantUUID); err2 == nil && vnet2.DNSServerIP != "" {
+		if vnet2, err2 := h.repo.GetVNet(r.Context(), vnetUUID2, tenantUUID, projectUUID); err2 == nil && vnet2.DNSServerIP != "" {
 			dnsSrvIP = vnet2.DNSServerIP
 		}
 	}
@@ -404,6 +409,11 @@ func (h *VMHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 
 	rawID := chi.URLParam(r, "id")
 	id, err := uuid.Parse(rawID)
@@ -412,7 +422,7 @@ func (h *VMHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resource, err := h.repo.Get(r.Context(), id, tenantUUID)
+	resource, err := h.repo.GetForProject(r.Context(), id, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "resource not found")
 		return
@@ -428,8 +438,13 @@ func (h *VMHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 
-	resources, err := h.repo.ListByTenant(r.Context(), tenantUUID, models.ResourceTypeVM)
+	resources, err := h.repo.ListByProject(r.Context(), tenantUUID, projectUUID, models.ResourceTypeVM)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list VMs")
 		return
@@ -454,6 +469,11 @@ func (h *VMHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
 		return
 	}
+	projectUUID, ok := middleware.ProjectUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no project UUID in context")
+		return
+	}
 	if !requireAction(w, r, h.repo, rbac.ActionVMDelete) {
 		return
 	}
@@ -466,7 +486,7 @@ func (h *VMHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resource, err := h.repo.Get(r.Context(), id, tenantUUID)
+	resource, err := h.repo.GetForProject(r.Context(), id, tenantUUID, projectUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "resource not found")
 		return
