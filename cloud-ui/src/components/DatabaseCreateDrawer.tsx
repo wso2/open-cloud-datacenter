@@ -8,10 +8,13 @@ import {
   Dropdown,
   Field,
   Input,
+  Link,
   MessageBar,
   MessageBarBody,
   Option,
   OverlayDrawer,
+  Radio,
+  RadioGroup,
   SpinButton,
   Toast,
   ToastTitle,
@@ -22,11 +25,13 @@ import {
   useToastController,
 } from '@fluentui/react-components';
 import { Dismiss24Regular } from '@fluentui/react-icons';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useApi } from '../api/useApi';
 import { useActiveProject } from '../hooks/useActiveProject';
+import SubnetCreateDrawer from './SubnetCreateDrawer';
+import VnetCreateDrawer from './VnetCreateDrawer';
 import { ReviewSummary } from './wizard/ReviewSummary';
 import { useWizard } from './wizard/CreateWizard';
 import type { ValidationIssue } from './wizard/CreateWizard';
@@ -60,6 +65,27 @@ const INSTANCE_CLASSES = [
 
 type InstanceClass = typeof INSTANCE_CLASSES[number];
 
+interface VNet {
+  id: string;
+  name: string;
+  status: string;
+  address_space: string[];
+}
+
+interface Subnet {
+  id: string;
+  vnet_id: string;
+  name: string;
+  cidr: string;
+  status: string;
+}
+
+interface Network {
+  id: string;
+  display_name: string;
+  namespace: string;
+}
+
 export interface DatabaseCreated {
   id: string;
   name: string;
@@ -72,6 +98,7 @@ interface Props {
 }
 
 const STEP_BASICS = 'basics';
+const STEP_NETWORK = 'network';
 
 export default function DatabaseCreateDrawer({ open, onClose, onCreated }: Props) {
   const styles = useStyles();
@@ -89,6 +116,82 @@ export default function DatabaseCreateDrawer({ open, onClose, onCreated }: Props
   const [name, setName] = useState('');
   const [instanceClass, setInstanceClass] = useState<InstanceClass>('db.t3.medium');
   const [storageGb, setStorageGb] = useState(50);
+  const [networkMode, setNetworkMode] = useState<'vpc' | 'legacy'>('vpc');
+  const [vnetId, setVnetId] = useState('');
+  const [subnetId, setSubnetId] = useState('');
+  const [nadRef, setNadRef] = useState('');
+  const [createVnetOpen, setCreateVnetOpen] = useState(false);
+  const [createSubnetOpen, setCreateSubnetOpen] = useState(false);
+
+  // ── Data fetching ──────────────────────────────────────────────────────────
+
+  // Poll while any VNet is PENDING so a freshly-created one flips to ACTIVE
+  // without the user refreshing.
+  const vnetsQuery = useQuery({
+    queryKey: ['vnets', tenantId, projectId],
+    enabled: open && networkMode === 'vpc' && Boolean(tenantId) && Boolean(projectId),
+    queryFn: async () => {
+      const { data, error } = await api.GET(
+        '/v1/tenants/{tenant_id}/projects/{project_id}/vnets',
+        { params: { path: { tenant_id: tenantId!, project_id: projectId! } } },
+      );
+      if (error) throw new Error(JSON.stringify(error));
+      return (data ?? []) as VNet[];
+    },
+    refetchInterval: (query) => {
+      const data = query.state.data as VNet[] | undefined;
+      return data?.some((v) => v.status === 'PENDING') ? 3000 : false;
+    },
+  });
+
+  const subnetsQuery = useQuery({
+    queryKey: ['subnets', tenantId, projectId, vnetId],
+    enabled: open && networkMode === 'vpc' && Boolean(tenantId) && Boolean(projectId) && Boolean(vnetId),
+    queryFn: async () => {
+      const { data, error } = await api.GET(
+        '/v1/tenants/{tenant_id}/projects/{project_id}/vnets/{vnet_id}/subnets',
+        { params: { path: { tenant_id: tenantId!, project_id: projectId!, vnet_id: vnetId } } },
+      );
+      if (error) throw new Error(JSON.stringify(error));
+      return (data ?? []) as Subnet[];
+    },
+    refetchInterval: (query) => {
+      const data = query.state.data as Subnet[] | undefined;
+      return data?.some((s) => s.status === 'PENDING') ? 3000 : false;
+    },
+  });
+
+  const networksQuery = useQuery({
+    queryKey: ['networks', tenantId],
+    enabled: open && networkMode === 'legacy' && Boolean(tenantId),
+    queryFn: async () => {
+      const { data, error } = await api.GET('/v1/tenants/{tenant_id}/networks', {
+        params: { path: { tenant_id: tenantId! } },
+      });
+      if (error) throw new Error(JSON.stringify(error));
+      return (data ?? []) as Network[];
+    },
+  });
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+
+  const vnets = vnetsQuery.data ?? [];
+  const subnets = subnetsQuery.data ?? [];
+  const selectedVnet = vnets.find((v) => v.id === vnetId);
+  const selectedSubnet = subnets.find((s) => s.id === subnetId);
+  const selectedNetwork = networksQuery.data?.find((n) => n.id === nadRef);
+
+  // ── Reset ──────────────────────────────────────────────────────────────────
+
+  const resetFormState = () => {
+    setName('');
+    setInstanceClass('db.t3.medium');
+    setStorageGb(50);
+    setNetworkMode('vpc');
+    setVnetId('');
+    setSubnetId('');
+    setNadRef('');
+  };
 
   // ── Validation ─────────────────────────────────────────────────────────────
 
@@ -100,19 +203,20 @@ export default function DatabaseCreateDrawer({ open, onClose, onCreated }: Props
     validationIssues.push({ message: 'Database name is missing or invalid', targetStep: STEP_BASICS });
   if (!storageValid)
     validationIssues.push({ message: 'Storage must be at least 1 GB', targetStep: STEP_BASICS });
-
-  // ── Reset ──────────────────────────────────────────────────────────────────
-
-  const resetFormState = () => {
-    setName('');
-    setInstanceClass('db.t3.medium');
-    setStorageGb(50);
-  };
+  if (networkMode === 'legacy' && !nadRef)
+    validationIssues.push({ message: 'Select a bridge network', targetStep: STEP_NETWORK });
 
   // ── Mutation ───────────────────────────────────────────────────────────────
 
   const createMutation = useMutation({
     mutationFn: async () => {
+      let network: Record<string, unknown> | undefined;
+      if (networkMode === 'vpc' && vnetId && subnetId) {
+        network = { mode: 'vpc', vnet_id: vnetId, subnet_id: subnetId };
+      } else if (networkMode === 'legacy' && nadRef) {
+        network = { mode: 'legacy', nad_ref: nadRef };
+      }
+
       const { data, error } = await api.POST(
         '/v1/tenants/{tenant_id}/projects/{project_id}/databases',
         {
@@ -122,6 +226,7 @@ export default function DatabaseCreateDrawer({ open, onClose, onCreated }: Props
             engine: 'postgres',
             instance_class: instanceClass,
             allocated_storage_gb: storageGb,
+            ...(network ? { network: network as never } : {}),
           },
         },
       );
@@ -153,6 +258,19 @@ export default function DatabaseCreateDrawer({ open, onClose, onCreated }: Props
           { key: 'Engine', value: 'PostgreSQL' },
           { key: 'Instance class', value: instanceClass },
           { key: 'Storage', value: `${storageGb} GB` },
+          ...(networkMode === 'vpc'
+            ? [
+                { key: 'VNet', value: selectedVnet?.name ?? '(auto)' },
+                {
+                  key: 'Subnet',
+                  value: selectedSubnet
+                    ? `${selectedSubnet.name} (${selectedSubnet.cidr})`
+                    : '(auto)',
+                },
+              ]
+            : [
+                { key: 'Bridge network', value: selectedNetwork?.display_name ?? (nadRef || '—') },
+              ]),
         ]}
       />
       <MessageBar intent="info">
@@ -231,6 +349,147 @@ export default function DatabaseCreateDrawer({ open, onClose, onCreated }: Props
           </>
         ),
       },
+      {
+        id: STEP_NETWORK,
+        title: 'Network',
+        content: (
+          <>
+            <Field label="Network mode" required hint="Where does this database live in the network?">
+              <RadioGroup
+                value={networkMode}
+                onChange={(_, d) => {
+                  setNetworkMode(d.value as 'vpc' | 'legacy');
+                  setVnetId('');
+                  setSubnetId('');
+                  setNadRef('');
+                }}
+                layout="horizontal"
+              >
+                <Radio value="vpc" label="VPC (recommended)" />
+                <Radio value="legacy" label="Legacy bridge network" />
+              </RadioGroup>
+            </Field>
+
+            {networkMode === 'vpc' && (
+              <>
+                <div>
+                  <Field
+                    label="VNet"
+                    hint="Optional — leave blank to auto-select the project default. Freshly-created VNets show as provisioning until ready."
+                  >
+                    <Dropdown
+                      placeholder={
+                        vnetsQuery.isLoading
+                          ? 'Loading VNets…'
+                          : vnets.length === 0
+                            ? 'No VNets yet — use Create new below'
+                            : 'Auto-select (recommended)'
+                      }
+                      value={
+                        selectedVnet
+                          ? `${selectedVnet.name} (${selectedVnet.address_space.join(', ')})${selectedVnet.status === 'ACTIVE' ? '' : ' (provisioning…)'}`
+                          : ''
+                      }
+                      selectedOptions={vnetId ? [vnetId] : []}
+                      onOptionSelect={(_, d) => {
+                        setVnetId(d.optionValue ?? '');
+                        setSubnetId('');
+                      }}
+                    >
+                      {vnets.map((v) => (
+                        <Option
+                          key={v.id}
+                          value={v.id}
+                          text={`${v.name} (${v.address_space.join(', ')})`}
+                        >
+                          {`${v.name} (${v.address_space.join(', ')})${v.status === 'ACTIVE' ? '' : ' (provisioning…)'}`}
+                        </Option>
+                      ))}
+                    </Dropdown>
+                  </Field>
+                  <Link
+                    as="button"
+                    type="button"
+                    onClick={() => setCreateVnetOpen(true)}
+                    style={{ fontSize: tokens.fontSizeBase200, marginTop: tokens.spacingVerticalXS }}
+                  >
+                    Create new
+                  </Link>
+                </div>
+
+                <div>
+                  <Field
+                    label="Subnet"
+                    hint="Optional — leave blank to auto-select. Freshly-created subnets show as provisioning until ready."
+                  >
+                    <Dropdown
+                      placeholder={
+                        !vnetId
+                          ? 'Pick a VNet first'
+                          : selectedVnet?.status !== 'ACTIVE'
+                            ? 'Waiting for VNet to be Active…'
+                            : subnetsQuery.isLoading
+                              ? 'Loading subnets…'
+                              : subnets.length === 0
+                                ? 'No subnets yet — use Create new below'
+                                : 'Auto-select (recommended)'
+                      }
+                      value={
+                        selectedSubnet
+                          ? selectedSubnet.status === 'ACTIVE'
+                            ? `${selectedSubnet.name} (${selectedSubnet.cidr})`
+                            : `${selectedSubnet.name} (${selectedSubnet.cidr}) (provisioning…)`
+                          : ''
+                      }
+                      selectedOptions={subnetId ? [subnetId] : []}
+                      onOptionSelect={(_, d) => setSubnetId(d.optionValue ?? '')}
+                      disabled={!vnetId || selectedVnet?.status !== 'ACTIVE'}
+                    >
+                      {subnets.map((s) => (
+                        <Option key={s.id} value={s.id} text={`${s.name} (${s.cidr})`}>
+                          {s.status === 'ACTIVE'
+                            ? `${s.name} (${s.cidr})`
+                            : `${s.name} (${s.cidr}) (provisioning…)`}
+                        </Option>
+                      ))}
+                    </Dropdown>
+                  </Field>
+                  <Link
+                    as="button"
+                    type="button"
+                    onClick={() => setCreateSubnetOpen(true)}
+                    disabled={!vnetId || selectedVnet?.status !== 'ACTIVE'}
+                    style={{ fontSize: tokens.fontSizeBase200, marginTop: tokens.spacingVerticalXS }}
+                  >
+                    Create new
+                  </Link>
+                </div>
+              </>
+            )}
+
+            {networkMode === 'legacy' && (
+              <Field
+                label="Bridge network"
+                required
+                hint="Pre-provisioned bridge network (Multus NAD). Most new databases should use VPC instead."
+              >
+                <Dropdown
+                  placeholder={networksQuery.isLoading ? 'Loading networks…' : 'Select a network'}
+                  value={selectedNetwork?.display_name ?? ''}
+                  selectedOptions={nadRef ? [nadRef] : []}
+                  onOptionSelect={(_, d) => setNadRef(d.optionValue ?? '')}
+                >
+                  {networksQuery.data?.map((n) => (
+                    <Option key={n.id} value={n.id} text={n.display_name}>
+                      {n.display_name}
+                    </Option>
+                  ))}
+                </Dropdown>
+              </Field>
+            )}
+          </>
+        ),
+      },
     ],
     issues: validationIssues,
     reviewSummary: reviewSummaryContent,
@@ -286,6 +545,27 @@ export default function DatabaseCreateDrawer({ open, onClose, onCreated }: Props
       <DrawerFooter className={styles.footer}>
         <wizard.Footer />
       </DrawerFooter>
+
+      <VnetCreateDrawer
+        open={createVnetOpen}
+        onClose={() => setCreateVnetOpen(false)}
+        onCreated={(result) => {
+          setVnetId(result.vnetId);
+          setSubnetId('');
+          setCreateVnetOpen(false);
+        }}
+      />
+
+      <SubnetCreateDrawer
+        open={createSubnetOpen}
+        onClose={() => setCreateSubnetOpen(false)}
+        onCreated={(result) => {
+          setSubnetId(result.subnetId);
+          setCreateSubnetOpen(false);
+        }}
+        vnetId={vnetId}
+        vnetAddressSpace={selectedVnet?.address_space ?? []}
+      />
     </OverlayDrawer>
   );
 }
