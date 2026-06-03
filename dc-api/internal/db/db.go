@@ -190,6 +190,120 @@ func (r *Repository) Get(ctx context.Context, id uuid.UUID, tenantUUID uuid.UUID
 	return &res, nil
 }
 
+// GetResourceLocationByUUID resolves a resource's immutable UUID to its parent
+// tenant slug and project UUID, searching every resource type — compute
+// resources (VMs, clusters), key vaults, and databases — because a
+// resource-scope role_assignment is keyed only by the resource UUID, not its
+// type. The entry path uses it to admit a principal who holds only a
+// resource-scope grant: the grant implies access to that resource's tenant and
+// project for navigation, with the per-resource action gate still deciding what
+// they may do. Returns found=false when no resource has that UUID, or when the
+// resource is not bound to a project (no navigable entry point).
+//
+// MAINTENANCE: adding a new resource-scope-able type means extending the UNION
+// below, the one in ListSharedResources, the one in AnyResourceInProject, and
+// the kind mapping in handlers.sharedResourceKind.
+func (r *Repository) GetResourceLocationByUUID(ctx context.Context, resourceUUID uuid.UUID) (tenantSlug string, projectUUID uuid.UUID, found bool, err error) {
+	const q = `
+		SELECT tenant_id, project_uuid FROM resources  WHERE id = $1
+		UNION ALL
+		SELECT tenant_id, project_uuid FROM key_vaults WHERE id = $1
+		UNION ALL
+		SELECT tenant_id, project_uuid FROM databases  WHERE id = $1
+		LIMIT 1`
+	var slug string
+	var puuid *uuid.UUID
+	err = r.pool.QueryRow(ctx, q, resourceUUID).Scan(&slug, &puuid)
+	if err == pgx.ErrNoRows {
+		return "", uuid.Nil, false, nil
+	}
+	if err != nil {
+		return "", uuid.Nil, false, fmt.Errorf("db get resource location %s: %w", resourceUUID, err)
+	}
+	if puuid == nil {
+		return "", uuid.Nil, false, nil
+	}
+	return slug, *puuid, true, nil
+}
+
+// AnyResourceInProject reports whether any of the given resource UUIDs lives in
+// projectUUID, across every resource type. ProjectContext uses it to admit a
+// resource-only user in a single query rather than resolving each grant one by
+// one. An empty id list is false (no grants to match).
+func (r *Repository) AnyResourceInProject(ctx context.Context, projectUUID uuid.UUID, resourceUUIDs []uuid.UUID) (bool, error) {
+	if len(resourceUUIDs) == 0 {
+		return false, nil
+	}
+	const q = `
+		SELECT 1 FROM (
+			SELECT project_uuid FROM resources  WHERE id = ANY($1)
+			UNION ALL
+			SELECT project_uuid FROM key_vaults WHERE id = ANY($1)
+			UNION ALL
+			SELECT project_uuid FROM databases  WHERE id = ANY($1)
+		) t WHERE project_uuid = $2 LIMIT 1`
+	var one int
+	err := r.pool.QueryRow(ctx, q, resourceUUIDs, projectUUID).Scan(&one)
+	if err == pgx.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("db any resource in project %s: %w", projectUUID, err)
+	}
+	return true, nil
+}
+
+// SharedResource is the DB view of a resource reachable via a resource-scope
+// grant — enough for the UI to list it and deep-link to its detail page. Type
+// is the stored resource type (e.g. VIRTUAL_MACHINE, keyvault); the handler
+// maps it to a URL path segment.
+type SharedResource struct {
+	ID        uuid.UUID
+	Type      string
+	Name      string
+	ProjectID string
+	Status    string
+}
+
+// ListSharedResources returns display info for the given resource UUIDs that
+// live in tenantUUID, across every resource type (compute resources, key
+// vaults, databases). The shared-resources entry endpoint uses it to show a
+// resource-only user the resources they hold a direct grant on. Rows with no
+// project (not navigable) are skipped.
+func (r *Repository) ListSharedResources(ctx context.Context, tenantUUID uuid.UUID, ids []uuid.UUID) ([]SharedResource, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	const q = `
+		SELECT id, name, project_id, status::text, type::text
+		FROM   resources  WHERE tenant_uuid = $1 AND id = ANY($2)
+		UNION ALL
+		SELECT id, name, project_id, status::text, 'keyvault'
+		FROM   key_vaults WHERE tenant_uuid = $1 AND id = ANY($2)
+		UNION ALL
+		SELECT id, name, project_id, status::text, 'database'
+		FROM   databases  WHERE tenant_uuid = $1 AND id = ANY($2)`
+	rows, err := r.pool.Query(ctx, q, tenantUUID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("db list shared resources: %w", err)
+	}
+	defer rows.Close()
+	out := make([]SharedResource, 0, len(ids))
+	for rows.Next() {
+		var sr SharedResource
+		var projectID *string
+		if err := rows.Scan(&sr.ID, &sr.Name, &projectID, &sr.Status, &sr.Type); err != nil {
+			return nil, fmt.Errorf("scan shared resource: %w", err)
+		}
+		if projectID == nil {
+			continue // not project-bound → no navigable link
+		}
+		sr.ProjectID = *projectID
+		out = append(out, sr)
+	}
+	return out, rows.Err()
+}
+
 // GetInternal retrieves a Resource by its DC-API UUID without any tenant
 // scope filter. Used by the reconciler and other internal callers that walk
 // all tenants' resources for status synchronisation.

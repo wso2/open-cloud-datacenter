@@ -540,6 +540,11 @@ func NewRouter(deps RouterDeps) http.Handler {
 			// so the user knows what fits before submitting. Any tenant member
 			// can read; mutation is admin-only via PATCH /v1/admin/tenants/{tid}.
 			r.Get("/cap-usage", projectHandler.GetTenantCapUsage) // GET /v1/tenants/{tenant_id}/cap-usage (tenant-shared; membership-gated)
+
+			// Resources the caller can reach via a resource-scope grant — lets a
+			// resource-only user find and open what's been shared with them.
+			// Self-scoped (only the caller's own grants), so no per-action gate.
+			r.Get("/shared-resources", tenantHandler.SharedResources) // GET /v1/tenants/{tenant_id}/shared-resources
 		})
 	})
 

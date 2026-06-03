@@ -42,6 +42,9 @@ var allowlistedV1Routes = map[string]bool{
 	"GET /v1/tenants/{tenant_id}/images":    true,
 	"GET /v1/tenants/{tenant_id}/networks":  true,
 	"GET /v1/tenants/{tenant_id}/cap-usage": true,
+	// Self-scoped discovery: the resources the caller holds a resource-scope
+	// grant on, so a resource-only user can reach what's shared with them.
+	"GET /v1/tenants/{tenant_id}/shared-resources": true,
 	// Project navigation reads: listing/reading projects is how a member finds
 	// where their resources live. Access is already enforced by TenantContext
 	// (list) and ProjectContext (detail), so no per-action gate — otherwise a

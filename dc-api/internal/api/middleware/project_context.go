@@ -146,10 +146,29 @@ func (p *ProjectContext) Validate(next http.Handler) http.Handler {
 			{Type: models.ScopeTypeTenant, UUID: tenantUUID},
 		}
 		if !rbac.HasGrantInChain(ras, chain) {
-			// No grant at project or tenant scope → 404 to avoid leaking project
-			// existence to callers with no access.
-			respond.Error(w, http.StatusNotFound, "project not found")
-			return
+			// A resource-scope grant on a resource that lives in THIS project also
+			// admits the caller — they must navigate in to reach it; the
+			// per-resource action gate still decides what they may do. Collect the
+			// resource grants and resolve them in one query.
+			var resourceGrants []uuid.UUID
+			for _, a := range assignments {
+				if a.ScopeType == models.ScopeTypeResource {
+					resourceGrants = append(resourceGrants, a.ScopeUUID)
+				}
+			}
+			admitted, err := p.repo.AnyResourceInProject(r.Context(), projectUUID, resourceGrants)
+			if err != nil {
+				log.Error().Err(err).Str("project", urlProject).
+					Msg("project_context: resolve resource grants failed")
+				respond.Error(w, http.StatusInternalServerError, "Internal Server Error")
+				return
+			}
+			if !admitted {
+				// No grant at project, tenant, or a resource within it → 404 to
+				// avoid leaking project existence to callers with no access.
+				respond.Error(w, http.StatusNotFound, "project not found")
+				return
+			}
 		}
 
 		dispatch(r.Context())

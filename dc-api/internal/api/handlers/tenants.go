@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"sort"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/wso2/dc-api/internal/api/middleware"
 	"github.com/wso2/dc-api/internal/db"
@@ -113,6 +114,20 @@ func (h *TenantHandler) List(w http.ResponseWriter, r *http.Request) {
 			if tslug != "" {
 				ensure(tslug)
 			}
+		case models.ScopeTypeResource:
+			// A resource-scope grant surfaces the resource's parent tenant with
+			// no tenant-level role, so a resource-only user can navigate toward
+			// the resource they hold. ProjectContext and the per-resource gate
+			// enforce access below.
+			tslug, _, found, err := h.repo.GetResourceLocationByUUID(r.Context(), a.ScopeUUID)
+			if err != nil {
+				h.log.Error().Err(err).Str("resource_uuid", a.ScopeUUID.String()).
+					Msg("resolve tenant for resource grant failed")
+				continue
+			}
+			if found {
+				ensure(tslug)
+			}
 		}
 	}
 
@@ -128,4 +143,92 @@ func (h *TenantHandler) List(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(summaries, func(i, j int) bool { return summaries[i].ID < summaries[j].ID })
 
 	writeJSON(w, http.StatusOK, summaries)
+}
+
+// sharedResource is one resource a caller can reach through a resource-scope
+// grant. Kind is the URL path segment the UI uses to deep-link to the detail
+// page; roles are the role definitions the caller holds on it.
+type sharedResource struct {
+	ID        string   `json:"id"`
+	Kind      string   `json:"kind"`
+	Name      string   `json:"name"`
+	ProjectID string   `json:"project_id"`
+	Status    string   `json:"status"`
+	Roles     []string `json:"roles"`
+}
+
+// SharedResources handles GET /v1/tenants/{tenant_id}/shared-resources. It
+// returns the resources in this tenant the caller holds a direct resource-scope
+// grant on, so a resource-only user (no tenant or project role) can find and
+// open the resources shared with them. Self-scoped — it reflects only the
+// caller's own grants — so it carries no per-action gate.
+func (h *TenantHandler) SharedResources(w http.ResponseWriter, r *http.Request) {
+	pType, pID, ok := middleware.PrincipalFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no principal in context")
+		return
+	}
+	tenantUUID, ok := middleware.TenantUUIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no tenant uuid in context")
+		return
+	}
+
+	assignments, err := h.repo.ListRoleAssignmentsForPrincipal(r.Context(), pType, pID)
+	if err != nil {
+		h.log.Error().Err(err).Str("principal", pID).Msg("shared-resources: list role assignments failed")
+		writeError(w, http.StatusInternalServerError, "failed to list shared resources")
+		return
+	}
+
+	// Collect the resource-scope grants: the resource UUIDs to look up, and the
+	// role definitions held on each.
+	rolesByResource := make(map[uuid.UUID][]string)
+	ids := make([]uuid.UUID, 0)
+	for _, a := range assignments {
+		if a.ScopeType != models.ScopeTypeResource {
+			continue
+		}
+		if _, seen := rolesByResource[a.ScopeUUID]; !seen {
+			ids = append(ids, a.ScopeUUID)
+		}
+		rolesByResource[a.ScopeUUID] = append(rolesByResource[a.ScopeUUID], a.RoleDefinition)
+	}
+
+	shared, err := h.repo.ListSharedResources(r.Context(), tenantUUID, ids)
+	if err != nil {
+		h.log.Error().Err(err).Msg("shared-resources: list shared resources failed")
+		writeError(w, http.StatusInternalServerError, "failed to list shared resources")
+		return
+	}
+
+	resp := make([]sharedResource, 0, len(shared))
+	for _, s := range shared {
+		resp = append(resp, sharedResource{
+			ID:        s.ID.String(),
+			Kind:      sharedResourceKind(s.Type),
+			Name:      s.Name,
+			ProjectID: s.ProjectID,
+			Status:    s.Status,
+			Roles:     rolesByResource[s.ID],
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// sharedResourceKind maps a stored resource type to the URL path segment the UI
+// uses to build a deep link to the resource's detail page.
+func sharedResourceKind(stored string) string {
+	switch stored {
+	case string(models.ResourceTypeVM):
+		return "virtual-machines"
+	case string(models.ResourceTypeCluster):
+		return "clusters"
+	case "keyvault":
+		return "keyvaults"
+	case "database":
+		return "databases"
+	default:
+		return ""
+	}
 }

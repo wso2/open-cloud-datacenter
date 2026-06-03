@@ -301,6 +301,18 @@ func (h *ProjectHandler) filterReachableProjects(r *http.Request, projects []mod
 		if a.ScopeType == models.ScopeTypeProject {
 			granted[a.ScopeUUID] = true
 		}
+		// A resource-scope grant makes the resource's project reachable, so a
+		// resource-only user sees just that project (to navigate to the
+		// resource) without other project names leaking.
+		if a.ScopeType == models.ScopeTypeResource {
+			_, puuid, found, err := h.repo.GetResourceLocationByUUID(r.Context(), a.ScopeUUID)
+			if err != nil {
+				return nil, err
+			}
+			if found {
+				granted[puuid] = true
+			}
+		}
 	}
 	out := make([]models.Project, 0, len(projects))
 	for _, p := range projects {

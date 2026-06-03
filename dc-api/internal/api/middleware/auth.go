@@ -235,6 +235,17 @@ type AuthRepo interface {
 	// grant to that project's tenant. Returns ("", nil) when no project matches.
 	GetTenantSlugByProjectUUID(ctx context.Context, projectUUID uuid.UUID) (string, error)
 
+	// GetResourceLocationByUUID resolves a resource-scope grant's resource UUID
+	// to its parent tenant slug and project UUID, so the entry path can admit a
+	// principal who holds only a resource-scope grant. Searches every resource
+	// type (VMs, clusters, key vaults, databases); found=false when none match.
+	GetResourceLocationByUUID(ctx context.Context, resourceUUID uuid.UUID) (tenantSlug string, projectUUID uuid.UUID, found bool, err error)
+
+	// AnyResourceInProject reports whether any of the given resource UUIDs lives
+	// in projectUUID — so ProjectContext can admit a resource-only user in one
+	// query rather than resolving each grant individually.
+	AnyResourceInProject(ctx context.Context, projectUUID uuid.UUID, resourceUUIDs []uuid.UUID) (bool, error)
+
 	GetServiceAccountByTokenLookupID(
 		ctx context.Context,
 		lookupID string,

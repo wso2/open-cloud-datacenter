@@ -190,6 +190,37 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /v1/tenants/{tenant_id}/shared-resources:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+    get:
+      operationId: listSharedResources
+      tags: [tenants]
+      summary: List resources the caller can reach via a resource-scope grant
+      description: |
+        Returns the resources in this tenant the caller holds a direct
+        resource-scope role assignment on — across virtual machines, clusters,
+        key vaults, and databases. It lets a resource-only user (one with no
+        tenant- or project-scope role) find and open exactly what has been
+        shared with them; the cloud-ui uses `kind` + `project_id` + `id` to
+        deep-link to each resource's detail page. Self-scoped: it reflects only
+        the caller's own grants.
+      responses:
+        "200":
+          description: Resources shared with the caller
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SharedResource"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /v1/tenants/{tenant_id}/projects:
     parameters:
       - $ref: "#/components/parameters/TenantID"
@@ -6378,6 +6409,33 @@ components:
           example: dcapi_sa_a1b2c3d4e5f6_0102030405060708090a0b0c0d0e0f10
 
     # ── Tenants ────────────────────────────────────────────────────────────────
+
+    SharedResource:
+      type: object
+      required: [id, kind, name, project_id, status, roles]
+      description: |
+        A resource the caller can reach through a resource-scope grant, with
+        just enough for the UI to list it and deep-link to its detail page.
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          description: URL path segment for the resource's detail route.
+          enum: [virtual-machines, clusters, keyvaults, databases]
+        name:
+          type: string
+        project_id:
+          type: string
+          description: Slug of the project the resource lives in.
+        status:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+          description: Role-definition keys the caller holds on this resource.
 
     TenantSummary:
       type: object

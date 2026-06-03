@@ -171,6 +171,21 @@ func (t *TenantContext) Validate(next http.Handler) http.Handler {
 					return
 				}
 			}
+			// A resource-scope grant likewise admits the user to the resource's
+			// parent tenant (for navigation); ProjectContext and the per-resource
+			// gate enforce access below.
+			if a.ScopeType == models.ScopeTypeResource {
+				tslug, _, found, err := t.repo.GetResourceLocationByUUID(r.Context(), a.ScopeUUID)
+				if err != nil {
+					log.Error().Err(err).Str("resource_uuid", a.ScopeUUID.String()).
+						Msg("tenant_context: resolve tenant for resource grant failed")
+					continue
+				}
+				if found && tslug == urlTenant {
+					dispatch(r.Context())
+					return
+				}
+			}
 		}
 
 		// Distinguish "in IdP group but no role row" (actionable 403 — owner

@@ -8,7 +8,15 @@ import {
   shorthands,
   tokens,
 } from '@fluentui/react-components';
-import { Add24Regular, ChevronRight24Regular, Cube24Regular } from '@fluentui/react-icons';
+import {
+  Add24Regular,
+  ChevronRight24Regular,
+  CloudCube24Regular,
+  Cube24Regular,
+  Database24Regular,
+  Server24Regular,
+  ShieldKeyhole24Regular,
+} from '@fluentui/react-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -99,6 +107,18 @@ const useStyles = makeStyles({
     fontWeight: 600,
     color: tokens.colorBrandForeground1,
   },
+  sharedSection: {
+    marginTop: tokens.spacingVerticalXXXL,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  sharedHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+    marginBottom: tokens.spacingVerticalS,
+  },
 });
 
 interface Project {
@@ -108,6 +128,41 @@ interface Project {
   cpu_cores: number;
   memory_gb: number;
   storage_gb: number;
+}
+
+// kind is the resource-type segment the shared-resources API returns. The UI
+// route for VMs is `vms` (not `virtual-machines`); the rest match 1:1.
+const KIND_ROUTE: Record<string, string> = {
+  'virtual-machines': 'vms',
+  clusters: 'clusters',
+  keyvaults: 'keyvaults',
+  databases: 'databases',
+};
+const KIND_LABEL: Record<string, string> = {
+  'virtual-machines': 'Virtual machine',
+  clusters: 'Cluster',
+  keyvaults: 'Key vault',
+  databases: 'Database',
+};
+function kindRoute(kind: string): string {
+  return KIND_ROUTE[kind] ?? kind;
+}
+function kindLabel(kind: string): string {
+  return KIND_LABEL[kind] ?? kind;
+}
+function kindIcon(kind: string) {
+  switch (kind) {
+    case 'virtual-machines':
+      return <Server24Regular />;
+    case 'clusters':
+      return <CloudCube24Regular />;
+    case 'keyvaults':
+      return <ShieldKeyhole24Regular />;
+    case 'databases':
+      return <Database24Regular />;
+    default:
+      return <Cube24Regular />;
+  }
 }
 
 export default function ProjectPickerPage() {
@@ -147,6 +202,22 @@ export default function ProjectPickerPage() {
   });
 
   const projects = projectsQuery.data ?? [];
+
+  // Resources shared with the caller directly (resource-scope grants). For a
+  // resource-only user this is the only way to reach their resource — the
+  // project's resource lists are gated and come back empty for them.
+  const sharedQuery = useQuery({
+    queryKey: ['shared-resources', tenantId],
+    enabled: Boolean(tenantId),
+    queryFn: async () => {
+      const { data, error } = await api.GET('/v1/tenants/{tenant_id}/shared-resources', {
+        params: { path: { tenant_id: tenantId! } },
+      });
+      if (error) throw new Error(typeof error === 'string' ? error : JSON.stringify(error));
+      return data ?? [];
+    },
+  });
+  const shared = sharedQuery.data ?? [];
 
   return (
     <div className={styles.root}>
@@ -227,6 +298,44 @@ export default function ProjectPickerPage() {
                 </div>
               </Card>
             )}
+          </div>
+        )}
+
+        {shared.length > 0 && (
+          <div className={styles.sharedSection}>
+            <div className={styles.sharedHeader}>
+              <Subtitle2>Shared with you</Subtitle2>
+              <Body1 className={styles.headerSubtitle}>
+                Individual resources you've been granted access to. Other resources in these
+                projects stay hidden.
+              </Body1>
+            </div>
+            <div className={styles.list}>
+              {shared.map((r) => (
+                <Card
+                  key={r.id}
+                  className={styles.projectCard}
+                  onClick={() =>
+                    navigate(`/tenants/${tenantId}/projects/${r.project_id}/${kindRoute(r.kind)}/${r.id}`)
+                  }
+                >
+                  <div className={styles.projectRow}>
+                    <div className={styles.iconWrap}>{kindIcon(r.kind)}</div>
+                    <div className={styles.projectTextStack}>
+                      <Body1 className={styles.projectName}>{r.name}</Body1>
+                      <Body1 className={styles.projectMeta}>
+                        {kindLabel(r.kind)} · {r.project_id}
+                        {r.status ? ` · ${r.status}` : ''}
+                      </Body1>
+                      {r.roles?.length ? (
+                        <Body1 className={styles.projectMeta}>{r.roles.join(', ')}</Body1>
+                      ) : null}
+                    </div>
+                    <ChevronRight24Regular style={{ color: tokens.colorNeutralForeground3 }} />
+                  </div>
+                </Card>
+              ))}
+            </div>
           </div>
         )}
       </div>
