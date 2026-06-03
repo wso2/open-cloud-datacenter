@@ -92,6 +92,12 @@ const (
 	// /v1/tenants/{tenant_id}/projects/{project_id}/... request.
 	ContextKeyProjectID   contextKey = "project_id"
 	ContextKeyProjectUUID contextKey = "project_uuid"
+	// ContextKeyResourceUUID is the narrowest scope (RBAC v2): the UUID of an
+	// individual resource (VM, cluster, key vault, database). Injected by the
+	// ResourceScope middleware on per-resource routes so the authorization scope
+	// chain includes {resource, uuid} and a resource-scope grant can authorize
+	// actions on that one resource.
+	ContextKeyResourceUUID contextKey = "resource_uuid"
 	ContextKeyUserID        contextKey = "user_id"
 	ContextKeyPrincipalType contextKey = "principal_type"
 	ContextKeyPrincipalID   contextKey = "principal_id"
@@ -138,6 +144,14 @@ func ProjectFromContext(ctx context.Context) (string, bool) {
 // is on the request.
 func ProjectUUIDFromContext(ctx context.Context) (uuid.UUID, bool) {
 	v, ok := ctx.Value(ContextKeyProjectUUID).(uuid.UUID)
+	return v, ok && v != uuid.Nil
+}
+
+// ResourceUUIDFromContext extracts the individual-resource UUID injected by the
+// ResourceScope middleware on per-resource routes. Returns (uuid.Nil, false)
+// when the request is not scoped to a single resource.
+func ResourceUUIDFromContext(ctx context.Context) (uuid.UUID, bool) {
+	v, ok := ctx.Value(ContextKeyResourceUUID).(uuid.UUID)
 	return v, ok && v != uuid.Nil
 }
 

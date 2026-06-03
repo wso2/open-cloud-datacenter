@@ -320,8 +320,23 @@ func NewRouter(deps RouterDeps) http.Handler {
 					r.Route("/virtual-machines", func(r chi.Router) {
 						r.Method(http.MethodPost, "/", gate(rbac.ActionVMWrite, vmHandler.Create))       // POST   .../virtual-machines
 						r.Method(http.MethodGet, "/", gate(rbac.ActionVMRead, vmHandler.List))          // GET    .../virtual-machines
-						r.Method(http.MethodGet, "/{id}", gate(rbac.ActionVMRead, vmHandler.Get))       // GET    .../virtual-machines/{id}
-						r.Method(http.MethodDelete, "/{id}", gate(rbac.ActionVMDelete, vmHandler.Delete)) // DELETE .../virtual-machines/{id}
+
+						// Per-VM routes — ResourceScope injects {resource, vm uuid} into the
+						// scope chain, so a role granted on THIS VM authorizes actions on it
+						// (and only it). ProjectContext above still gates the project.
+						r.Route("/{id}", func(r chi.Router) {
+							r.Use(middleware.ResourceScope("id"))
+							r.Method(http.MethodGet, "/", gate(rbac.ActionVMRead, vmHandler.Get))         // GET    .../virtual-machines/{id}
+							r.Method(http.MethodDelete, "/", gate(rbac.ActionVMDelete, vmHandler.Delete)) // DELETE .../virtual-machines/{id}
+
+							// M5b: resource-scope role assignments + capability probe.
+							r.Route("/role-assignments", func(r chi.Router) {
+								r.Method(http.MethodPost, "/", gate(rbac.ActionRoleAssignmentWrite, roleAssignmentHandler.Create))                  // POST   .../{id}/role-assignments
+								r.Method(http.MethodGet, "/", gate(rbac.ActionRoleAssignmentRead, roleAssignmentHandler.List))                      // GET    .../{id}/role-assignments
+								r.Method(http.MethodDelete, "/{principal_id}", gate(rbac.ActionRoleAssignmentDelete, roleAssignmentHandler.Remove)) // DELETE .../{id}/role-assignments/{principal_id}
+							})
+							r.Post("/permissions:check", permissionsHandler.Check) // POST .../{id}/permissions:check
+						})
 					})
 
 					// ── Bastions (F10) ──────────────────────────────────────
@@ -338,9 +353,18 @@ func NewRouter(deps RouterDeps) http.Handler {
 						r.Method(http.MethodGet, "/", gate(rbac.ActionClusterRead, clusterHandler.List))    // GET    .../clusters
 
 						r.Route("/{id}", func(r chi.Router) {
+							r.Use(middleware.ResourceScope("id")) // resource-scope grants authorize actions on this cluster
 							r.Method(http.MethodGet, "/", gate(rbac.ActionClusterRead, clusterHandler.Get))                      // GET    .../clusters/{id}
 							r.Method(http.MethodDelete, "/", gate(rbac.ActionClusterDelete, clusterHandler.Delete))                // DELETE .../clusters/{id}
 							r.Method(http.MethodGet, "/kubeconfig", gate(rbac.ActionClusterKubeconfigRead, clusterHandler.GetKubeconfig))  // GET    .../clusters/{id}/kubeconfig
+
+							// M5b: resource-scope role assignments + capability probe.
+							r.Route("/role-assignments", func(r chi.Router) {
+								r.Method(http.MethodPost, "/", gate(rbac.ActionRoleAssignmentWrite, roleAssignmentHandler.Create))
+								r.Method(http.MethodGet, "/", gate(rbac.ActionRoleAssignmentRead, roleAssignmentHandler.List))
+								r.Method(http.MethodDelete, "/{principal_id}", gate(rbac.ActionRoleAssignmentDelete, roleAssignmentHandler.Remove))
+							})
+							r.Post("/permissions:check", permissionsHandler.Check)
 
 							// ── AKS-style node pool management (R5) ────────────
 							r.Route("/node-pools", func(r chi.Router) {
@@ -433,6 +457,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 					// ── M3 Key Vaults ───────────────────────────────────────
 					r.Route("/keyvaults", func(r chi.Router) {
+						r.Use(middleware.ResourceScope("id")) // resource-scope grants authorize actions on a vault; no-op for the {id}-less collection routes
 						r.Method(http.MethodPost, "/", gate(rbac.ActionVaultWrite, kvHandler.Create))                       // POST   .../keyvaults
 						r.Method(http.MethodGet, "/", gate(rbac.ActionVaultRead, kvHandler.List))                          // GET    .../keyvaults
 						r.Method(http.MethodGet, "/{id}", gate(rbac.ActionVaultRead, kvHandler.Get))                       // GET    .../keyvaults/{id}
@@ -461,16 +486,33 @@ func NewRouter(deps RouterDeps) http.Handler {
 								r.Method(http.MethodDelete, "/{ep_id}", gate(rbac.ActionPrivateEndpointDelete, kvEpHandler.Delete))
 							})
 						}
+
+						// M5b: resource-scope role assignments + capability probe.
+						r.Route("/{id}/role-assignments", func(r chi.Router) {
+							r.Method(http.MethodPost, "/", gate(rbac.ActionRoleAssignmentWrite, roleAssignmentHandler.Create))
+							r.Method(http.MethodGet, "/", gate(rbac.ActionRoleAssignmentRead, roleAssignmentHandler.List))
+							r.Method(http.MethodDelete, "/{principal_id}", gate(rbac.ActionRoleAssignmentDelete, roleAssignmentHandler.Remove))
+						})
+						r.Post("/{id}/permissions:check", permissionsHandler.Check)
 					})
 
 					// ── Task 1 — DBaaS Databases ────────────────────────────
 					dbHandler := handlers.NewDatabaseHandler(deps.Repo, deps.DatabaseProvisioner, deps.DBaaSOSImage, deps.Log)
 					r.Route("/databases", func(r chi.Router) {
+						r.Use(middleware.ResourceScope("id")) // resource-scope grants authorize actions on a database; no-op for the {id}-less collection routes
 						r.Method(http.MethodPost, "/", gate(rbac.ActionDBServerWrite, dbHandler.Create))                     // POST   .../databases
 						r.Method(http.MethodGet, "/", gate(rbac.ActionDBServerRead, dbHandler.List))                        // GET    .../databases
 						r.Method(http.MethodGet, "/{id}", gate(rbac.ActionDBServerRead, dbHandler.Get))                     // GET    .../databases/{id}
 						r.Method(http.MethodDelete, "/{id}", gate(rbac.ActionDBServerDelete, dbHandler.Delete))               // DELETE .../databases/{id}
 						r.Method(http.MethodGet, "/{id}/credentials", gate(rbac.ActionDBCredentialsRead, dbHandler.Credentials)) // GET    .../databases/{id}/credentials (shown-once)
+
+						// M5b: resource-scope role assignments + capability probe.
+						r.Route("/{id}/role-assignments", func(r chi.Router) {
+							r.Method(http.MethodPost, "/", gate(rbac.ActionRoleAssignmentWrite, roleAssignmentHandler.Create))
+							r.Method(http.MethodGet, "/", gate(rbac.ActionRoleAssignmentRead, roleAssignmentHandler.List))
+							r.Method(http.MethodDelete, "/{principal_id}", gate(rbac.ActionRoleAssignmentDelete, roleAssignmentHandler.Remove))
+						})
+						r.Post("/{id}/permissions:check", permissionsHandler.Check)
 					})
 				})
 			})

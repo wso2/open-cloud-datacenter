@@ -34,6 +34,7 @@ import { useApi } from '../api/useApi';
 import { useActiveProject } from '../hooks/useActiveProject';
 import { useConfirmDialog } from '../components/useConfirmDialog';
 import StatusPill from '../components/StatusPill';
+import MembersPage from './MembersPage';
 
 const useStyles = makeStyles({
   root: {
@@ -151,7 +152,7 @@ export default function VmDetailPage() {
   const { tenantId, vmId } = useParams<{ tenantId: string; vmId: string }>();
   const { projectId } = useActiveProject();
   const confirmDialog = useConfirmDialog();
-  const [tab, setTab] = useState<'overview' | 'activity' | 'configuration'>('overview');
+  const [tab, setTab] = useState<'overview' | 'activity' | 'configuration' | 'access'>('overview');
 
   const vmQuery = useQuery({
     queryKey: ['vm', tenantId, vmId],
@@ -307,6 +308,7 @@ status:
         <Tab value="overview">Overview</Tab>
         <Tab value="activity">Activity</Tab>
         <Tab value="configuration">Configuration</Tab>
+        <Tab value="access">Access control</Tab>
       </TabList>
 
       {tab === 'overview' && (
@@ -410,6 +412,13 @@ status:
             />
           </div>
         </Card>
+      )}
+
+      {tab === 'access' && (
+        <MembersPage
+          resourceBase={`/v1/tenants/${tenantId}/projects/${projectId}/virtual-machines/${vmId}`}
+          scopeLabel={vm.name}
+        />
       )}
     </div>
   );

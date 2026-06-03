@@ -31,6 +31,10 @@ var allowlistedV1Routes = map[string]bool{
 	"PATCH /v1/admin/tenants/{tenant_id}/":           true,
 	"POST /v1/tenants/{tenant_id}/permissions:check":                     true,
 	"POST /v1/tenants/{tenant_id}/projects/{project_id}/permissions:check": true,
+	"POST /v1/tenants/{tenant_id}/projects/{project_id}/virtual-machines/{id}/permissions:check": true,
+	"POST /v1/tenants/{tenant_id}/projects/{project_id}/clusters/{id}/permissions:check":         true,
+	"POST /v1/tenants/{tenant_id}/projects/{project_id}/keyvaults/{id}/permissions:check":        true,
+	"POST /v1/tenants/{tenant_id}/projects/{project_id}/databases/{id}/permissions:check":        true,
 	// Tenant-shared catalog / metadata reads: any tenant member (including a
 	// project-scoped service account) reads these to provision. Membership is
 	// enforced by TenantContext, so there's no per-action gate. The matching

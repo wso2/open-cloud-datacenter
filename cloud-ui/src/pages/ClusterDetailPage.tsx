@@ -37,6 +37,7 @@ import { useConfirmDialog } from '../components/useConfirmDialog';
 import NodePoolsTab from '../components/NodePoolsTab';
 import StatusPill from '../components/StatusPill';
 import { fmtDate } from '../lib/date';
+import MembersPage from './MembersPage';
 
 const useStyles = makeStyles({
   root: {
@@ -157,7 +158,7 @@ export default function ClusterDetailPage() {
   const { tenantId, clusterId } = useParams<{ tenantId: string; clusterId: string }>();
   const { projectId } = useActiveProject();
   const confirmDialog = useConfirmDialog();
-  const [tab, setTab] = useState<'overview' | 'node-pools' | 'kubeconfig' | 'activity'>(
+  const [tab, setTab] = useState<'overview' | 'node-pools' | 'kubeconfig' | 'activity' | 'access'>(
     'overview',
   );
 
@@ -357,6 +358,7 @@ export default function ClusterDetailPage() {
         <Tab value="node-pools">Node pools</Tab>
         <Tab value="kubeconfig">Kubeconfig</Tab>
         <Tab value="activity">Activity</Tab>
+        <Tab value="access">Access control</Tab>
       </TabList>
 
       {tab === 'overview' && (
@@ -502,6 +504,13 @@ export default function ClusterDetailPage() {
             Full audit timeline arrives once dc-api exposes <code>GET /v1/audit-events</code>.
           </div>
         </Card>
+      )}
+
+      {tab === 'access' && (
+        <MembersPage
+          resourceBase={`/v1/tenants/${tenantId}/projects/${projectId}/clusters/${clusterId}`}
+          scopeLabel={cluster.name}
+        />
       )}
     </div>
   );

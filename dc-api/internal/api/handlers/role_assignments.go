@@ -123,6 +123,10 @@ type scopeRef struct {
 // middleware injected.
 func (h *RoleAssignmentsHandler) activeScope(r *http.Request) (scopeRef, bool) {
 	ctx := r.Context()
+	if ruuid, ok := middleware.ResourceUUIDFromContext(ctx); ok {
+		// Resources have no slug — the UUID is the identity, so scope_id is it too.
+		return scopeRef{models.ScopeTypeResource, ruuid.String(), ruuid}, true
+	}
 	if puuid, ok := middleware.ProjectUUIDFromContext(ctx); ok {
 		return scopeRef{models.ScopeTypeProject, chi.URLParam(r, "project_id"), puuid}, true
 	}

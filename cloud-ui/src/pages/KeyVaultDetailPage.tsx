@@ -35,6 +35,7 @@ import KeyVaultSecretsTab from '../components/KeyVaultSecretsTab';
 import SecretRevealBanner, { type Secret } from '../components/SecretRevealBanner';
 import StatusPill from '../components/StatusPill';
 import { fmtDate } from '../lib/date';
+import MembersPage from './MembersPage';
 
 interface KeyVault {
   id: string;
@@ -118,7 +119,7 @@ export default function KeyVaultDetailPage() {
   const { projectId } = useActiveProject();
   const confirmDialog = useConfirmDialog();
 
-  const [tab, setTab] = useState<'overview' | 'secrets'>('overview');
+  const [tab, setTab] = useState<'overview' | 'secrets' | 'access'>('overview');
   const [revealedSecrets, setRevealedSecrets] = useState<Secret[] | null>(null);
   // Track whether the GET /credentials returned 410 — sets a sticky banner
   // even if the user refreshes the page.
@@ -356,9 +357,17 @@ export default function KeyVaultDetailPage() {
       <TabList selectedValue={tab} onTabSelect={(_, d) => setTab(d.value as typeof tab)}>
         <Tab value="overview">Overview</Tab>
         <Tab value="secrets" disabled={!isActive}>Secrets</Tab>
+        <Tab value="access">Access control</Tab>
       </TabList>
 
       {tab === 'secrets' && <KeyVaultSecretsTab vaultId={kv.id} />}
+
+      {tab === 'access' && (
+        <MembersPage
+          resourceBase={`/v1/tenants/${tenantId}/projects/${projectId}/keyvaults/${kvId}`}
+          scopeLabel={kv.name}
+        />
+      )}
 
       {tab === 'overview' && (
       <>

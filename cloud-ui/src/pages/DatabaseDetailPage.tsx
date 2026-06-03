@@ -7,6 +7,8 @@ import {
   MessageBarTitle,
   Spinner,
   Subtitle1,
+  Tab,
+  TabList,
   Title2,
   Toast,
   ToastTitle,
@@ -31,6 +33,7 @@ import { useConfirmDialog } from '../components/useConfirmDialog';
 import SecretRevealBanner, { type Secret } from '../components/SecretRevealBanner';
 import StatusPill from '../components/StatusPill';
 import { fmtDate } from '../lib/date';
+import MembersPage from './MembersPage';
 
 interface Database {
   id: string;
@@ -115,6 +118,7 @@ export default function DatabaseDetailPage() {
   const { projectId } = useActiveProject();
   const confirmDialog = useConfirmDialog();
 
+  const [tab, setTab] = useState<'overview' | 'access'>('overview');
   const [revealedSecrets, setRevealedSecrets] = useState<Secret[] | null>(null);
   // Tracks whether credentials were already retrieved (410 Gone response).
   const [credsAlreadyTaken, setCredsAlreadyTaken] = useState(false);
@@ -313,6 +317,13 @@ export default function DatabaseDetailPage() {
         </MessageBar>
       )}
 
+      <TabList selectedValue={tab} onTabSelect={(_, d) => setTab(d.value as typeof tab)}>
+        <Tab value="overview">Overview</Tab>
+        <Tab value="access">Access control</Tab>
+      </TabList>
+
+      {tab === 'overview' && (
+      <>
       <Card className={styles.card}>
         <div className={styles.cardHeader}>
           <Subtitle1>Details</Subtitle1>
@@ -399,6 +410,15 @@ export default function DatabaseDetailPage() {
           )}
         </div>
       </Card>
+      </>
+      )}
+
+      {tab === 'access' && (
+        <MembersPage
+          resourceBase={`/v1/tenants/${tenantId}/projects/${projectId}/databases/${dbId}`}
+          scopeLabel={db.name}
+        />
+      )}
     </div>
   );
 }

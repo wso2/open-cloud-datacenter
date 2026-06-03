@@ -603,6 +603,191 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /v1/tenants/{tenant_id}/projects/{project_id}/virtual-machines/{id}/permissions:check:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+      - name: id
+        in: path
+        required: true
+        description: The resource's immutable UUID.
+        schema:
+          type: string
+          format: uuid
+          example: 3a1c2e5d-1234-5678-abcd-000000000001
+
+    post:
+      operationId: checkVMPermissions
+      tags: [rbac]
+      summary: Check whether the caller may perform actions on a virtual machine
+      description: |
+        Evaluates each requested action for the calling principal at the
+        virtual machine scope and returns booleans. The web UI uses this to
+        enable or disable controls without ever re-implementing the
+        authorization matcher — dc-api owns the engine; this endpoint runs it
+        on the caller's behalf.
+
+        The result reflects only what the caller actually holds (platform admins
+        get `true` for everything). Control vs data plane is inferred per action.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PermissionsCheckRequest"
+            example:
+              actions:
+                - authorization/roleAssignments/write
+                - compute/virtualMachines/write
+      responses:
+        "200":
+          description: One result per requested action.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionsCheckResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenant_id}/projects/{project_id}/virtual-machines/{id}/role-assignments:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+      - name: id
+        in: path
+        required: true
+        description: The resource's immutable UUID.
+        schema:
+          type: string
+          format: uuid
+          example: 3a1c2e5d-1234-5678-abcd-000000000001
+
+    post:
+      operationId: createVMRoleAssignment
+      tags: [roleAssignments]
+      summary: Grant a role to a principal on a virtual machine
+      description: |
+        Creates a `role_assignments` row binding the user (identified by
+        their OIDC `sub`) to the virtual machine scope. Returns 409 if the user
+        already holds that role at the virtual machine.
+
+        The URL `{tenant_id}` must match the caller's own tenant context
+        (Option D: derived from a `role_assignments` row, not from any
+        IdP group). Platform admins may operate on any tenant.
+
+        **Required role**: `owner` at this scope or inherited from the
+        project or tenant (or platform admin).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRoleAssignmentRequest"
+            example:
+              user_sub: 01abc123-0000-0000-0000-user000000001
+              role_definition: VirtualMachineContributor
+              display_alias: alice-laptop
+      responses:
+        "201":
+          description: Role assignment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleAssignment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    get:
+      operationId: listVMRoleAssignments
+      tags: [roleAssignments]
+      summary: List user role assignments on a virtual machine
+      description: |
+        Returns all `role_assignments` rows of `principal_type: user` for
+        the virtual machine scope. Service accounts are excluded; use
+        `GET /v1/tenants/{tenant_id}/projects/{project_id}/service-accounts`
+        for those.
+
+        **Required role**: any authenticated tenant member (viewer, member, or owner).
+      responses:
+        "200":
+          description: Role assignment list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role_assignments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RoleAssignment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenant_id}/projects/{project_id}/virtual-machines/{id}/role-assignments/{principal_id}:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+      - name: id
+        in: path
+        required: true
+        description: The resource's immutable UUID.
+        schema:
+          type: string
+          format: uuid
+          example: 3a1c2e5d-1234-5678-abcd-000000000001
+      - name: principal_id
+        in: path
+        required: true
+        description: OIDC subject (`sub`) of the user to remove
+        schema:
+          type: string
+          example: 01abc123-0000-0000-0000-user000000001
+
+    delete:
+      operationId: deleteVMRoleAssignment
+      tags: [roleAssignments]
+      summary: Revoke a principal's role assignments on a virtual machine
+      description: |
+        Atomically deletes all `role_assignments` rows for this principal at
+        the virtual machine scope.
+
+        **Required role**: `owner`.
+      responses:
+        "204":
+          description: Role assignment removed
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   # ── Bastions (F10) ────────────────────────────────────────────────────────────
 
   /v1/tenants/{tenant_id}/projects/{project_id}/bastions:
@@ -880,6 +1065,191 @@ paths:
       responses:
         "202":
           description: Deletion accepted; cluster is now DELETING
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenant_id}/projects/{project_id}/clusters/{id}/permissions:check:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+      - name: id
+        in: path
+        required: true
+        description: The resource's immutable UUID.
+        schema:
+          type: string
+          format: uuid
+          example: 3a1c2e5d-1234-5678-abcd-000000000001
+
+    post:
+      operationId: checkClusterPermissions
+      tags: [rbac]
+      summary: Check whether the caller may perform actions on a cluster
+      description: |
+        Evaluates each requested action for the calling principal at the
+        cluster scope and returns booleans. The web UI uses this to enable or
+        disable controls without ever re-implementing the authorization
+        matcher — dc-api owns the engine; this endpoint runs it on the
+        caller's behalf.
+
+        The result reflects only what the caller actually holds (platform admins
+        get `true` for everything). Control vs data plane is inferred per action.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PermissionsCheckRequest"
+            example:
+              actions:
+                - authorization/roleAssignments/write
+                - compute/virtualMachines/write
+      responses:
+        "200":
+          description: One result per requested action.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionsCheckResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenant_id}/projects/{project_id}/clusters/{id}/role-assignments:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+      - name: id
+        in: path
+        required: true
+        description: The resource's immutable UUID.
+        schema:
+          type: string
+          format: uuid
+          example: 3a1c2e5d-1234-5678-abcd-000000000001
+
+    post:
+      operationId: createClusterRoleAssignment
+      tags: [roleAssignments]
+      summary: Grant a role to a principal on a cluster
+      description: |
+        Creates a `role_assignments` row binding the user (identified by
+        their OIDC `sub`) to the cluster scope. Returns 409 if the user
+        already holds that role at the cluster.
+
+        The URL `{tenant_id}` must match the caller's own tenant context
+        (Option D: derived from a `role_assignments` row, not from any
+        IdP group). Platform admins may operate on any tenant.
+
+        **Required role**: `owner` at this scope or inherited from the
+        project or tenant (or platform admin).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRoleAssignmentRequest"
+            example:
+              user_sub: 01abc123-0000-0000-0000-user000000001
+              role_definition: VirtualMachineContributor
+              display_alias: alice-laptop
+      responses:
+        "201":
+          description: Role assignment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleAssignment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    get:
+      operationId: listClusterRoleAssignments
+      tags: [roleAssignments]
+      summary: List user role assignments on a cluster
+      description: |
+        Returns all `role_assignments` rows of `principal_type: user` for
+        the cluster scope. Service accounts are excluded; use
+        `GET /v1/tenants/{tenant_id}/projects/{project_id}/service-accounts`
+        for those.
+
+        **Required role**: any authenticated tenant member (viewer, member, or owner).
+      responses:
+        "200":
+          description: Role assignment list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role_assignments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RoleAssignment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenant_id}/projects/{project_id}/clusters/{id}/role-assignments/{principal_id}:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+      - name: id
+        in: path
+        required: true
+        description: The resource's immutable UUID.
+        schema:
+          type: string
+          format: uuid
+          example: 3a1c2e5d-1234-5678-abcd-000000000001
+      - name: principal_id
+        in: path
+        required: true
+        description: OIDC subject (`sub`) of the user to remove
+        schema:
+          type: string
+          example: 01abc123-0000-0000-0000-user000000001
+
+    delete:
+      operationId: deleteClusterRoleAssignment
+      tags: [roleAssignments]
+      summary: Revoke a principal's role assignments on a cluster
+      description: |
+        Atomically deletes all `role_assignments` rows for this principal at
+        the cluster scope.
+
+        **Required role**: `owner`.
+      responses:
+        "204":
+          description: Role assignment removed
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -3327,6 +3697,191 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /v1/tenants/{tenant_id}/projects/{project_id}/keyvaults/{id}/permissions:check:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+      - name: id
+        in: path
+        required: true
+        description: The resource's immutable UUID.
+        schema:
+          type: string
+          format: uuid
+          example: 3a1c2e5d-1234-5678-abcd-000000000001
+
+    post:
+      operationId: checkKeyVaultPermissions
+      tags: [rbac]
+      summary: Check whether the caller may perform actions on a key vault
+      description: |
+        Evaluates each requested action for the calling principal at the
+        key vault scope and returns booleans. The web UI uses this to enable or
+        disable controls without ever re-implementing the authorization
+        matcher — dc-api owns the engine; this endpoint runs it on the
+        caller's behalf.
+
+        The result reflects only what the caller actually holds (platform admins
+        get `true` for everything). Control vs data plane is inferred per action.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PermissionsCheckRequest"
+            example:
+              actions:
+                - authorization/roleAssignments/write
+                - compute/virtualMachines/write
+      responses:
+        "200":
+          description: One result per requested action.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionsCheckResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenant_id}/projects/{project_id}/keyvaults/{id}/role-assignments:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+      - name: id
+        in: path
+        required: true
+        description: The resource's immutable UUID.
+        schema:
+          type: string
+          format: uuid
+          example: 3a1c2e5d-1234-5678-abcd-000000000001
+
+    post:
+      operationId: createKeyVaultRoleAssignment
+      tags: [roleAssignments]
+      summary: Grant a role to a principal on a key vault
+      description: |
+        Creates a `role_assignments` row binding the user (identified by
+        their OIDC `sub`) to the key vault scope. Returns 409 if the user
+        already holds that role at the key vault.
+
+        The URL `{tenant_id}` must match the caller's own tenant context
+        (Option D: derived from a `role_assignments` row, not from any
+        IdP group). Platform admins may operate on any tenant.
+
+        **Required role**: `owner` at this scope or inherited from the
+        project or tenant (or platform admin).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRoleAssignmentRequest"
+            example:
+              user_sub: 01abc123-0000-0000-0000-user000000001
+              role_definition: VirtualMachineContributor
+              display_alias: alice-laptop
+      responses:
+        "201":
+          description: Role assignment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleAssignment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    get:
+      operationId: listKeyVaultRoleAssignments
+      tags: [roleAssignments]
+      summary: List user role assignments on a key vault
+      description: |
+        Returns all `role_assignments` rows of `principal_type: user` for
+        the key vault scope. Service accounts are excluded; use
+        `GET /v1/tenants/{tenant_id}/projects/{project_id}/service-accounts`
+        for those.
+
+        **Required role**: any authenticated tenant member (viewer, member, or owner).
+      responses:
+        "200":
+          description: Role assignment list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role_assignments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RoleAssignment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenant_id}/projects/{project_id}/keyvaults/{id}/role-assignments/{principal_id}:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+      - name: id
+        in: path
+        required: true
+        description: The resource's immutable UUID.
+        schema:
+          type: string
+          format: uuid
+          example: 3a1c2e5d-1234-5678-abcd-000000000001
+      - name: principal_id
+        in: path
+        required: true
+        description: OIDC subject (`sub`) of the user to remove
+        schema:
+          type: string
+          example: 01abc123-0000-0000-0000-user000000001
+
+    delete:
+      operationId: deleteKeyVaultRoleAssignment
+      tags: [roleAssignments]
+      summary: Revoke a principal's role assignments on a key vault
+      description: |
+        Atomically deletes all `role_assignments` rows for this principal at
+        the key vault scope.
+
+        **Required role**: `owner`.
+      responses:
+        "204":
+          description: Role assignment removed
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /v1/tenants/{tenant_id}/projects/{project_id}/keyvaults/{id}/credentials:
     parameters:
       - $ref: "#/components/parameters/TenantID"
@@ -4378,6 +4933,191 @@ paths:
       responses:
         "204":
           description: Database deletion accepted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenant_id}/projects/{project_id}/databases/{id}/permissions:check:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+      - name: id
+        in: path
+        required: true
+        description: The resource's immutable UUID.
+        schema:
+          type: string
+          format: uuid
+          example: 3a1c2e5d-1234-5678-abcd-000000000001
+
+    post:
+      operationId: checkDatabasePermissions
+      tags: [rbac]
+      summary: Check whether the caller may perform actions on a database
+      description: |
+        Evaluates each requested action for the calling principal at the
+        database scope and returns booleans. The web UI uses this to enable or
+        disable controls without ever re-implementing the authorization
+        matcher — dc-api owns the engine; this endpoint runs it on the
+        caller's behalf.
+
+        The result reflects only what the caller actually holds (platform admins
+        get `true` for everything). Control vs data plane is inferred per action.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PermissionsCheckRequest"
+            example:
+              actions:
+                - authorization/roleAssignments/write
+                - compute/virtualMachines/write
+      responses:
+        "200":
+          description: One result per requested action.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionsCheckResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenant_id}/projects/{project_id}/databases/{id}/role-assignments:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+      - name: id
+        in: path
+        required: true
+        description: The resource's immutable UUID.
+        schema:
+          type: string
+          format: uuid
+          example: 3a1c2e5d-1234-5678-abcd-000000000001
+
+    post:
+      operationId: createDatabaseRoleAssignment
+      tags: [roleAssignments]
+      summary: Grant a role to a principal on a database
+      description: |
+        Creates a `role_assignments` row binding the user (identified by
+        their OIDC `sub`) to the database scope. Returns 409 if the user
+        already holds that role at the database.
+
+        The URL `{tenant_id}` must match the caller's own tenant context
+        (Option D: derived from a `role_assignments` row, not from any
+        IdP group). Platform admins may operate on any tenant.
+
+        **Required role**: `owner` at this scope or inherited from the
+        project or tenant (or platform admin).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRoleAssignmentRequest"
+            example:
+              user_sub: 01abc123-0000-0000-0000-user000000001
+              role_definition: VirtualMachineContributor
+              display_alias: alice-laptop
+      responses:
+        "201":
+          description: Role assignment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleAssignment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    get:
+      operationId: listDatabaseRoleAssignments
+      tags: [roleAssignments]
+      summary: List user role assignments on a database
+      description: |
+        Returns all `role_assignments` rows of `principal_type: user` for
+        the database scope. Service accounts are excluded; use
+        `GET /v1/tenants/{tenant_id}/projects/{project_id}/service-accounts`
+        for those.
+
+        **Required role**: any authenticated tenant member (viewer, member, or owner).
+      responses:
+        "200":
+          description: Role assignment list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role_assignments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RoleAssignment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenant_id}/projects/{project_id}/databases/{id}/role-assignments/{principal_id}:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+      - name: id
+        in: path
+        required: true
+        description: The resource's immutable UUID.
+        schema:
+          type: string
+          format: uuid
+          example: 3a1c2e5d-1234-5678-abcd-000000000001
+      - name: principal_id
+        in: path
+        required: true
+        description: OIDC subject (`sub`) of the user to remove
+        schema:
+          type: string
+          example: 01abc123-0000-0000-0000-user000000001
+
+    delete:
+      operationId: deleteDatabaseRoleAssignment
+      tags: [roleAssignments]
+      summary: Revoke a principal's role assignments on a database
+      description: |
+        Atomically deletes all `role_assignments` rows for this principal at
+        the database scope.
+
+        **Required role**: `owner`.
+      responses:
+        "204":
+          description: Role assignment removed
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

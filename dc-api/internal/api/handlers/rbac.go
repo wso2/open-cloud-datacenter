@@ -91,11 +91,15 @@ func IsGated(h http.Handler) (action string, ok bool) {
 }
 
 // scopeChainFromContext builds the request's scope chain (narrowest → broadest)
-// from the UUIDs the TenantContext / ProjectContext middleware injected. A
-// resource-scope entry is added later, when handlers target an individual
-// resource by UUID.
+// from the UUIDs the ResourceScope / ProjectContext / TenantContext middleware
+// injected: resource → project → tenant. The engine matches an assignment when
+// its (scope_type, scope_uuid) appears anywhere in this chain, so a grant at any
+// level authorizes the action — and a resource grant matches only its own UUID.
 func scopeChainFromContext(ctx context.Context) []rbac.ScopeRef {
 	chain := make([]rbac.ScopeRef, 0, 3)
+	if rid, ok := middleware.ResourceUUIDFromContext(ctx); ok {
+		chain = append(chain, rbac.ScopeRef{Type: models.ScopeTypeResource, UUID: rid})
+	}
 	if pid, ok := middleware.ProjectUUIDFromContext(ctx); ok {
 		chain = append(chain, rbac.ScopeRef{Type: models.ScopeTypeProject, UUID: pid})
 	}

@@ -143,7 +143,37 @@ function RolePill({
   return <span className={`${classes.rolePill} ${cls}`}>{label}</span>;
 }
 
-export default function MembersPage() {
+/** A scope-agnostic JSON fetch for the role-assignment / permissions:check calls.
+ *  Resource-scope paths are dynamic per resource type, so they can't use the
+ *  typed openapi-fetch client; cookie auth (credentials: include) carries the
+ *  session regardless. Tenant/project keep using the typed client below. */
+async function scopedJson(path: string, init?: RequestInit): Promise<unknown> {
+  const res = await fetch(path, { credentials: 'include', ...init });
+  if (res.status === 204) return null;
+  const text = await res.text();
+  if (!res.ok) {
+    let msg = text;
+    try {
+      const j = JSON.parse(text);
+      if (j && typeof j.error === 'string') msg = j.error;
+    } catch {
+      /* not JSON — use the raw text */
+    }
+    throw new Error(msg || res.statusText);
+  }
+  return text ? JSON.parse(text) : null;
+}
+
+interface MembersPageProps {
+  /** When set, the panel manages access at RESOURCE scope using this path prefix
+   *  (e.g. /v1/tenants/acme/projects/p1/virtual-machines/<uuid>). Resource detail
+   *  pages pass it; the route-mounted tenant/project panel omits it. */
+  resourceBase?: string;
+  /** Human label for the resource (e.g. "web-server-01"), shown in the copy. */
+  scopeLabel?: string;
+}
+
+export default function MembersPage({ resourceBase, scopeLabel }: MembersPageProps = {}) {
   const styles = useListPageStyles();
   const pageStyles = usePageStyles();
   const api = useApi();
@@ -151,7 +181,10 @@ export default function MembersPage() {
   const toasterId = useId('toaster');
   const { dispatchToast } = useToastController(toasterId);
   const { tenantId, projectId } = useParams<{ tenantId: string; projectId?: string }>();
-  const isProject = Boolean(projectId);
+  const isResource = Boolean(resourceBase);
+  const isProject = !isResource && Boolean(projectId);
+  // Distinct react-query key segment per scope (resource base is unique per resource).
+  const scopeKey = resourceBase ?? projectId ?? 'tenant';
   const confirmDialog = useConfirmDialog();
 
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -177,9 +210,17 @@ export default function MembersPage() {
   // scope this MUST hit the project endpoint so a project-Owner who lacks tenant
   // write is still allowed to manage project access.
   const canManageQuery = useQuery({
-    queryKey: ['perm-check', tenantId, projectId ?? 'tenant', ACTION_ROLE_WRITE],
+    queryKey: ['perm-check', tenantId, scopeKey, ACTION_ROLE_WRITE],
     enabled: Boolean(tenantId),
     queryFn: async () => {
+      if (resourceBase) {
+        const data = await scopedJson(`${resourceBase}/permissions:check`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ actions: [ACTION_ROLE_WRITE] }),
+        });
+        return (data as { results?: { action: string; allowed: boolean }[] }).results ?? [];
+      }
       if (projectId) {
         const { data, error } = await api.POST(
           '/v1/tenants/{tenant_id}/projects/{project_id}/permissions:check',
@@ -205,9 +246,13 @@ export default function MembersPage() {
   );
 
   const membersQuery = useQuery({
-    queryKey: ['role-assignments', tenantId, projectId ?? 'tenant'],
+    queryKey: ['role-assignments', tenantId, scopeKey],
     enabled: Boolean(tenantId),
     queryFn: async () => {
+      if (resourceBase) {
+        const data = await scopedJson(`${resourceBase}/role-assignments`);
+        return ((data as { role_assignments?: RoleAssignment[] }).role_assignments ?? []) as RoleAssignment[];
+      }
       if (projectId) {
         const { data, error } = await api.GET(
           '/v1/tenants/{tenant_id}/projects/{project_id}/role-assignments',
@@ -233,6 +278,14 @@ export default function MembersPage() {
       };
       if (displayAlias.trim()) body.display_alias = displayAlias.trim();
 
+      if (resourceBase) {
+        await scopedJson(`${resourceBase}/role-assignments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        return;
+      }
       if (projectId) {
         const { error } = await api.POST(
           '/v1/tenants/{tenant_id}/projects/{project_id}/role-assignments',
@@ -252,7 +305,7 @@ export default function MembersPage() {
     },
     onSuccess: () => {
       dispatchToast(<Toast><ToastTitle>Member invited</ToastTitle></Toast>, { intent: 'success' });
-      queryClient.invalidateQueries({ queryKey: ['role-assignments', tenantId, projectId ?? 'tenant'] });
+      queryClient.invalidateQueries({ queryKey: ['role-assignments', tenantId, scopeKey] });
       setInviteOpen(false);
       setUserSub('');
       setDisplayAlias('');
@@ -265,6 +318,10 @@ export default function MembersPage() {
 
   const removeMutation = useMutation({
     mutationFn: async (principalId: string) => {
+      if (resourceBase) {
+        await scopedJson(`${resourceBase}/role-assignments/${principalId}`, { method: 'DELETE' });
+        return;
+      }
       if (projectId) {
         const { error } = await api.DELETE(
           '/v1/tenants/{tenant_id}/projects/{project_id}/role-assignments/{principal_id}',
@@ -282,7 +339,7 @@ export default function MembersPage() {
     },
     onSuccess: () => {
       dispatchToast(<Toast><ToastTitle>Member removed</ToastTitle></Toast>, { intent: 'success' });
-      queryClient.invalidateQueries({ queryKey: ['role-assignments', tenantId, projectId ?? 'tenant'] });
+      queryClient.invalidateQueries({ queryKey: ['role-assignments', tenantId, scopeKey] });
     },
     onError: (e: Error) => {
       dispatchToast(<Toast><ToastTitle>Remove failed: {e.message}</ToastTitle></Toast>, { intent: 'error' });
@@ -291,7 +348,7 @@ export default function MembersPage() {
 
   const onRemove = async (m: RoleAssignment) => {
     const displayName = m.display_alias ?? m.principal_id;
-    const scopeWord = isProject ? 'project' : 'tenant';
+    const scopeWord = isResource ? (scopeLabel ?? 'resource') : isProject ? 'project' : 'tenant';
     const ok = await confirmDialog({
       title: `Remove "${displayName}"?`,
       body: `This will revoke ${displayNameFor(m.role_definition)} access to the ${scopeWord} immediately. The user will lose the ability to manage any resources here. This action can be reversed by adding them again.`,
@@ -310,9 +367,17 @@ export default function MembersPage() {
       <Toaster toasterId={toasterId} />
 
       <div className={styles.header}>
-        <Title2>{isProject ? `Access control · project ${projectId}` : 'Access control'}</Title2>
+        <Title2>
+          {isResource
+            ? `Access control · ${scopeLabel ?? 'resource'}`
+            : isProject
+            ? `Access control · project ${projectId}`
+            : 'Access control'}
+        </Title2>
         <Subtitle1 className={styles.subtitle}>
-          {isProject ? (
+          {isResource ? (
+            <>Roles granted on <strong>{scopeLabel ?? 'this resource'}</strong>.</>
+          ) : isProject ? (
             <>Members of project <strong>{projectId}</strong> and their roles.</>
           ) : (
             <>Members of tenant <strong>{tenantId}</strong> and their roles.</>
@@ -351,7 +416,9 @@ export default function MembersPage() {
       {!membersQuery.isLoading && !membersQuery.isError && count === 0 && (
         <EmptyState
           icon={<ShieldPerson20Regular />}
-          title={`No members in ${(isProject ? projectId : tenantId) ?? (isProject ? 'this project' : 'this tenant')} yet`}
+          title={isResource
+            ? `No roles granted on ${scopeLabel ?? 'this resource'} yet`
+            : `No members in ${(isProject ? projectId : tenantId) ?? (isProject ? 'this project' : 'this tenant')} yet`}
           description="Add a principal by their OIDC subject and grant them a role from the catalog. Roles range from Owner down to per-resource-type roles like Virtual Machine Contributor."
           action={
             canManageAccess ? (
@@ -369,7 +436,7 @@ export default function MembersPage() {
 
       {!membersQuery.isLoading && !membersQuery.isError && count === 1 && canManageAccess && (
         <Subtitle1 style={{ color: tokens.colorNeutralForeground3, fontWeight: 400, fontSize: tokens.fontSizeBase200 }}>
-          You&apos;re the only member of this {isProject ? 'project' : 'tenant'}. Use the button above to add teammates.
+          You&apos;re the only one with a role on this {isResource ? 'resource' : isProject ? 'project' : 'tenant'}. Use the button above to add teammates.
         </Subtitle1>
       )}
 
