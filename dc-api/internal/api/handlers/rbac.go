@@ -52,6 +52,44 @@ func requireAction(w http.ResponseWriter, r *http.Request, repo rbac.Repo, actio
 	return true
 }
 
+// gatedHandler authorizes `action` (via the engine) before delegating to the
+// wrapped handler. It is a named type, not a closure, so the router-completeness
+// test can confirm via chi.Walk that every /v1 resource route is gated. See Gate.
+type gatedHandler struct {
+	repo   rbac.Repo
+	action string
+	next   http.HandlerFunc
+}
+
+// Action reports the action this route requires — read by the completeness test
+// and useful when auditing the route→permission map.
+func (g gatedHandler) Action() string { return g.action }
+
+func (g gatedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !requireAction(w, r, g.repo, g.action) {
+		return
+	}
+	g.next(w, r)
+}
+
+// Gate is the single authorization choke-point for /v1 resource routes. The router
+// declares every route as Gate(repo, action, handler), which keeps the whole
+// endpoint→permission map in one auditable place and keeps handlers free of auth
+// code. A route mounted without Gate (or without an allowlist entry) is caught by
+// the router completeness test, so a new endpoint can't ship ungated.
+func Gate(repo rbac.Repo, action string, next http.HandlerFunc) http.Handler {
+	return gatedHandler{repo: repo, action: action, next: next}
+}
+
+// IsGated reports whether h is a Gate-wrapped handler, returning its action. The
+// router-completeness test walks every registered route and uses this to prove
+// each /v1 resource route goes through Gate — so a new endpoint cannot ship
+// without an explicit permission.
+func IsGated(h http.Handler) (action string, ok bool) {
+	g, ok := h.(gatedHandler)
+	return g.action, ok
+}
+
 // scopeChainFromContext builds the request's scope chain (narrowest → broadest)
 // from the UUIDs the TenantContext / ProjectContext middleware injected. A
 // resource-scope entry is added later, when handlers target an individual

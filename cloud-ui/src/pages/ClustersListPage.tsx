@@ -36,6 +36,9 @@ import { EmptyState, ErrorState, LoadingState } from '../components/list/PageSta
 import { RowActionsMenu } from '../components/list/RowActionsMenu';
 import { useListPageStyles } from '../components/list/useListPageStyles';
 import StatusPill from '../components/StatusPill';
+import { useCan } from '../api/useCan';
+import { PermissionTooltip } from '../components/PermissionTooltip';
+import { listErrorMessage } from '../lib/apiError';
 import { fmtDate } from '../lib/date';
 
 const usePageStyles = makeStyles({
@@ -91,6 +94,8 @@ export default function ClustersListPage() {
   const { dispatchToast } = useToastController(toasterId);
   const { tenantId } = useParams<{ tenantId: string }>();
   const { projectId } = useActiveProject();
+  const { can } = useCan(tenantId, ['compute/clusters/write'], projectId);
+  const canWrite = can('compute/clusters/write');
   const confirmDialog = useConfirmDialog();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [created, setCreated] = useState<ClusterCreateResult | null>(null);
@@ -178,13 +183,16 @@ export default function ClustersListPage() {
       </div>
 
       <div className={styles.cmdBar}>
-        <Button
-          appearance="primary"
-          icon={<Add20Regular />}
-          onClick={() => setDrawerOpen(true)}
-        >
-          Create cluster
-        </Button>
+        <PermissionTooltip when={!canWrite} reason="You need write access on this tenant to create clusters">
+          <Button
+            appearance="primary"
+            icon={<Add20Regular />}
+            onClick={() => setDrawerOpen(true)}
+            disabledFocusable={!canWrite}
+          >
+            Create cluster
+          </Button>
+        </PermissionTooltip>
         <Button
           appearance="subtle"
           icon={<ArrowClockwise20Regular />}
@@ -226,7 +234,7 @@ export default function ClustersListPage() {
 
       {clustersQuery.isError && !clustersQuery.isLoading && (
         <ErrorState
-          message={`Failed to load clusters: ${(clustersQuery.error as Error).message}`}
+          message={listErrorMessage(clustersQuery.error, 'clusters')}
         />
       )}
 
@@ -236,13 +244,16 @@ export default function ClustersListPage() {
           title={`No Kubernetes clusters in ${projectId ?? 'this project'} yet`}
           description="Provision a fully managed RKE2 cluster. Configure the system pool at creation time — worker pools can be added once the cluster is Active."
           action={
-            <Button
-              appearance="primary"
-              icon={<Add20Regular />}
-              onClick={() => setDrawerOpen(true)}
-            >
-              Create cluster
-            </Button>
+            <PermissionTooltip when={!canWrite} reason="You need write access on this tenant to create clusters">
+              <Button
+                appearance="primary"
+                icon={<Add20Regular />}
+                onClick={() => setDrawerOpen(true)}
+                disabledFocusable={!canWrite}
+              >
+                Create cluster
+              </Button>
+            </PermissionTooltip>
           }
         />
       )}
@@ -296,7 +307,7 @@ export default function ClustersListPage() {
                       <MenuItem
                         onClick={() => onDelete(c)}
                         disabled={
-                          deleteMutation.isPending || c.status === 'DELETING'
+                          !canWrite || deleteMutation.isPending || c.status === 'DELETING'
                         }
                       >
                         Delete

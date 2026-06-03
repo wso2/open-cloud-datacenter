@@ -38,6 +38,9 @@ import DatabaseCreateDrawer, { type DatabaseCreated } from '../components/Databa
 import StatusPill from '../components/StatusPill';
 import { EmptyState, ErrorState, LoadingState } from '../components/list/PageStates';
 import { useListPageStyles } from '../components/list/useListPageStyles';
+import { useCan } from '../api/useCan';
+import { PermissionTooltip } from '../components/PermissionTooltip';
+import { listErrorMessage } from '../lib/apiError';
 import { fmtDate } from '../lib/date';
 
 interface Database {
@@ -72,6 +75,8 @@ export default function DatabasesListPage() {
   const { dispatchToast } = useToastController(toasterId);
   const { tenantId } = useParams<{ tenantId: string }>();
   const { projectId } = useActiveProject();
+  const { can } = useCan(tenantId, ['database/servers/write'], projectId);
+  const canWrite = can('database/servers/write');
   const navigate = useNavigate();
   const confirmDialog = useConfirmDialog();
 
@@ -157,13 +162,16 @@ export default function DatabasesListPage() {
       </div>
 
       <div className={styles.cmdBar}>
-        <Button
-          appearance="primary"
-          icon={<Add20Regular />}
-          onClick={() => setCreateOpen(true)}
-        >
-          Create database
-        </Button>
+        <PermissionTooltip when={!canWrite} reason="You need write access on this tenant to create databases">
+          <Button
+            appearance="primary"
+            icon={<Add20Regular />}
+            onClick={() => setCreateOpen(true)}
+            disabledFocusable={!canWrite}
+          >
+            Create database
+          </Button>
+        </PermissionTooltip>
         <Button
           appearance="subtle"
           icon={<ArrowClockwise20Regular />}
@@ -178,7 +186,7 @@ export default function DatabasesListPage() {
 
       {dbsQuery.isError && !dbsQuery.isLoading && (
         <ErrorState
-          message={`Failed to load databases: ${(dbsQuery.error as Error).message}`}
+          message={listErrorMessage(dbsQuery.error, 'databases')}
         />
       )}
 
@@ -188,13 +196,16 @@ export default function DatabasesListPage() {
           title="No databases in this project yet"
           description="A managed database gives your workloads a dedicated PostgreSQL instance. Credentials are provisioned by the controller and shown once on first retrieval."
           action={
-            <Button
-              appearance="primary"
-              icon={<Add20Regular />}
-              onClick={() => setCreateOpen(true)}
-            >
-              Create database
-            </Button>
+            <PermissionTooltip when={!canWrite} reason="You need write access on this tenant to create databases">
+              <Button
+                appearance="primary"
+                icon={<Add20Regular />}
+                onClick={() => setCreateOpen(true)}
+                disabledFocusable={!canWrite}
+              >
+                Create database
+              </Button>
+            </PermissionTooltip>
           }
         />
       )}
@@ -249,7 +260,7 @@ export default function DatabasesListPage() {
                           <MenuItem onClick={() => navigate(`${db.id}`)}>Open</MenuItem>
                           <MenuItem
                             onClick={() => onDelete(db)}
-                            disabled={deleteMutation.isPending || db.status === 'DELETING'}
+                            disabled={!canWrite || deleteMutation.isPending || db.status === 'DELETING'}
                           >
                             Delete
                           </MenuItem>

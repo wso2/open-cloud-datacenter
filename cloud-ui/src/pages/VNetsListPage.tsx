@@ -34,6 +34,8 @@ import { RowActionsMenu } from '../components/list/RowActionsMenu';
 import { useListPageStyles } from '../components/list/useListPageStyles';
 import StatusPill from '../components/StatusPill';
 import VnetCreateDrawer, { type VnetCreateResult } from '../components/VnetCreateDrawer';
+import { useCan } from '../api/useCan';
+import { PermissionTooltip } from '../components/PermissionTooltip';
 import { fmtDate } from '../lib/date';
 
 const usePageStyles = makeStyles({
@@ -67,6 +69,8 @@ export default function VNetsListPage() {
   const { dispatchToast } = useToastController(toasterId);
   const { tenantId } = useParams<{ tenantId: string }>();
   const { projectId } = useActiveProject();
+  const { can } = useCan(tenantId, ['network/vnets/write'], projectId);
+  const canWrite = can('network/vnets/write');
   const confirmDialog = useConfirmDialog();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [created, setCreated] = useState<VnetCreateResult | null>(null);
@@ -146,13 +150,16 @@ export default function VNetsListPage() {
       </div>
 
       <div className={styles.cmdBar}>
-        <Button
-          appearance="primary"
-          icon={<Add20Regular />}
-          onClick={() => setDrawerOpen(true)}
-        >
-          Create VNet
-        </Button>
+        <PermissionTooltip when={!canWrite} reason="You need write access on this tenant to create VNets">
+          <Button
+            appearance="primary"
+            icon={<Add20Regular />}
+            onClick={() => setDrawerOpen(true)}
+            disabledFocusable={!canWrite}
+          >
+            Create VNet
+          </Button>
+        </PermissionTooltip>
         <Button
           appearance="subtle"
           icon={<ArrowClockwise20Regular />}
@@ -197,13 +204,16 @@ export default function VNetsListPage() {
           title={`No virtual networks in ${tenantId ?? 'this tenant'} yet`}
           description="A virtual network is the isolated L3 boundary for your tenant. Create one first — subnets, bastions, and VMs attach to it."
           action={
-            <Button
-              appearance="primary"
-              icon={<Add20Regular />}
-              onClick={() => setDrawerOpen(true)}
-            >
-              Create VNet
-            </Button>
+            <PermissionTooltip when={!canWrite} reason="You need write access on this tenant to create VNets">
+              <Button
+                appearance="primary"
+                icon={<Add20Regular />}
+                onClick={() => setDrawerOpen(true)}
+                disabledFocusable={!canWrite}
+              >
+                Create VNet
+              </Button>
+            </PermissionTooltip>
           }
         />
       )}
@@ -244,7 +254,7 @@ export default function VNetsListPage() {
                     <RowActionsMenu>
                       <MenuItem
                         onClick={() => onDelete(v)}
-                        disabled={deleteMutation.isPending || v.status === 'DELETING'}
+                        disabled={!canWrite || deleteMutation.isPending || v.status === 'DELETING'}
                       >
                         Delete
                       </MenuItem>

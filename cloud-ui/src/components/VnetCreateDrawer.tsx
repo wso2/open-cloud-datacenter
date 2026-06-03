@@ -389,15 +389,15 @@ export default function VnetCreateDrawer({ open, onClose, onCreated }: VnetCreat
           A VNet is the top-level network scope. Subnets, peerings, and route tables live inside
           it.
         </Body1>
-        <wizard.TabList />
+        {wizard.tabList}
       </DrawerHeader>
 
       <DrawerBody className={styles.body}>
-        <wizard.StepContent />
+        {wizard.stepContent}
       </DrawerBody>
 
       <DrawerFooter className={styles.footer}>
-        <wizard.Footer />
+        {wizard.footer}
       </DrawerFooter>
     </OverlayDrawer>
   );

@@ -103,7 +103,7 @@ func TestOptionD_DisplayAliasRoundTrip(t *testing.T) {
 	ownerClient := NewAPIClient(subEnv.BaseURL, ownerToken)
 	ctx := context.Background()
 
-	invited, rawBody, status, err := ownerClient.InviteMemberWithAlias(ctx, tenantID, inviteeSub, "member", alias)
+	invited, rawBody, status, err := ownerClient.InviteMemberWithAlias(ctx, tenantID, inviteeSub, "Contributor", alias)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, status, "body=%s", rawBody)
 	require.Equal(t, alias, invited.DisplayAlias, "POST response must echo display_alias")
@@ -152,7 +152,7 @@ func TestOptionD_InviteUpsertsTenantsRegistry(t *testing.T) {
 	ownerClient := NewAPIClient(subEnv.BaseURL, ownerToken)
 	ctx := context.Background()
 
-	_, body, status, err := ownerClient.InviteMember(ctx, tenantID, inviteeSub, "member")
+	_, body, status, err := ownerClient.InviteMember(ctx, tenantID, inviteeSub, "Contributor")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, status, "body=%s", body)
 

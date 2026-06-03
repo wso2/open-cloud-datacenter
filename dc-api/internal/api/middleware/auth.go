@@ -216,6 +216,11 @@ type AuthRepo interface {
 	// non-nil error means DB failure.
 	GetProjectUUIDByTenantAndSlug(ctx context.Context, tenantID, projectSlug string) (uuid.UUID, error)
 
+	// GetTenantSlugByProjectUUID resolves a project_uuid to its parent tenant
+	// slug, so TenantContext can admit a principal who holds only a project-scope
+	// grant to that project's tenant. Returns ("", nil) when no project matches.
+	GetTenantSlugByProjectUUID(ctx context.Context, projectUUID uuid.UUID) (string, error)
+
 	GetServiceAccountByTokenLookupID(
 		ctx context.Context,
 		lookupID string,

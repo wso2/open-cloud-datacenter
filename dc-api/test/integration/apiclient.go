@@ -700,33 +700,33 @@ func (c *APIClient) PatchAdminTenantCap(ctx context.Context, req PatchTenantCapR
 
 // MemberResponse is the JSON shape returned by the members endpoints.
 type MemberResponse struct {
-	ID            string `json:"id"`
-	PrincipalType string `json:"principal_type"`
-	PrincipalID   string `json:"principal_id"`
-	ScopeType     string `json:"scope_type"`
-	ScopeID       string `json:"scope_id"`
-	Role          string `json:"role"`
-	GrantedAt     string `json:"granted_at"`
-	GrantedBy     string `json:"granted_by"`
-	DisplayAlias  string `json:"display_alias,omitempty"`
+	ID             string `json:"id"`
+	PrincipalType  string `json:"principal_type"`
+	PrincipalID    string `json:"principal_id"`
+	ScopeType      string `json:"scope_type"`
+	ScopeID        string `json:"scope_id"`
+	RoleDefinition string `json:"role_definition"`
+	GrantedAt      string `json:"granted_at"`
+	GrantedBy      string `json:"granted_by"`
+	DisplayAlias   string `json:"display_alias,omitempty"`
 }
 
-// ListMembersResponse wraps the members list array.
+// ListMembersResponse wraps the role-assignments list array.
 type ListMembersResponse struct {
-	Members []MemberResponse `json:"members"`
+	Members []MemberResponse `json:"role_assignments"`
 }
 
-// InviteMember calls POST /v1/tenants/{tenant_id}/members.
+// InviteMember calls POST /v1/tenants/{tenant_id}/role-assignments.
 // Returns the created MemberResponse, the raw body, and the HTTP status code.
-func (c *APIClient) InviteMember(ctx context.Context, tenantID, userSub, role string) (MemberResponse, []byte, int, error) {
-	return c.InviteMemberWithAlias(ctx, tenantID, userSub, role, "")
+func (c *APIClient) InviteMember(ctx context.Context, tenantID, userSub, roleDefinition string) (MemberResponse, []byte, int, error) {
+	return c.InviteMemberWithAlias(ctx, tenantID, userSub, roleDefinition, "")
 }
 
 // InviteMemberWithAlias is InviteMember with the Option D display_alias
 // field set. Empty alias produces the same body InviteMember sends.
-func (c *APIClient) InviteMemberWithAlias(ctx context.Context, tenantID, userSub, role, displayAlias string) (MemberResponse, []byte, int, error) {
-	path := fmt.Sprintf("/v1/tenants/%s/members", tenantID)
-	body := map[string]string{"user_sub": userSub, "role": role}
+func (c *APIClient) InviteMemberWithAlias(ctx context.Context, tenantID, userSub, roleDefinition, displayAlias string) (MemberResponse, []byte, int, error) {
+	path := fmt.Sprintf("/v1/tenants/%s/role-assignments", tenantID)
+	body := map[string]string{"user_sub": userSub, "role_definition": roleDefinition}
 	if displayAlias != "" {
 		body["display_alias"] = displayAlias
 	}
@@ -739,21 +739,46 @@ func (c *APIClient) InviteMemberWithAlias(ctx context.Context, tenantID, userSub
 	return resp, b, status, nil
 }
 
-// ListMembers calls GET /v1/tenants/{tenant_id}/members.
+// ListMembers calls GET /v1/tenants/{tenant_id}/role-assignments.
 // Returns the parsed response, raw body, and HTTP status code.
 func (c *APIClient) ListMembers(ctx context.Context, tenantID string) (ListMembersResponse, int, error) {
-	path := fmt.Sprintf("/v1/tenants/%s/members", tenantID)
+	path := fmt.Sprintf("/v1/tenants/%s/role-assignments", tenantID)
 	b, status, err := c.do(ctx, http.MethodGet, path, nil)
 	var resp ListMembersResponse
 	_ = json.Unmarshal(b, &resp)
 	return resp, status, err
 }
 
-// RemoveMember calls DELETE /v1/tenants/{tenant_id}/members/{principal_id}.
+// RemoveMember calls DELETE /v1/tenants/{tenant_id}/role-assignments/{principal_id}.
 // Returns the raw body and HTTP status code.
 func (c *APIClient) RemoveMember(ctx context.Context, tenantID, principalID string) ([]byte, int, error) {
-	path := fmt.Sprintf("/v1/tenants/%s/members/%s", tenantID, principalID)
+	path := fmt.Sprintf("/v1/tenants/%s/role-assignments/%s", tenantID, principalID)
 	return c.do(ctx, http.MethodDelete, path, nil)
+}
+
+// CreateProjectRoleAssignment calls POST
+// /v1/tenants/{tenant_id}/projects/{project_id}/role-assignments — granting a
+// role at PROJECT scope. Returns the created MemberResponse, raw body, and status.
+func (c *APIClient) CreateProjectRoleAssignment(ctx context.Context, tenantID, projectID, userSub, roleDefinition string) (MemberResponse, []byte, int, error) {
+	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/role-assignments", tenantID, projectID)
+	body := map[string]string{"user_sub": userSub, "role_definition": roleDefinition}
+	b, status, err := c.do(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return MemberResponse{}, b, status, err
+	}
+	var resp MemberResponse
+	_ = json.Unmarshal(b, &resp)
+	return resp, b, status, nil
+}
+
+// ListProjectRoleAssignments calls GET
+// /v1/tenants/{tenant_id}/projects/{project_id}/role-assignments.
+func (c *APIClient) ListProjectRoleAssignments(ctx context.Context, tenantID, projectID string) (ListMembersResponse, int, error) {
+	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/role-assignments", tenantID, projectID)
+	b, status, err := c.do(ctx, http.MethodGet, path, nil)
+	var resp ListMembersResponse
+	_ = json.Unmarshal(b, &resp)
+	return resp, status, err
 }
 
 // ── Service Accounts ─────────────────────────────────────────────────────────

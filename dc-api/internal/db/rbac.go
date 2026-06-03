@@ -187,6 +187,38 @@ func (r *Repository) ListRoleAssignmentsForScope(ctx context.Context, scopeType 
 	return results, rows.Err()
 }
 
+// ListRoleAssignmentsForScopeUUID returns all role assignments for a specific
+// scope identified by its immutable UUID (a tenant_uuid, project_uuid, or a
+// resource UUID). Unlike ListRoleAssignmentsForScope — which filters on the slug
+// scope_id — this keys on scope_uuid. That matters below the tenant: project and
+// resource slugs are NOT globally unique (the same project name can exist in two
+// tenants), so a slug filter would leak assignments across tenants. Tenant slugs
+// are globally unique, so either method is safe at tenant scope.
+func (r *Repository) ListRoleAssignmentsForScopeUUID(ctx context.Context, scopeUUID uuid.UUID) ([]models.RoleAssignment, error) {
+	const q = `
+		SELECT id, principal_type, principal_id, scope_type, scope_id, scope_uuid, role_definition,
+		       granted_at, granted_by, display_alias
+		FROM   role_assignments
+		WHERE  scope_uuid = $1
+		ORDER  BY granted_at DESC`
+
+	rows, err := r.pool.Query(ctx, q, scopeUUID)
+	if err != nil {
+		return nil, fmt.Errorf("db list role assignments for scope uuid %s: %w", scopeUUID, err)
+	}
+	defer rows.Close()
+
+	var results []models.RoleAssignment
+	for rows.Next() {
+		ra, err := scanRoleAssignment(rows)
+		if err != nil {
+			return nil, fmt.Errorf("db scan role assignment: %w", err)
+		}
+		results = append(results, ra)
+	}
+	return results, rows.Err()
+}
+
 // DeleteRoleAssignment removes a role_assignments row by ID.
 // Idempotent: returns nil if the row does not exist.
 func (r *Repository) DeleteRoleAssignment(ctx context.Context, id uuid.UUID) error {
@@ -531,6 +563,34 @@ func (r *Repository) DeleteRoleAssignmentsForPrincipalAtScope(
 	if err != nil {
 		return fmt.Errorf("db delete role assignments for principal %s at scope %s/%s: %w",
 			principalID, scopeType, scopeID, err)
+	}
+	return nil
+}
+
+// DeleteRoleAssignmentsForPrincipalAtScopeUUID removes ALL role_assignments rows
+// matching (principal_type, principal_id, scope_uuid). It is the UUID-keyed twin
+// of DeleteRoleAssignmentsForPrincipalAtScope — required below the tenant, where
+// slugs are not globally unique, so deleting by (scope_type, scope_id) could
+// remove grants in a same-named project of another tenant. Idempotent: returns
+// nil if no rows match.
+func (r *Repository) DeleteRoleAssignmentsForPrincipalAtScopeUUID(
+	ctx context.Context,
+	principalType models.PrincipalType,
+	principalID string,
+	scopeUUID uuid.UUID,
+) error {
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM role_assignments
+		WHERE  principal_type = $1
+		  AND  principal_id   = $2
+		  AND  scope_uuid     = $3`,
+		string(principalType),
+		principalID,
+		scopeUUID,
+	)
+	if err != nil {
+		return fmt.Errorf("db delete role assignments for principal %s at scope uuid %s: %w",
+			principalID, scopeUUID, err)
 	}
 	return nil
 }

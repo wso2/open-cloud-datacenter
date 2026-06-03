@@ -87,16 +87,33 @@ func (h *TenantHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Group by scope_id (tenant id), aggregate distinct roles.
+	// Group by scope_id (tenant id), aggregate distinct roles. A tenant-scope
+	// grant contributes its role. A project-scope grant surfaces the project's
+	// parent tenant with NO tenant-level role (empty roles), so a project-only
+	// user can navigate to the project they were granted on; per-project access
+	// is gated by ProjectContext below.
 	byTenant := make(map[string]map[string]struct{})
+	ensure := func(tenantSlug string) {
+		if _, exists := byTenant[tenantSlug]; !exists {
+			byTenant[tenantSlug] = make(map[string]struct{})
+		}
+	}
 	for _, a := range assignments {
-		if a.ScopeType != models.ScopeTypeTenant {
-			continue
+		switch a.ScopeType {
+		case models.ScopeTypeTenant:
+			ensure(a.ScopeID)
+			byTenant[a.ScopeID][string(a.Role)] = struct{}{}
+		case models.ScopeTypeProject:
+			tslug, err := h.repo.GetTenantSlugByProjectUUID(r.Context(), a.ScopeUUID)
+			if err != nil {
+				h.log.Error().Err(err).Str("project_uuid", a.ScopeUUID.String()).
+					Msg("resolve tenant for project grant failed")
+				continue
+			}
+			if tslug != "" {
+				ensure(tslug)
+			}
 		}
-		if _, exists := byTenant[a.ScopeID]; !exists {
-			byTenant[a.ScopeID] = make(map[string]struct{})
-		}
-		byTenant[a.ScopeID][string(a.Role)] = struct{}{}
 	}
 
 	summaries := make([]tenantSummary, 0, len(byTenant))

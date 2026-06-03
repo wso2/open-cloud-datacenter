@@ -69,6 +69,7 @@ export function buildRouter({ isDark, onToggleDark }: BuildRouterArgs) {
     { path: 'keyvaults/:kvId', element: <KeyVaultDetailPage /> },
     { path: 'databases', element: <DatabasesListPage /> },
     { path: 'databases/:dbId', element: <DatabaseDetailPage /> },
+    { path: 'access', element: <MembersPage /> },
   ];
 
   const routes: RouteObject[] = [

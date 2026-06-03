@@ -1121,15 +1121,15 @@ export default function ClusterCreateDrawer({
           Provision a managed Kubernetes cluster. Provisioning is asynchronous and takes ~5
           minutes.
         </Body1>
-        <wizard.TabList />
+        {wizard.tabList}
       </DrawerHeader>
 
       <DrawerBody className={styles.body}>
-        <wizard.StepContent />
+        {wizard.stepContent}
       </DrawerBody>
 
       <DrawerFooter className={styles.footer}>
-        <wizard.Footer />
+        {wizard.footer}
       </DrawerFooter>
 
       <VnetCreateDrawer

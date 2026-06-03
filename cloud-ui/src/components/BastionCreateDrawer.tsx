@@ -444,15 +444,15 @@ export default function BastionCreateDrawer({
           A small dual-NIC VM giving you SSH access into one of your VPCs. Sized and
           imaged by the platform — you only choose the VPC.
         </Body1>
-        <wizard.TabList />
+        {wizard.tabList}
       </DrawerHeader>
 
       <DrawerBody className={styles.body}>
-        <wizard.StepContent />
+        {wizard.stepContent}
       </DrawerBody>
 
       <DrawerFooter className={styles.footer}>
-        <wizard.Footer />
+        {wizard.footer}
       </DrawerFooter>
 
       <VnetCreateDrawer

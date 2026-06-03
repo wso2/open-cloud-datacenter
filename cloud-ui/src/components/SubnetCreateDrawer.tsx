@@ -418,15 +418,15 @@ export default function SubnetCreateDrawer({
           A subnet carves an IP range out of the parent VNet&apos;s address space. VMs and
           bastions attach to a subnet to get an IP.
         </Body1>
-        <wizard.TabList />
+        {wizard.tabList}
       </DrawerHeader>
 
       <DrawerBody className={styles.body}>
-        <wizard.StepContent />
+        {wizard.stepContent}
       </DrawerBody>
 
       <DrawerFooter className={styles.footer}>
-        <wizard.Footer />
+        {wizard.footer}
       </DrawerFooter>
     </OverlayDrawer>
   );

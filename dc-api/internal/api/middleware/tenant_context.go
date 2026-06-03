@@ -156,6 +156,21 @@ func (t *TenantContext) Validate(next http.Handler) http.Handler {
 				dispatch(r.Context())
 				return
 			}
+			// A project-scope grant admits the user to the project's parent
+			// tenant (for navigation). Per-project access is still gated by
+			// ProjectContext; this only gets them through the tenant door.
+			if a.ScopeType == models.ScopeTypeProject {
+				tslug, err := t.repo.GetTenantSlugByProjectUUID(r.Context(), a.ScopeUUID)
+				if err != nil {
+					log.Error().Err(err).Str("project_uuid", a.ScopeUUID.String()).
+						Msg("tenant_context: resolve tenant for project grant failed")
+					continue
+				}
+				if tslug == urlTenant {
+					dispatch(r.Context())
+					return
+				}
+			}
 		}
 
 		// Distinguish "in IdP group but no role row" (actionable 403 — owner

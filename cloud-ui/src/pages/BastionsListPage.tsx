@@ -34,6 +34,9 @@ import { RowActionsMenu } from '../components/list/RowActionsMenu';
 import { useListPageStyles } from '../components/list/useListPageStyles';
 import SecretRevealBanner, { type Secret } from '../components/SecretRevealBanner';
 import StatusPill from '../components/StatusPill';
+import { useCan } from '../api/useCan';
+import { PermissionTooltip } from '../components/PermissionTooltip';
+import { listErrorMessage } from '../lib/apiError';
 import { fmtDate } from '../lib/date';
 
 interface Bastion {
@@ -58,6 +61,8 @@ export default function BastionsListPage() {
   const { dispatchToast } = useToastController(toasterId);
   const { tenantId } = useParams<{ tenantId: string }>();
   const { projectId } = useActiveProject();
+  const { can } = useCan(tenantId, ['compute/bastions/write'], projectId);
+  const canWrite = can('compute/bastions/write');
   const confirmDialog = useConfirmDialog();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [createdSecrets, setCreatedSecrets] = useState<{
@@ -163,13 +168,16 @@ export default function BastionsListPage() {
       </div>
 
       <div className={styles.cmdBar}>
-        <Button
-          appearance="primary"
-          icon={<Add20Regular />}
-          onClick={() => setDrawerOpen(true)}
-        >
-          Create bastion
-        </Button>
+        <PermissionTooltip when={!canWrite} reason="You need write access on this tenant to create bastions">
+          <Button
+            appearance="primary"
+            icon={<Add20Regular />}
+            onClick={() => setDrawerOpen(true)}
+            disabledFocusable={!canWrite}
+          >
+            Create bastion
+          </Button>
+        </PermissionTooltip>
         <Button
           appearance="subtle"
           icon={<ArrowClockwise20Regular />}
@@ -200,7 +208,7 @@ export default function BastionsListPage() {
 
       {bastionsQuery.isError && !bastionsQuery.isLoading && (
         <ErrorState
-          message={`Failed to load bastions: ${(bastionsQuery.error as Error).message}`}
+          message={listErrorMessage(bastionsQuery.error, 'bastions')}
         />
       )}
 
@@ -210,13 +218,16 @@ export default function BastionsListPage() {
           title={`No bastions in ${tenantId ?? 'this tenant'} yet`}
           description="A bastion is a small jump-host VM with a reachable IP. SSH to the bastion, then ProxyJump to VMs on the private subnet."
           action={
-            <Button
-              appearance="primary"
-              icon={<Add20Regular />}
-              onClick={() => setDrawerOpen(true)}
-            >
-              Create bastion
-            </Button>
+            <PermissionTooltip when={!canWrite} reason="You need write access on this tenant to create bastions">
+              <Button
+                appearance="primary"
+                icon={<Add20Regular />}
+                onClick={() => setDrawerOpen(true)}
+                disabledFocusable={!canWrite}
+              >
+                Create bastion
+              </Button>
+            </PermissionTooltip>
           }
         />
       )}
@@ -254,7 +265,7 @@ export default function BastionsListPage() {
                     <RowActionsMenu>
                       <MenuItem
                         onClick={() => onDelete(b)}
-                        disabled={deleteMutation.isPending || b.status === 'DELETING'}
+                        disabled={!canWrite || deleteMutation.isPending || b.status === 'DELETING'}
                       >
                         Delete
                       </MenuItem>

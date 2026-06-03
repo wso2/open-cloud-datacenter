@@ -44,6 +44,9 @@ import { EmptyState, ErrorState, LoadingState } from '../components/list/PageSta
 import { RowActionsMenu } from '../components/list/RowActionsMenu';
 import { useListPageStyles } from '../components/list/useListPageStyles';
 import StatusPill from '../components/StatusPill';
+import { useCan } from '../api/useCan';
+import { PermissionTooltip } from '../components/PermissionTooltip';
+import { listErrorMessage } from '../lib/apiError';
 import { fmtDate } from '../lib/date';
 
 const usePageStyles = makeStyles({
@@ -74,6 +77,8 @@ export default function NSGsListPage() {
   const { dispatchToast } = useToastController(toasterId);
   const { tenantId } = useParams<{ tenantId: string }>();
   const { projectId } = useActiveProject();
+  const { can } = useCan(tenantId, ['network/nsgs/write'], projectId);
+  const canWrite = can('network/nsgs/write');
   const confirmDialog = useConfirmDialog();
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -180,9 +185,16 @@ export default function NSGsListPage() {
       </div>
 
       <div className={styles.cmdBar}>
-        <Button appearance="primary" icon={<Add20Regular />} onClick={() => setCreateOpen(true)}>
-          Create security group
-        </Button>
+        <PermissionTooltip when={!canWrite} reason="You need write access on this tenant to create security groups">
+          <Button
+            appearance="primary"
+            icon={<Add20Regular />}
+            onClick={() => setCreateOpen(true)}
+            disabledFocusable={!canWrite}
+          >
+            Create security group
+          </Button>
+        </PermissionTooltip>
         <Button
           appearance="subtle"
           icon={<ArrowClockwise20Regular />}
@@ -197,7 +209,7 @@ export default function NSGsListPage() {
 
       {nsgsQuery.isError && !nsgsQuery.isLoading && (
         <ErrorState
-          message={`Failed to load security groups: ${(nsgsQuery.error as Error).message}`}
+          message={listErrorMessage(nsgsQuery.error, 'security groups')}
         />
       )}
 
@@ -207,9 +219,16 @@ export default function NSGsListPage() {
           title={`No security groups in ${tenantId ?? 'this tenant'} yet`}
           description="A security group holds inbound and outbound firewall rules. Create one, define rules, then attach it to a subnet."
           action={
-            <Button appearance="primary" icon={<Add20Regular />} onClick={() => setCreateOpen(true)}>
-              Create security group
-            </Button>
+            <PermissionTooltip when={!canWrite} reason="You need write access on this tenant to create security groups">
+              <Button
+                appearance="primary"
+                icon={<Add20Regular />}
+                onClick={() => setCreateOpen(true)}
+                disabledFocusable={!canWrite}
+              >
+                Create security group
+              </Button>
+            </PermissionTooltip>
           }
         />
       )}
@@ -246,7 +265,7 @@ export default function NSGsListPage() {
                     <RowActionsMenu>
                       <MenuItem
                         onClick={() => onDelete(n)}
-                        disabled={deleteMutation.isPending || n.status === 'DELETING'}
+                        disabled={!canWrite || deleteMutation.isPending || n.status === 'DELETING'}
                       >
                         Delete
                       </MenuItem>

@@ -9,17 +9,25 @@
  *     <DrawerHeader>
  *       <DrawerHeaderTitle ...>Create foo</DrawerHeaderTitle>
  *       <Body1>Subtitle copy.</Body1>
- *       <wizard.TabList />
+ *       {wizard.tabList}
  *     </DrawerHeader>
  *     <DrawerBody className={styles.body}>
- *       <wizard.StepContent />
+ *       {wizard.stepContent}
  *     </DrawerBody>
  *     <DrawerFooter className={styles.footer}>
- *       <wizard.Footer />
+ *       {wizard.footer}
  *     </DrawerFooter>
  *   </OverlayDrawer>
  *
  * The wizard owns navigation state only. Form state lives in the consumer.
+ *
+ * IMPORTANT: tabList / stepContent / footer are ELEMENTS, not components, and are
+ * dropped in as {wizard.stepContent}. This matters: if the wizard returned
+ * components (re-created every render) and consumers rendered <wizard.StepContent/>,
+ * React would see a new component type each render and unmount+remount the whole
+ * step subtree on EVERY keystroke — stealing focus from form inputs and re-firing
+ * autoFocus after a single character. Returning elements lets React reconcile the
+ * step content in place, so inputs keep their focus and cursor.
  */
 
 import {
@@ -170,121 +178,113 @@ export function useWizard({
 
   const canCreate = issues.length === 0 && !submitting;
 
-  // ── Sub-components ────────────────────────────────────────────────────────
+  // ── Elements (not components — see file header) ─────────────────────────────
 
-  function TabListNav() {
-    return (
-      <div className={styles.tabListWrapper}>
-        <TabList
-          size="small"
-          selectedValue={String(stepIndex)}
-          onTabSelect={(_, d) => goToStep(Number(d.value))}
-        >
-          {steps.map((tab, i) => (
-            <Tab key={tab.id} value={String(i)}>
-              {tab.title}
-            </Tab>
-          ))}
-          <Tab value={String(lastIndex)}>{REVIEW_TAB_TITLE}</Tab>
-        </TabList>
+  const tabList = (
+    <div className={styles.tabListWrapper}>
+      <TabList
+        size="small"
+        selectedValue={String(stepIndex)}
+        onTabSelect={(_, d) => goToStep(Number(d.value))}
+      >
+        {steps.map((tab, i) => (
+          <Tab key={tab.id} value={String(i)}>
+            {tab.title}
+          </Tab>
+        ))}
+        <Tab value={String(lastIndex)}>{REVIEW_TAB_TITLE}</Tab>
+      </TabList>
+    </div>
+  );
+
+  const stepContent = !isReview ? (
+    <>{steps[stepIndex].content}</>
+  ) : (
+    <div className={styles.reviewBody}>
+      <div className={styles.reviewHeader}>
+        <Subtitle2 block>Review and create</Subtitle2>
+        <Body1 className={styles.reviewSubtitle}>
+          Review all settings before submitting. Provisioning begins immediately.
+        </Body1>
       </div>
-    );
-  }
 
-  function StepContent() {
-    if (!isReview) {
-      return <>{steps[stepIndex].content}</>;
-    }
+      {showAllErrors && issues.length > 0 && (
+        <MessageBar intent="error">
+          <MessageBarBody>
+            <MessageBarTitle className={styles.issueTitle}>
+              Fix the following before creating
+            </MessageBarTitle>
+            <ul className={styles.issueList}>
+              {issues.map((issue, i) => {
+                const stepTitle =
+                  steps.find((s) => s.id === issue.targetStep)?.title ?? issue.targetStep;
+                return (
+                  <li key={i} className={styles.issueRow}>
+                    <span className={styles.issueMessage}>{issue.message}</span>
+                    <Link
+                      as="button"
+                      type="button"
+                      onClick={() => jumpToIssueStep(issue.targetStep)}
+                      style={{ fontSize: tokens.fontSizeBase200, whiteSpace: 'nowrap' }}
+                    >
+                      Go to {stepTitle}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </MessageBarBody>
+        </MessageBar>
+      )}
 
-    return (
-      <div className={styles.reviewBody}>
-        <div className={styles.reviewHeader}>
-          <Subtitle2 block>Review and create</Subtitle2>
-          <Body1 className={styles.reviewSubtitle}>
-            Review all settings before submitting. Provisioning begins immediately.
-          </Body1>
-        </div>
+      {reviewSummary}
 
-        {showAllErrors && issues.length > 0 && (
-          <MessageBar intent="error">
-            <MessageBarBody>
-              <MessageBarTitle className={styles.issueTitle}>
-                Fix the following before creating
-              </MessageBarTitle>
-              <ul className={styles.issueList}>
-                {issues.map((issue, i) => {
-                  const stepTitle =
-                    steps.find((s) => s.id === issue.targetStep)?.title ?? issue.targetStep;
-                  return (
-                    <li key={i} className={styles.issueRow}>
-                      <span className={styles.issueMessage}>{issue.message}</span>
-                      <Link
-                        as="button"
-                        type="button"
-                        onClick={() => jumpToIssueStep(issue.targetStep)}
-                        style={{ fontSize: tokens.fontSizeBase200, whiteSpace: 'nowrap' }}
-                      >
-                        Go to {stepTitle}
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            </MessageBarBody>
-          </MessageBar>
+      {submitError && (
+        <MessageBar intent="error">
+          <MessageBarBody>
+            <MessageBarTitle>Create failed</MessageBarTitle>
+            {submitError}
+          </MessageBarBody>
+        </MessageBar>
+      )}
+    </div>
+  );
+
+  const footer = (
+    <>
+      <Button appearance="subtle" onClick={onCancel} disabled={submitting}>
+        Cancel
+      </Button>
+      <div className={styles.footerRight}>
+        {stepIndex > 0 && (
+          <Button
+            appearance="secondary"
+            onClick={() => setStepIndex((s) => s - 1)}
+            disabled={submitting}
+          >
+            Back
+          </Button>
         )}
-
-        {reviewSummary}
-
-        {submitError && (
-          <MessageBar intent="error">
-            <MessageBarBody>
-              <MessageBarTitle>Create failed</MessageBarTitle>
-              {submitError}
-            </MessageBarBody>
-          </MessageBar>
+        {extraFooterAction !== undefined &&
+          stepIndex === (extraFooterActionStep ?? -1) && (
+            <>{extraFooterAction(() => goToStep(stepIndex + 1))}</>
+          )}
+        {isReview ? (
+          <Button appearance="primary" onClick={onSubmit} disabled={!canCreate}>
+            {submitting ? 'Creating…' : submitLabel}
+          </Button>
+        ) : (
+          <Button
+            appearance="primary"
+            onClick={() => goToStep(stepIndex + 1)}
+            disabled={submitting}
+          >
+            Next
+          </Button>
         )}
       </div>
-    );
-  }
+    </>
+  );
 
-  function Footer() {
-    return (
-      <>
-        <Button appearance="subtle" onClick={onCancel} disabled={submitting}>
-          Cancel
-        </Button>
-        <div className={styles.footerRight}>
-          {stepIndex > 0 && (
-            <Button
-              appearance="secondary"
-              onClick={() => setStepIndex((s) => s - 1)}
-              disabled={submitting}
-            >
-              Back
-            </Button>
-          )}
-          {extraFooterAction !== undefined &&
-            stepIndex === (extraFooterActionStep ?? -1) && (
-              <>{extraFooterAction(() => goToStep(stepIndex + 1))}</>
-            )}
-          {isReview ? (
-            <Button appearance="primary" onClick={onSubmit} disabled={!canCreate}>
-              {submitting ? 'Creating…' : submitLabel}
-            </Button>
-          ) : (
-            <Button
-              appearance="primary"
-              onClick={() => goToStep(stepIndex + 1)}
-              disabled={submitting}
-            >
-              Next
-            </Button>
-          )}
-        </div>
-      </>
-    );
-  }
-
-  return { TabList: TabListNav, StepContent, Footer, reset, stepIndex, goToStep };
+  return { tabList, stepContent, footer, reset, stepIndex, goToStep };
 }

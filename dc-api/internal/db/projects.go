@@ -39,6 +39,26 @@ func scanProject(row pgx.Row, p *models.Project) error {
 	return nil
 }
 
+// GetTenantSlugByProjectUUID resolves a project's immutable UUID to its parent
+// tenant slug. The entry path (GET /v1/tenants and TenantContext) uses it to
+// admit a principal who holds only a project-scope grant to that project's
+// tenant — a project grant implies access to its tenant for navigation, with
+// per-project access still gated by ProjectContext below. Returns ("", nil) if
+// no project has that UUID.
+func (r *Repository) GetTenantSlugByProjectUUID(ctx context.Context, projectUUID uuid.UUID) (string, error) {
+	var tenantSlug string
+	err := r.pool.QueryRow(ctx,
+		`SELECT tenant_id FROM projects WHERE project_uuid = $1`, projectUUID,
+	).Scan(&tenantSlug)
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("db get tenant slug by project uuid %s: %w", projectUUID, err)
+	}
+	return tenantSlug, nil
+}
+
 // ErrProjectAlreadyExists is returned by CreateProject when the slug is taken
 // within the same tenant. Distinct from a generic DB error so the handler can
 // map it to 409.

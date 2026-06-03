@@ -64,8 +64,8 @@ tags:
       can SSH in from their workstations).
   - name: clusters
     description: RKE2 Kubernetes clusters (async provisioning via Rancher)
-  - name: members
-    description: Tenant membership management (human users)
+  - name: roleAssignments
+    description: Role assignments — granting catalog roles to principals at tenant or project scope
   - name: service-accounts
     description: Service account lifecycle and token management
   - name: networking-vnets
@@ -114,6 +114,11 @@ tags:
       The existing JWT middleware in dc-api accepts the `dcapi_session` cookie as an
       alternative to a `Bearer` header — cloud-ui's runtime calls to `/v1/*` go through
       the same auth code path as `dcctl`.
+  - name: rbac
+    description: |
+      RBAC v2 role catalog: the assignable role definitions (built-in today,
+      tenant custom roles later) that the UI and CLI pick from when granting
+      access.
 
 security:
   - bearerAuth: []
@@ -1199,14 +1204,55 @@ paths:
 
   # ── Tenant Members ─────────────────────────────────────────────────────────
 
-  /v1/tenants/{tenant_id}/members:
+  /v1/tenants/{tenant_id}/permissions:check:
+    post:
+      operationId: checkPermissions
+      tags: [rbac]
+      summary: Check whether the caller may perform actions at this scope
+      description: |
+        Evaluates each requested action for the calling principal at the tenant
+        scope and returns booleans. The web UI uses this to enable or disable
+        controls without ever re-implementing the authorization matcher — dc-api
+        owns the engine; this endpoint runs it on the caller's behalf.
+
+        The result reflects only what the caller actually holds (platform admins
+        get `true` for everything). Control vs data plane is inferred per action.
+      parameters:
+        - $ref: "#/components/parameters/TenantID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PermissionsCheckRequest"
+            example:
+              actions:
+                - authorization/roleAssignments/write
+                - compute/virtualMachines/write
+      responses:
+        "200":
+          description: One result per requested action.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionsCheckResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenant_id}/role-assignments:
     parameters:
       - $ref: "#/components/parameters/TenantID"
 
     post:
-      operationId: inviteMember
-      tags: [members]
-      summary: Invite a user to the tenant
+      operationId: createTenantRoleAssignment
+      tags: [roleAssignments]
+      summary: Grant a role to a principal at tenant scope
       description: |
         Creates a `role_assignments` row binding the user (identified by
         their OIDC `sub`) to the tenant scope. Returns 409 if the user
@@ -1224,14 +1270,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/InviteMemberRequest"
+              $ref: "#/components/schemas/CreateRoleAssignmentRequest"
             example:
               user_sub: 01abc123-0000-0000-0000-user000000001
-              role: member
+              role_definition: Contributor
               display_alias: alice-laptop
       responses:
         "201":
-          description: Member invited
+          description: Role assignment created
           content:
             application/json:
               schema:
@@ -1250,9 +1296,9 @@ paths:
           $ref: "#/components/responses/InternalError"
 
     get:
-      operationId: listMembers
-      tags: [members]
-      summary: List human members of the tenant
+      operationId: listTenantRoleAssignments
+      tags: [roleAssignments]
+      summary: List user role assignments at tenant scope
       description: |
         Returns all `role_assignments` rows of `principal_type: user` for
         the tenant scope. Service accounts are excluded; use
@@ -1261,13 +1307,13 @@ paths:
         **Required role**: any authenticated tenant member (viewer, member, or owner).
       responses:
         "200":
-          description: Member list
+          description: Role assignment list
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  members:
+                  role_assignments:
                     type: array
                     items:
                       $ref: "#/components/schemas/RoleAssignment"
@@ -1280,7 +1326,7 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
-  /v1/tenants/{tenant_id}/members/{principal_id}:
+  /v1/tenants/{tenant_id}/role-assignments/{principal_id}:
     parameters:
       - $ref: "#/components/parameters/TenantID"
       - name: principal_id
@@ -1292,9 +1338,9 @@ paths:
           example: 01abc123-0000-0000-0000-user000000001
 
     delete:
-      operationId: removeMember
-      tags: [members]
-      summary: Remove a user from the tenant
+      operationId: deleteTenantRoleAssignment
+      tags: [roleAssignments]
+      summary: Revoke a principal's role assignments at tenant scope
       description: |
         Atomically deletes all `role_assignments` rows for this principal at
         the tenant scope. Returns 409 if the target is the last owner.
@@ -1302,7 +1348,7 @@ paths:
         **Required role**: `owner`.
       responses:
         "204":
-          description: Member removed
+          description: Role assignment removed
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1319,6 +1365,166 @@ paths:
                 $ref: "#/components/schemas/Error"
               example:
                 error: "cannot remove the last owner of a tenant; promote another member to owner first"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenant_id}/projects/{project_id}/permissions:check:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+
+    post:
+      operationId: checkProjectPermissions
+      tags: [rbac]
+      summary: Check whether the caller may perform actions at this project
+      description: |
+        Evaluates each requested action for the calling principal at the project
+        scope and returns booleans. The web UI uses this to enable or disable
+        controls without ever re-implementing the authorization matcher — dc-api
+        owns the engine; this endpoint runs it on the caller's behalf.
+
+        The result reflects only what the caller actually holds (platform admins
+        get `true` for everything). Control vs data plane is inferred per action.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PermissionsCheckRequest"
+            example:
+              actions:
+                - authorization/roleAssignments/write
+                - compute/virtualMachines/write
+      responses:
+        "200":
+          description: One result per requested action.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionsCheckResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenant_id}/projects/{project_id}/role-assignments:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+
+    post:
+      operationId: createProjectRoleAssignment
+      tags: [roleAssignments]
+      summary: Grant a role to a principal at project scope
+      description: |
+        Creates a `role_assignments` row binding the user (identified by
+        their OIDC `sub`) to the project scope. Returns 409 if the user
+        already holds that role at the project.
+
+        The URL `{tenant_id}` must match the caller's own tenant context
+        (Option D: derived from a `role_assignments` row, not from any
+        IdP group). Platform admins may operate on any tenant.
+
+        **Required role**: `owner` at this scope or inherited from the
+        tenant (or platform admin).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRoleAssignmentRequest"
+            example:
+              user_sub: 01abc123-0000-0000-0000-user000000001
+              role_definition: VirtualMachineContributor
+              display_alias: alice-laptop
+      responses:
+        "201":
+          description: Role assignment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleAssignment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    get:
+      operationId: listProjectRoleAssignments
+      tags: [roleAssignments]
+      summary: List user role assignments at project scope
+      description: |
+        Returns all `role_assignments` rows of `principal_type: user` for
+        the project scope. Service accounts are excluded; use
+        `GET /v1/tenants/{tenant_id}/projects/{project_id}/service-accounts`
+        for those.
+
+        **Required role**: any authenticated tenant member (viewer, member, or owner).
+      responses:
+        "200":
+          description: Role assignment list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role_assignments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RoleAssignment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/tenants/{tenant_id}/projects/{project_id}/role-assignments/{principal_id}:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+      - name: principal_id
+        in: path
+        required: true
+        description: OIDC subject (`sub`) of the user to remove
+        schema:
+          type: string
+          example: 01abc123-0000-0000-0000-user000000001
+
+    delete:
+      operationId: deleteProjectRoleAssignment
+      tags: [roleAssignments]
+      summary: Revoke a principal's role assignments at project scope
+      description: |
+        Atomically deletes all `role_assignments` rows for this principal at
+        the project scope.
+
+        **Required role**: `owner`.
+      responses:
+        "204":
+          description: Role assignment removed
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -1494,7 +1700,7 @@ paths:
         regardless. Tenants without role-assignment rows are still
         visible to admins as long as they're in the registry — the
         registry is populated by `POST /v1/admin/tenants` (explicit
-        admin pre-registration) or by `POST /v1/tenants/{tid}/members`
+        admin pre-registration) or by `POST /v1/tenants/{tid}/role-assignments`
         (UPSERT on first invite).
 
         **Required auth**: any valid token. No minimum role required beyond
@@ -1523,6 +1729,69 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  # ── RBAC v2: role catalog ─────────────────────────────────────────────────────
+
+  /v1/role-definitions:
+    get:
+      operationId: listRoleDefinitions
+      tags: [rbac]
+      summary: List the assignable role catalog
+      description: |
+        Returns the catalog of role definitions a caller can grant — today the
+        in-code built-in roles (Owner, Contributor, Reader, the per-resource-type
+        roles, …); tenant-owned custom roles will join the same list, with the
+        same shape, when they ship.
+
+        Each entry carries its `key` (the stable identifier persisted on a role
+        assignment), a human `display_name` and `description` for the picker, and
+        the underlying `actions` / `data_actions` patterns for a role-detail view.
+
+        **Required auth**: any valid token. The catalog is non-sensitive metadata;
+        no minimum role is required beyond being authenticated.
+      responses:
+        "200":
+          description: The role catalog, sorted by key.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [role_definitions]
+                properties:
+                  role_definitions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RoleDefinition"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/role-definitions/{key}:
+    get:
+      operationId: getRoleDefinition
+      tags: [rbac]
+      summary: Get one role definition by key
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: The role-definition key (e.g. `VirtualMachineContributor`).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The requested role definition.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleDefinition"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   # ── Admin: tenant registry ────────────────────────────────────────────────────
 
   /v1/admin/tenants:
@@ -1535,7 +1804,7 @@ paths:
         visible via `GET /v1/tenants` (admin path).
 
         Two paths populate the registry; this endpoint is the explicit
-        one. The other is implicit: `POST /v1/tenants/{tid}/members`
+        one. The other is implicit: `POST /v1/tenants/{tid}/role-assignments`
         UPSERTs the registry row as a side effect of the first invite.
         Use this endpoint when an admin wants the tenant discoverable
         before inviting anyone.
@@ -5127,7 +5396,7 @@ components:
 
     RoleAssignment:
       type: object
-      required: [id, principal_type, principal_id, scope_type, scope_id, role, granted_at, granted_by]
+      required: [id, principal_type, principal_id, scope_type, scope_id, role_definition, granted_at, granted_by]
       properties:
         id:
           type: string
@@ -5144,17 +5413,20 @@ components:
           example: 01abc123-0000-0000-0000-user000000001
         scope_type:
           type: string
-          enum: [tenant]
-          description: Scope hierarchy level. Only `tenant` is active in M1.5.
+          enum: [tenant, project]
+          description: Scope hierarchy level the role is granted at.
           example: tenant
         scope_id:
           type: string
-          description: Identifier of the scope (e.g. tenant slug)
+          description: Identifier of the scope (tenant or project slug)
           example: iam-platform
-        role:
+        role_definition:
           type: string
-          enum: [owner, member, viewer]
-          example: member
+          description: |
+            RBAC v2 role-definition key (e.g. `Contributor`,
+            `VirtualMachineContributor`). Resolve it to a display name via
+            `GET /v1/role-definitions`.
+          example: Contributor
         granted_at:
           type: string
           format: date-time
@@ -5167,7 +5439,7 @@ components:
             (legacy autoprovision path, default off in Option D),
             `member-invite:<inviter-sub>` (when the row was created
             implicitly by an admin invite), or a bare sub when
-            granted explicitly via the members API.
+            granted explicitly via the role-assignments API.
           example: 01abc123-0000-0000-0000-user000000099
         display_alias:
           type: string
@@ -5177,23 +5449,103 @@ components:
             purely what the inviter typed when they added the principal.
           example: alice-laptop
 
-    InviteMemberRequest:
+    PermissionsCheckRequest:
       type: object
-      required: [user_sub, role]
+      required: [actions]
+      properties:
+        actions:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            type: string
+          description: Action keys to evaluate at the scope, e.g. `compute/virtualMachines/write`.
+          example: ["authorization/roleAssignments/write", "compute/virtualMachines/write"]
+
+    PermissionsCheckResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            required: [action, allowed]
+            properties:
+              action:
+                type: string
+                example: authorization/roleAssignments/write
+              allowed:
+                type: boolean
+                example: true
+
+    RoleDefinition:
+      type: object
+      required: [key, display_name, description, actions, builtin]
+      description: |
+        A role definition: a named set of allow/deny action patterns, split
+        across the control plane (`actions` / `not_actions`) and the data plane
+        (`data_actions` / `not_data_actions`). Patterns may use the `*` wildcard.
+        `key` is the stable identifier a role assignment stores.
+      properties:
+        key:
+          type: string
+          description: |
+            Stable identifier — a reserved PascalCase name for built-ins
+            (e.g. `VirtualMachineContributor`), or a UUID for custom roles.
+          example: VirtualMachineContributor
+        display_name:
+          type: string
+          example: Virtual Machine Contributor
+        description:
+          type: string
+          example: Full control of virtual machines, plus read access to the images and networks they depend on.
+        actions:
+          type: array
+          items:
+            type: string
+          description: Control-plane action patterns this role grants.
+          example: ["compute/virtualMachines/*", "compute/images/read", "network/*/read"]
+        not_actions:
+          type: array
+          items:
+            type: string
+          description: Control-plane patterns subtracted from `actions` within this role.
+        data_actions:
+          type: array
+          items:
+            type: string
+          description: Data-plane action patterns (touching resource contents) this role grants.
+        not_data_actions:
+          type: array
+          items:
+            type: string
+          description: Data-plane patterns subtracted from `data_actions` within this role.
+        builtin:
+          type: boolean
+          description: True for the system catalog; false for tenant-owned custom roles.
+          example: true
+
+    CreateRoleAssignmentRequest:
+      type: object
+      required: [user_sub, role_definition]
       properties:
         user_sub:
           type: string
-          description: OIDC `sub` of the user to invite
+          description: OIDC `sub` of the user to grant the role to
           example: 01abc123-0000-0000-0000-user000000001
-        role:
+        role_definition:
           type: string
-          enum: [owner, member, viewer]
-          example: member
+          description: |
+            Role-definition key to grant — any catalog key from
+            `GET /v1/role-definitions` (e.g. `Owner`, `Contributor`, `Reader`,
+            `VirtualMachineContributor`). The v1 owner/member/viewer ranks are gone.
+          example: Contributor
         display_alias:
           type: string
           description: |
-            Optional mnemonic the inviter sets so cloud-ui can show a
-            readable name in the members list instead of the opaque
+            Optional mnemonic the granter sets so cloud-ui can show a
+            readable name in the role-assignment list instead of the opaque
             `user_sub`. Not propagated to the IdP and never matched
             against any IdP attribute — purely admin bookkeeping.
             Stored verbatim, max 256 chars by convention.

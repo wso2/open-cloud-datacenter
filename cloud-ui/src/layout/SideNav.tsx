@@ -18,6 +18,7 @@ import {
 import { NavLink, useParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useActiveProject } from '../hooks/useActiveProject';
+import { useCan } from '../api/useCan';
 
 const useStyles = makeStyles({
   nav: {
@@ -72,6 +73,13 @@ interface NavItem {
   label: string;
   to: string;
   icon: ReactNode;
+  /**
+   * Read action gating this item. When set, the item only appears if the caller
+   * holds it (checked via permissions:check). Items without an action — overview
+   * pages and tenant-shared catalog reads that are membership-gated server-side —
+   * always show. Keep these in sync with the GET-route gates in dc-api/router.go.
+   */
+  action?: string;
 }
 
 // Items scoped to the project (under /projects/:projectId/)
@@ -86,30 +94,36 @@ const projectGroups: { label: string; items: NavItem[] }[] = [
   {
     label: 'Compute',
     items: [
-      { label: 'Virtual machines', to: 'vms', icon: <Server20Regular /> },
-      { label: 'Bastions', to: 'bastions', icon: <PersonShield20Regular /> },
-      { label: 'Clusters', to: 'clusters', icon: <CloudCube20Regular /> },
+      { label: 'Virtual machines', to: 'vms', icon: <Server20Regular />, action: 'compute/virtualMachines/read' },
+      { label: 'Bastions', to: 'bastions', icon: <PersonShield20Regular />, action: 'compute/bastions/read' },
+      { label: 'Clusters', to: 'clusters', icon: <CloudCube20Regular />, action: 'compute/clusters/read' },
     ],
   },
   {
     label: 'Networking',
     items: [
-      { label: 'Virtual networks', to: 'vnets', icon: <NetworkCheck20Regular /> },
-      { label: 'Security groups', to: 'nsgs', icon: <ShieldKeyhole20Regular /> },
-      { label: 'Private DNS', to: 'dns', icon: <Globe20Regular /> },
+      { label: 'Virtual networks', to: 'vnets', icon: <NetworkCheck20Regular />, action: 'network/vnets/read' },
+      { label: 'Security groups', to: 'nsgs', icon: <ShieldKeyhole20Regular />, action: 'network/nsgs/read' },
+      { label: 'Private DNS', to: 'dns', icon: <Globe20Regular />, action: 'network/dnsZones/read' },
     ],
   },
   {
     label: 'Security',
     items: [
-      { label: 'Key vaults', to: 'keyvaults', icon: <LockClosed20Regular /> },
-      { label: 'Service accounts', to: 'service-accounts', icon: <Box20Regular /> },
+      { label: 'Key vaults', to: 'keyvaults', icon: <LockClosed20Regular />, action: 'keyvault/vaults/read' },
+      { label: 'Service accounts', to: 'service-accounts', icon: <Box20Regular />, action: 'authorization/serviceAccounts/read' },
     ],
   },
   {
     label: 'Managed services',
     items: [
-      { label: 'Databases', to: 'databases', icon: <Database20Regular /> },
+      { label: 'Databases', to: 'databases', icon: <Database20Regular />, action: 'database/servers/read' },
+    ],
+  },
+  {
+    label: 'Project',
+    items: [
+      { label: 'Access control', to: 'access', icon: <ShieldPerson20Regular />, action: 'authorization/roleAssignments/read' },
     ],
   },
 ];
@@ -126,42 +140,76 @@ const tenantGroups: { label: string; items: NavItem[] }[] = [
   {
     label: 'Tenant',
     items: [
-      { label: 'Access control', to: 'iam', icon: <ShieldPerson20Regular /> },
+      { label: 'Access control', to: 'iam', icon: <ShieldPerson20Regular />, action: 'authorization/roleAssignments/read' },
     ],
   },
 ];
+
+// The distinct read actions each scope's nav items gate on. Project items are
+// checked at PROJECT scope and tenant items at tenant scope, so a project Owner
+// who holds only a narrow tenant role still sees the full project nav.
+const actionsOf = (groups: { items: NavItem[] }[]) => [
+  ...new Set(
+    groups
+      .flatMap((g) => g.items)
+      .map((i) => i.action)
+      .filter((a): a is string => Boolean(a)),
+  ),
+];
+const PROJECT_ACTIONS = actionsOf(projectGroups);
+const TENANT_ACTIONS = actionsOf(tenantGroups);
 
 export default function SideNav() {
   const styles = useStyles();
   const { tenantId } = useParams<{ tenantId: string }>();
   const { projectId } = useActiveProject();
+  // Project nav gated at PROJECT scope (honours project grants AND inherited
+  // tenant grants); tenant nav at tenant scope. Two batched permissions:check
+  // calls, one per scope.
+  const projectScope = useCan(tenantId, PROJECT_ACTIONS, projectId);
+  const tenantScope = useCan(tenantId, TENANT_ACTIONS);
 
   const tenantBase = tenantId ? `/tenants/${tenantId}` : '';
   const projectBase = tenantId && projectId ? `/tenants/${tenantId}/projects/${projectId}` : null;
 
+  // Show overview/catalog items (no action) always; gate the rest on read access.
+  // While the check is in flight, show everything so a full-access user sees no
+  // flash — items the caller can't read drop out once the result arrives.
+  const renderGroups = (
+    groups: { label: string; items: NavItem[] }[],
+    base: string,
+    scope: { can: (a: string) => boolean; isLoading: boolean },
+  ) =>
+    groups.map((g) => {
+      const items = g.items.filter(
+        (item) => scope.isLoading || !item.action || scope.can(item.action),
+      );
+      if (items.length === 0) return null;
+      return (
+        <div key={g.label}>
+          <div className={styles.group}>
+            <span className={styles.groupLabel}>{g.label}</span>
+          </div>
+          {items.map((item) => (
+            <NavLink
+              key={item.to}
+              to={`${base}/${item.to}`}
+              className={({ isActive }) =>
+                `${styles.link} ${isActive ? styles.linkActive : styles.linkHover}`
+              }
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+        </div>
+      );
+    });
+
   return (
     <aside className={styles.nav}>
       {/* Project-scoped items — only render when inside a project route */}
-      {projectBase &&
-        projectGroups.map((g) => (
-          <div key={g.label}>
-            <div className={styles.group}>
-              <span className={styles.groupLabel}>{g.label}</span>
-            </div>
-            {g.items.map((item) => (
-              <NavLink
-                key={item.to}
-                to={`${projectBase}/${item.to}`}
-                className={({ isActive }) =>
-                  `${styles.link} ${isActive ? styles.linkActive : styles.linkHover}`
-                }
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </NavLink>
-            ))}
-          </div>
-        ))}
+      {projectBase && renderGroups(projectGroups, projectBase, projectScope)}
 
       {/* Tenant-scoped items — always show when inside a tenant.
           When inside a project, show a divider + scope banner so users
@@ -170,26 +218,7 @@ export default function SideNav() {
       {tenantBase && projectBase && (
         <div className={styles.scopeBanner}>Tenant scope — leaves project context</div>
       )}
-      {tenantBase &&
-        tenantGroups.map((g) => (
-          <div key={g.label}>
-            <div className={styles.group}>
-              <span className={styles.groupLabel}>{g.label}</span>
-            </div>
-            {g.items.map((item) => (
-              <NavLink
-                key={item.to}
-                to={`${tenantBase}/${item.to}`}
-                className={({ isActive }) =>
-                  `${styles.link} ${isActive ? styles.linkActive : styles.linkHover}`
-                }
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </NavLink>
-            ))}
-          </div>
-        ))}
+      {tenantBase && renderGroups(tenantGroups, tenantBase, tenantScope)}
     </aside>
   );
 }

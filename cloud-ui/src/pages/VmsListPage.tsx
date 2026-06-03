@@ -33,6 +33,9 @@ import { useListPageStyles } from '../components/list/useListPageStyles';
 import SecretRevealBanner, { type Secret } from '../components/SecretRevealBanner';
 import StatusPill from '../components/StatusPill';
 import VmCreateDrawer, { type VmCreateResult } from '../components/VmCreateDrawer';
+import { useCan } from '../api/useCan';
+import { PermissionTooltip } from '../components/PermissionTooltip';
+import { listErrorMessage } from '../lib/apiError';
 import { fmtDate } from '../lib/date';
 
 interface VirtualMachine {
@@ -54,6 +57,8 @@ export default function VmsListPage() {
   const { dispatchToast } = useToastController(toasterId);
   const { tenantId } = useParams<{ tenantId: string }>();
   const { projectId } = useActiveProject();
+  const { can } = useCan(tenantId, ['compute/virtualMachines/write'], projectId);
+  const canWrite = can('compute/virtualMachines/write');
   const confirmDialog = useConfirmDialog();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [createdSecrets, setCreatedSecrets] = useState<{
@@ -155,13 +160,16 @@ export default function VmsListPage() {
       </div>
 
       <div className={styles.cmdBar}>
-        <Button
-          appearance="primary"
-          icon={<Add20Regular />}
-          onClick={() => setDrawerOpen(true)}
-        >
-          Create virtual machine
-        </Button>
+        <PermissionTooltip when={!canWrite} reason="You need write access on this tenant to create VMs">
+          <Button
+            appearance="primary"
+            icon={<Add20Regular />}
+            onClick={() => setDrawerOpen(true)}
+            disabledFocusable={!canWrite}
+          >
+            Create virtual machine
+          </Button>
+        </PermissionTooltip>
         <Button
           appearance="subtle"
           icon={<ArrowClockwise20Regular />}
@@ -191,7 +199,7 @@ export default function VmsListPage() {
       {vmsQuery.isLoading && <LoadingState label="Loading virtual machines…" />}
 
       {vmsQuery.isError && !vmsQuery.isLoading && (
-        <ErrorState message={`Failed to load VMs: ${(vmsQuery.error as Error).message}`} />
+        <ErrorState message={listErrorMessage(vmsQuery.error, 'virtual machines')} />
       )}
 
       {!vmsQuery.isLoading && !vmsQuery.isError && count === 0 && (
@@ -200,13 +208,16 @@ export default function VmsListPage() {
           title={`No virtual machines in ${tenantId ?? 'this tenant'} yet`}
           description="Create a VM by picking a size, an image, and the subnet it should join."
           action={
-            <Button
-              appearance="primary"
-              icon={<Add20Regular />}
-              onClick={() => setDrawerOpen(true)}
-            >
-              Create virtual machine
-            </Button>
+            <PermissionTooltip when={!canWrite} reason="You need write access on this tenant to create VMs">
+              <Button
+                appearance="primary"
+                icon={<Add20Regular />}
+                onClick={() => setDrawerOpen(true)}
+                disabledFocusable={!canWrite}
+              >
+                Create virtual machine
+              </Button>
+            </PermissionTooltip>
           }
         />
       )}
@@ -245,7 +256,7 @@ export default function VmsListPage() {
                     <RowActionsMenu>
                       <MenuItem
                         onClick={() => onDelete(vm)}
-                        disabled={deleteMutation.isPending || vm.status === 'DELETING'}
+                        disabled={!canWrite || deleteMutation.isPending || vm.status === 'DELETING'}
                       >
                         Delete
                       </MenuItem>

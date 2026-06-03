@@ -38,6 +38,9 @@ import KeyVaultCreateDrawer, { type KeyVaultCreated } from '../components/KeyVau
 import StatusPill from '../components/StatusPill';
 import { EmptyState, ErrorState, LoadingState } from '../components/list/PageStates';
 import { useListPageStyles } from '../components/list/useListPageStyles';
+import { useCan } from '../api/useCan';
+import { PermissionTooltip } from '../components/PermissionTooltip';
+import { listErrorMessage } from '../lib/apiError';
 import { fmtDate } from '../lib/date';
 
 interface KeyVault {
@@ -67,6 +70,8 @@ export default function KeyVaultsListPage() {
   const { dispatchToast } = useToastController(toasterId);
   const { tenantId } = useParams<{ tenantId: string }>();
   const { projectId } = useActiveProject();
+  const { can } = useCan(tenantId, ['keyvault/vaults/write'], projectId);
+  const canWrite = can('keyvault/vaults/write');
   const navigate = useNavigate();
   const confirmDialog = useConfirmDialog();
 
@@ -156,13 +161,16 @@ export default function KeyVaultsListPage() {
       </div>
 
       <div className={styles.cmdBar}>
-        <Button
-          appearance="primary"
-          icon={<Add20Regular />}
-          onClick={() => setCreateOpen(true)}
-        >
-          Create key vault
-        </Button>
+        <PermissionTooltip when={!canWrite} reason="You need write access on this tenant to create key vaults">
+          <Button
+            appearance="primary"
+            icon={<Add20Regular />}
+            onClick={() => setCreateOpen(true)}
+            disabledFocusable={!canWrite}
+          >
+            Create key vault
+          </Button>
+        </PermissionTooltip>
         <Button
           appearance="subtle"
           icon={<ArrowClockwise20Regular />}
@@ -177,7 +185,7 @@ export default function KeyVaultsListPage() {
 
       {kvsQuery.isError && !kvsQuery.isLoading && (
         <ErrorState
-          message={`Failed to load key vaults: ${(kvsQuery.error as Error).message}`}
+          message={listErrorMessage(kvsQuery.error, 'key vaults')}
         />
       )}
 
@@ -187,13 +195,16 @@ export default function KeyVaultsListPage() {
           title="No key vaults in this project yet"
           description="A key vault stores per-project secrets (DB passwords, API keys, certificates). Workloads read them at runtime using the vault's credentials."
           action={
-            <Button
-              appearance="primary"
-              icon={<Add20Regular />}
-              onClick={() => setCreateOpen(true)}
-            >
-              Create key vault
-            </Button>
+            <PermissionTooltip when={!canWrite} reason="You need write access on this tenant to create key vaults">
+              <Button
+                appearance="primary"
+                icon={<Add20Regular />}
+                onClick={() => setCreateOpen(true)}
+                disabledFocusable={!canWrite}
+              >
+                Create key vault
+              </Button>
+            </PermissionTooltip>
           }
         />
       )}
@@ -241,6 +252,7 @@ export default function KeyVaultsListPage() {
                           <MenuItem
                             onClick={() => onDelete(kv)}
                             disabled={
+                              !canWrite ||
                               deleteMutation.isPending ||
                               kv.status === 'DELETING'
                             }

@@ -163,8 +163,12 @@ export default function ProjectSwitcher() {
     );
   }
 
-  // If not inside a project route, or only one project and not admin/owner: bare label
-  const showMenu = projects.length > 1 || canCreate;
+  // Show the picker whenever there's at least one project to select — selecting a
+  // project is navigation, available to any member, NOT an owner/admin action.
+  // (Creating a project is still gated by canCreate, inside the menu.) Without
+  // this, a non-owner in a single-project tenant got a disabled label and could
+  // never enter the project, so the resource nav never appeared.
+  const showMenu = projects.length >= 1 || canCreate;
 
   if (!showMenu) {
     const sole = projects[0];

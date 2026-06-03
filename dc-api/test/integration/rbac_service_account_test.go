@@ -278,7 +278,13 @@ func TestRBAC_ServiceAccount_LastUsedUpdated(t *testing.T) {
 	require.Nil(t, sa.LastUsed, "last_used must be nil before first request")
 
 	// ── Make an authenticated request ─────────────────────────────────────────
-	before := time.Now().UTC().Add(-time.Second) // 1s buffer for clock skew
+	// Reference time from the SAME clock that writes last_used (the database), so
+	// the assertion is immune to host-vs-DB-container clock skew. A Rancher
+	// Desktop / Lima VM can run a couple of seconds behind the macOS host, which
+	// exceeds any fixed host-clock buffer. Minus 1s for ordering slack.
+	var before time.Time
+	require.NoError(t, env.DB.Pool().QueryRow(ctx, "SELECT now()").Scan(&before))
+	before = before.UTC().Add(-time.Second)
 	_, status, err := client.ListVNets(ctx)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status, "SA member must be able to list VNets")

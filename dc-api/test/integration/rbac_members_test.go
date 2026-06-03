@@ -47,13 +47,13 @@ func TestMembers_OwnerCanInviteAndList(t *testing.T) {
 
 	// ── POST → 201 ───────────────────────────────────────────────────────────
 
-	invited, rawBody, status, err := ownerClient.InviteMember(ctx, tenantID, inviteeSub, "member")
+	invited, rawBody, status, err := ownerClient.InviteMember(ctx, tenantID, inviteeSub, "Contributor")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, status,
 		"owner must receive 201 on POST /v1/tenants/{id}/members; body=%s", rawBody)
 	require.Equal(t, "user", invited.PrincipalType)
 	require.Equal(t, inviteeSub, invited.PrincipalID)
-	require.Equal(t, "member", invited.Role)
+	require.Equal(t, "Contributor", invited.RoleDefinition)
 	require.NotEmpty(t, invited.ID, "invited member response must include the role_assignment UUID")
 	require.Equal(t, ownerSub, invited.GrantedBy)
 
@@ -72,16 +72,16 @@ func TestMembers_OwnerCanInviteAndList(t *testing.T) {
 	}
 
 	// Confirm both principals are present.
-	principals := make(map[string]string) // principal_id → role
+	principals := make(map[string]string) // principal_id → role_definition
 	for _, m := range listResp.Members {
-		principals[m.PrincipalID] = m.Role
+		principals[m.PrincipalID] = m.RoleDefinition
 	}
 	require.Contains(t, principals, ownerSub,
 		"owner must appear in member list")
 	require.Contains(t, principals, inviteeSub,
 		"invited member must appear in member list")
-	require.Equal(t, "owner", principals[ownerSub])
-	require.Equal(t, "member", principals[inviteeSub])
+	require.Equal(t, "Owner", principals[ownerSub])
+	require.Equal(t, "Contributor", principals[inviteeSub])
 }
 
 // TestMembers_MemberCannotInvite verifies that a user with only the member role
@@ -100,7 +100,7 @@ func TestMembers_MemberCannotInvite(t *testing.T) {
 	memberClient := NewAPIClient(subEnv.BaseURL, memberToken)
 	ctx := context.Background()
 
-	_, rawBody, status, err := memberClient.InviteMember(ctx, tenantID, someUserSub, "member")
+	_, rawBody, status, err := memberClient.InviteMember(ctx, tenantID, someUserSub, "Contributor")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusForbidden, status,
 		"member must receive 403 on POST /v1/tenants/{id}/members; body=%s", rawBody)
@@ -124,7 +124,7 @@ func TestMembers_OwnerCanRemoveOtherMember(t *testing.T) {
 	ctx := context.Background()
 
 	// Invite the member first.
-	_, _, status, err := ownerClient.InviteMember(ctx, tenantID, inviteeSub, "member")
+	_, _, status, err := ownerClient.InviteMember(ctx, tenantID, inviteeSub, "Contributor")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, status, "invite must succeed")
 
@@ -190,13 +190,13 @@ func TestMembers_InviteDuplicateReturnsConflict(t *testing.T) {
 	ctx := context.Background()
 
 	// First invite → 201.
-	_, rawBody, status, err := ownerClient.InviteMember(ctx, tenantID, inviteeSub, "member")
+	_, rawBody, status, err := ownerClient.InviteMember(ctx, tenantID, inviteeSub, "Contributor")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, status,
 		"first invite must return 201; body=%s", rawBody)
 
 	// Second identical invite → 409.
-	_, rawBody2, status2, err := ownerClient.InviteMember(ctx, tenantID, inviteeSub, "member")
+	_, rawBody2, status2, err := ownerClient.InviteMember(ctx, tenantID, inviteeSub, "Contributor")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusConflict, status2,
 		"duplicate invite must return 409; body=%s", rawBody2)
@@ -221,7 +221,7 @@ func TestMembers_CrossTenantOpsReturn404(t *testing.T) {
 	ctx := context.Background()
 
 	// POST to tenantB → 404.
-	_, rawBody, status, err := ownerClient.InviteMember(ctx, tenantB, "someone@example.com", "member")
+	_, rawBody, status, err := ownerClient.InviteMember(ctx, tenantB, "someone@example.com", "Contributor")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNotFound, status,
 		"cross-tenant POST must return 404; body=%s", rawBody)

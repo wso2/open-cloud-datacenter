@@ -39,6 +39,8 @@ import VnetCreateDrawer from './VnetCreateDrawer';
 import { ReviewSummary } from './wizard/ReviewSummary';
 import { useWizard } from './wizard/CreateWizard';
 import type { ValidationIssue } from './wizard/CreateWizard';
+import { useCan } from '../api/useCan';
+import { PermissionTooltip } from './PermissionTooltip';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -158,6 +160,9 @@ export default function VmCreateDrawer({ open, onClose, onCreated }: VmCreateDra
   const { dispatchToast } = useToastController(toasterId);
   const { tenantId } = useParams<{ tenantId: string }>();
   const { projectId } = useActiveProject();
+  const { can } = useCan(tenantId, ['network/vnets/write', 'network/subnets/write'], projectId);
+  const canCreateVnet = can('network/vnets/write');
+  const canCreateSubnet = can('network/subnets/write');
 
   // Stable ref so mutation callbacks can call wizard.reset() even though the
   // wizard object is declared later in the render body.
@@ -529,17 +534,23 @@ export default function VmCreateDrawer({ open, onClose, onCreated }: VmCreateDra
                       ))}
                     </Dropdown>
                   </Field>
-                  <Link
-                    as="button"
-                    type="button"
-                    onClick={() => setCreateVnetOpen(true)}
-                    style={{
-                      fontSize: tokens.fontSizeBase200,
-                      marginTop: tokens.spacingVerticalXS,
-                    }}
+                  <PermissionTooltip
+                    when={!canCreateVnet}
+                    reason="You need write access on this tenant to create VNets"
                   >
-                    Create new
-                  </Link>
+                    <Link
+                      as="button"
+                      type="button"
+                      onClick={() => setCreateVnetOpen(true)}
+                      disabledFocusable={!canCreateVnet}
+                      style={{
+                        fontSize: tokens.fontSizeBase200,
+                        marginTop: tokens.spacingVerticalXS,
+                      }}
+                    >
+                      Create new
+                    </Link>
+                  </PermissionTooltip>
                 </div>
                 <div>
                   <Field
@@ -579,18 +590,26 @@ export default function VmCreateDrawer({ open, onClose, onCreated }: VmCreateDra
                       ))}
                     </Dropdown>
                   </Field>
-                  <Link
-                    as="button"
-                    type="button"
-                    onClick={() => setCreateSubnetOpen(true)}
-                    disabled={!vnetId || selectedVnet?.status !== 'ACTIVE'}
-                    style={{
-                      fontSize: tokens.fontSizeBase200,
-                      marginTop: tokens.spacingVerticalXS,
-                    }}
+                  <PermissionTooltip
+                    when={!canCreateSubnet}
+                    reason="You need write access on this tenant to create subnets"
                   >
-                    Create new
-                  </Link>
+                    <Link
+                      as="button"
+                      type="button"
+                      onClick={() => setCreateSubnetOpen(true)}
+                      disabled={
+                        canCreateSubnet ? !vnetId || selectedVnet?.status !== 'ACTIVE' : undefined
+                      }
+                      disabledFocusable={!canCreateSubnet}
+                      style={{
+                        fontSize: tokens.fontSizeBase200,
+                        marginTop: tokens.spacingVerticalXS,
+                      }}
+                    >
+                      Create new
+                    </Link>
+                  </PermissionTooltip>
                 </div>
               </>
             )}
@@ -670,15 +689,15 @@ export default function VmCreateDrawer({ open, onClose, onCreated }: VmCreateDra
         <Body1 className={styles.subtitle}>
           Provision a new VM. Provisioning is asynchronous and takes 2-5 minutes.
         </Body1>
-        <wizard.TabList />
+        {wizard.tabList}
       </DrawerHeader>
 
       <DrawerBody className={styles.body}>
-        <wizard.StepContent />
+        {wizard.stepContent}
       </DrawerBody>
 
       <DrawerFooter className={styles.footer}>
-        <wizard.Footer />
+        {wizard.footer}
       </DrawerFooter>
 
       <VnetCreateDrawer

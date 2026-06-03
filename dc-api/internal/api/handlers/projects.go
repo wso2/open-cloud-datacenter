@@ -256,12 +256,59 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Filter to the projects the caller can actually reach. A tenant-scope grant
+	// (or platform admin) covers every project by inheritance and sees them all;
+	// a caller with only project-scope grants sees just those, so other projects'
+	// names don't leak to them.
+	projects, err = h.filterReachableProjects(r, projects)
+	if err != nil {
+		h.log.Error().Err(err).Msg("filter reachable projects")
+		writeError(w, http.StatusInternalServerError, "failed to list projects")
+		return
+	}
+
 	resp := make([]projectResponse, 0, len(projects))
 	for i := range projects {
 		q, _ := h.repo.GetProjectQuota(r.Context(), projects[i].ProjectUUID)
 		resp = append(resp, projectToResponse(&projects[i], q))
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// filterReachableProjects narrows a tenant's project list to those the caller
+// may access. A platform admin or the holder of a tenant-scope grant on this
+// tenant sees all of them (a tenant grant inherits into every project);
+// otherwise the caller sees only the projects they hold a project-scope grant
+// on. Returns an error only on a genuine lookup failure (fail-closed).
+func (h *ProjectHandler) filterReachableProjects(r *http.Request, projects []models.Project) ([]models.Project, error) {
+	if middleware.IsAdminFromContext(r.Context()) {
+		return projects, nil
+	}
+	tenantID, _ := middleware.TenantFromContext(r.Context())
+	pType, pID, ok := middleware.PrincipalFromContext(r.Context())
+	if !ok {
+		return nil, fmt.Errorf("no principal in context")
+	}
+	assignments, err := h.repo.ListRoleAssignmentsForPrincipal(r.Context(), pType, pID)
+	if err != nil {
+		return nil, err
+	}
+	granted := make(map[uuid.UUID]bool)
+	for _, a := range assignments {
+		if a.ScopeType == models.ScopeTypeTenant && a.ScopeID == tenantID {
+			return projects, nil // tenant grant inherits to every project
+		}
+		if a.ScopeType == models.ScopeTypeProject {
+			granted[a.ScopeUUID] = true
+		}
+	}
+	out := make([]models.Project, 0, len(projects))
+	for _, p := range projects {
+		if granted[p.ProjectUUID] {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }
 
 // Get handles GET /v1/tenants/{tenant_id}/projects/{project_id}.
