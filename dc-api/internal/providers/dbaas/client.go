@@ -218,6 +218,16 @@ func (c *Client) GetDatabaseCredentialsSecret(ctx context.Context, namespace, na
 	return out, nil
 }
 
+// DeleteCredentialsSecret removes the credentials Secret from Kubernetes.
+// Idempotent: NotFound is treated as success.
+func (c *Client) DeleteCredentialsSecret(ctx context.Context, namespace, name string) error {
+	err := c.dyn.Resource(secretsGVR).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
 // decodeBase64Maybe returns the base64-decoded bytes of s, or s as bytes
 // when s is not valid base64. K8s API responses sometimes return secret
 // data values already-decoded as []byte and sometimes as base64 strings

@@ -659,6 +659,12 @@ type DatabaseProvisioner interface {
 	// ca_cert, server_cert, ...); the handler picks the subset to surface
 	// on GET .../credentials.
 	GetDatabaseCredentialsSecret(ctx context.Context, namespace, name string) (map[string][]byte, error)
+
+	// DeleteCredentialsSecret removes the credentials Secret from Kubernetes
+	// after it has been read and returned to the caller once. This enforces
+	// the shown-once guarantee at the Kubernetes layer as well as in the db
+	// row. Idempotent: NotFound is treated as success.
+	DeleteCredentialsSecret(ctx context.Context, namespace, name string) error
 }
 
 // DatabaseInstanceCreateRequest is what the handler hands the provisioner.

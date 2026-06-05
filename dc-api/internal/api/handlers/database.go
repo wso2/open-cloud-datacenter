@@ -578,6 +578,15 @@ func (h *DatabaseHandler) Credentials(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Delete the K8s Secret now that credentials have been consumed. Non-fatal:
+	// the db row is already stamped consumed so a retry can't fetch them again;
+	// a lingering Secret is just a minor cleanup gap, not a security failure.
+	if err := h.provisioner.DeleteCredentialsSecret(r.Context(), ns, st.SecretRefName); err != nil {
+		h.log.Error().Err(err).
+			Str("secret", ns+"/"+st.SecretRefName).
+			Msg("delete credentials secret after shown-once fetch (non-fatal)")
+	}
+
 	// dbaas controller writes admin_user/admin_password/ca_cert; map to the
 	// canonical username/password/ca_cert response shape.
 	writeJSON(w, http.StatusOK, databaseCredentialsResponse{
