@@ -214,6 +214,8 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SharedResource"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -476,6 +478,8 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Network"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "500":
