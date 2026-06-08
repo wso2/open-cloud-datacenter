@@ -17,6 +17,10 @@ terraform {
       source  = "hashicorp/null"
       version = "~> 3.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -58,6 +62,29 @@ resource "harvester_image" "vm_image" {
 
 locals {
   image_id = var.image_url != "" ? harvester_image.vm_image[0].id : var.ubuntu_image_id
+
+  # Parse the Harvester kubeconfig so cloud-init can query the Kubernetes API from
+  # inside each VM to discover its virt-launcher pod IP.  In masquerade mode every
+  # VM gets the same internal address (10.0.2.2), so without the pod IP etcd peer
+  # URLs conflict and the secondary nodes can never join.  The pod IPs are unique
+  # and reachable between VMs via the Calico overlay (10.52.x.x range).
+  #
+  # Only parsed when kubeconfig_path is set AND node_count > 1 (single-node has no
+  # etcd peers so the default 10.0.2.2 node-ip is fine).
+  #
+  # try() guards against file("") when kubeconfig_path is empty — Terraform
+  # evaluates both branches of a ternary for errors, so a plain file() call
+  # with an empty-string path would fail even when the condition is false.
+  _kc_content = try(file(var.harvester_kubeconfig_path), "")
+  _kc = (
+    var.node_count > 1 && local._kc_content != ""
+    ? yamldecode(local._kc_content)
+    : null
+  )
+  harvester_api_url  = try(local._kc.clusters[0].cluster.server, "")
+  harvester_ca_b64   = try(local._kc.clusters[0].cluster["certificate-authority-data"], "")
+  harvester_cert_b64 = try(local._kc.users[0].user["client-certificate-data"], "")
+  harvester_key_b64  = try(local._kc.users[0].user["client-key-data"], "")
 }
 
 check "image_source_required" {
@@ -65,6 +92,14 @@ check "image_source_required" {
     condition     = var.image_url != "" || var.ubuntu_image_id != ""
     error_message = "Either image_url (to download a new image) or ubuntu_image_id (to reference an existing one) must be set."
   }
+}
+
+# ── RKE2 cluster join token ───────────────────────────────────────────────────
+# Generated once and stored in Terraform state. All nodes receive the same token
+# via their individual cloud-init secrets so they can form a cluster.
+resource "random_password" "rke2_token" {
+  length  = 64
+  special = false
 }
 
 # ── SSH key pair (greenfield only) ────────────────────────────────────────────
@@ -92,18 +127,35 @@ resource "harvester_cloudinit_secret" "cloudinit" {
   depends_on = [kubernetes_namespace.harvester_ns]
 
   user_data = templatefile("${path.module}/templates/cloud-init.yaml.tpl", {
-    password         = var.vm_password
-    cluster_dns      = var.rancher_hostname
-    rancher_password = var.bootstrap_password
-    ssh_public_key   = tls_private_key.bootstrap_key[0].public_key_openssh
-    node_index       = count.index
-    node_count       = var.node_count
-    lb_ip            = var.ippool_start
-    rke2_version     = var.rke2_version
-    rancher_version  = var.rancher_version
-    tls_source       = var.tls_source
-    tls_cert_b64     = var.tls_source == "secret" ? base64encode(var.tls_cert) : ""
-    tls_key_b64      = var.tls_source == "secret" ? base64encode(var.tls_key) : ""
+    password           = var.vm_password
+    cluster_dns        = var.rancher_hostname
+    rancher_password   = var.bootstrap_password
+    ssh_public_key     = tls_private_key.bootstrap_key[0].public_key_openssh
+    node_index         = count.index
+    node_count         = var.node_count
+    lb_ip              = var.ippool_start
+    rke2_version       = var.rke2_version
+    rancher_version    = var.rancher_version
+    tls_source         = var.tls_source
+    tls_cert_b64       = var.tls_source == "secret" ? base64encode(var.tls_cert) : ""
+    tls_key_b64        = var.tls_source == "secret" ? base64encode(var.tls_key) : ""
+    rke2_cluster_token = random_password.rke2_token.result
+    primary_dns        = var.primary_dns
+    # Pod IP discovery (masquerade) / ConfigMap join coordination (bridge+MetalLB):
+    # both paths use the Harvester Kubernetes API with the embedded kubeconfig creds.
+    harvester_api_url   = local.harvester_api_url
+    harvester_ca_b64    = local.harvester_ca_b64
+    harvester_cert_b64  = local.harvester_cert_b64
+    harvester_key_b64   = local.harvester_key_b64
+    harvester_namespace = var.harvester_namespace
+    # MetalLB: when use_metallb = true, MetalLB is installed on node 0 and the
+    # VIP (ippool_start) is announced via L2 on the VM VLAN instead of using
+    # the Harvester LB controller (which cannot reach bridge-mode VM backends
+    # without inter-VLAN routing from Harvester host nodes to the guest VLAN).
+    use_metallb     = var.use_metallb
+    metallb_version = var.metallb_version
+    metallb_ip      = var.ippool_start
+    vm_name         = var.vm_name
   })
 }
 
@@ -131,6 +183,37 @@ check "existing_cloudinit_secret_name_required" {
   }
 }
 
+# ── Bridge network (greenfield) ───────────────────────────────────────────────
+# Creates a NetworkAttachmentDefinition in harvester_namespace so bridge-mode VMs
+# can attach to it. The NAD name is var.network_name; VMs reference it as
+# "<namespace>/<name>". Set create_bridge_network = false when the NAD already
+# exists (brownfield) and pass the full "<namespace>/<name>" as network_name.
+resource "harvester_network" "bridge" {
+  count = var.network_type == "bridge" && var.create_bridge_network ? 1 : 0
+
+  name                 = var.network_name
+  namespace            = var.harvester_namespace
+  vlan_id              = var.cluster_vlan_id
+  cluster_network_name = var.cluster_network_name
+
+  route_mode    = var.cluster_vlan_gateway != "" ? "manual" : "auto"
+  route_cidr    = var.cluster_vlan_gateway != "" ? var.cluster_vlan_cidr : null
+  route_gateway = var.cluster_vlan_gateway != "" ? var.cluster_vlan_gateway : null
+
+  depends_on = [kubernetes_namespace.harvester_ns]
+}
+
+locals {
+  # Full NAD reference for the VM spec. When we created the NAD ourselves the
+  # name is short (e.g. "rancher-network"); we prefix the namespace. When the
+  # caller owns a pre-existing NAD they must pass the full "<ns>/<name>" form.
+  bridge_network_name = (
+    var.network_type == "bridge" && var.create_bridge_network
+    ? "${var.harvester_namespace}/${var.network_name}"
+    : var.network_name
+  )
+}
+
 # ── Rancher server VM ─────────────────────────────────────────────────────────
 resource "harvester_virtualmachine" "rancher_server" {
   count                = var.node_count
@@ -138,9 +221,12 @@ resource "harvester_virtualmachine" "rancher_server" {
   namespace            = var.harvester_namespace
   restart_after_update = true
 
-  # Storage network must be configured before any VM starts; Harvester rejects
-  # storage-network changes while VMs are running.
-  depends_on = [null_resource.storage_network]
+  # Bridge NAD must exist before the VM; storage-network must be set before any
+  # VM starts (Harvester rejects storage-network changes while VMs are running).
+  depends_on = [
+    null_resource.storage_network,
+    harvester_network.bridge,
+  ]
 
   cpu    = var.vm_cpu
   memory = var.vm_memory
@@ -165,7 +251,7 @@ resource "harvester_virtualmachine" "rancher_server" {
     content {
       name         = var.network_interface_name
       type         = "bridge"
-      network_name = var.network_name
+      network_name = local.bridge_network_name
       mac_address  = var.network_mac_address != "" ? var.network_mac_address : null
     }
   }
@@ -206,7 +292,7 @@ resource "harvester_virtualmachine" "rancher_server" {
 # Set create_lb = false when the Rancher VM is reachable directly via its
 # bridge IP (no dedicated LB/IP-pool needed).
 resource "harvester_loadbalancer" "rancher_lb" {
-  count     = var.create_lb ? 1 : 0
+  count     = var.create_lb && !var.use_metallb ? 1 : 0
   name      = "${var.vm_name}-lb"
   namespace = var.harvester_namespace
 
@@ -248,17 +334,30 @@ resource "harvester_loadbalancer" "rancher_lb" {
     values = harvester_virtualmachine.rancher_server[*].name
   }
 
-  healthcheck {
-    port              = 443
-    success_threshold = 1
-    failure_threshold = 3
-    period_seconds    = 10
-    timeout_seconds   = 5
+  # Health check on port 9345 is safe for masquerade mode: the VIP lives on
+  # mgmt-br which shares L2 with masquerade VM traffic, so probes succeed.
+  # In bridge mode the VIP is on mgmt-br (192.168.11.x) but backends are on
+  # the VLAN (172.24.0.x). The kube-vip probe goes out mgmt-br, hits the
+  # datacenter router, and reaches the VM — but only if inter-VLAN routing is
+  # configured at the switch/router level. When it is not, the probe returns
+  # no response and healthy=0, preventing ANY traffic from being forwarded.
+  # Omitting the healthcheck lets kube-vip treat all backends as healthy and
+  # forward traffic unconditionally, which is safe once the cluster is up, and
+  # lets secondary nodes reach node-0 for the initial join even before 443 is up.
+  dynamic "healthcheck" {
+    for_each = var.network_type == "masquerade" ? [1] : []
+    content {
+      port              = 9345
+      success_threshold = 1
+      failure_threshold = 3
+      period_seconds    = 10
+      timeout_seconds   = 5
+    }
   }
 }
 
 resource "harvester_ippool" "rancher_ips" {
-  count = var.create_lb ? 1 : 0
+  count = var.create_lb && !var.use_metallb ? 1 : 0
   name  = "${var.vm_name}-ips"
 
   range {

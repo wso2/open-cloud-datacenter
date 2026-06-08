@@ -1,5 +1,13 @@
 locals {
-  rancher_lb_ip = var.create_lb ? harvester_loadbalancer.rancher_lb[0].ip_address : var.static_rancher_ip
+  # When use_metallb = true the Harvester LB resource is not created even though
+  # create_lb = true; use ippool_start (the MetalLB VIP) as the canonical IP instead.
+  rancher_lb_ip = (
+    var.create_lb && !var.use_metallb
+    ? harvester_loadbalancer.rancher_lb[0].ip_address
+    : var.use_metallb
+    ? var.ippool_start
+    : var.static_rancher_ip
+  )
 }
 
 output "rancher_hostname" {

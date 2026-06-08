@@ -7,11 +7,20 @@ chpasswd:
 
 ssh_authorized_keys:
   - ${ssh_public_key}
+%{~ if primary_dns != "" }
+
+bootcmd:
+  - mkdir -p /etc/systemd/resolved.conf.d
+  - "echo '[Resolve]' > /etc/systemd/resolved.conf.d/primary-dns.conf"
+  - "echo 'DNS=${primary_dns}' >> /etc/systemd/resolved.conf.d/primary-dns.conf"
+  - systemctl restart systemd-resolved
+%{~ endif }
 
 packages:
   - qemu-guest-agent
   - curl
-  - iptables
+  - avahi-daemon
+  - avahi-utils
 %{~ if tls_source == "secret" }
 
 write_files:
@@ -27,119 +36,135 @@ write_files:
 
 runcmd:
   - systemctl enable --now qemu-guest-agent
-  - sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="console=ttyS0,115200n8 console=tty0"/' /etc/default/grub
-  - update-grub
-
   - |
     (
-      echo "--- Waiting for internet connectivity ---" > /dev/console
-      until curl -s --connect-timeout 5 http://1.1.1.1 > /dev/null; do 
-        echo "Still waiting for internet (http://1.1.1.1)..." > /dev/console
+      until curl -s --connect-timeout 5 http://1.1.1.1 > /dev/null; do
         sleep 5
       done
 
-      echo "--- Starting RKE2 and Rancher Deployment ---" > /dev/console
-      
-      # 1. Install RKE2
       curl -sfL https://get.rke2.io | INSTALL_RKE2_VERSION=${rke2_version} sh -
       mkdir -p /etc/rancher/rke2
+%{~ if node_index == 0 }
 
-      cat <<EOF > /etc/rancher/rke2/config.yaml
-      token: static-bootstrap-token-123
-      $( [ "${node_index}" != "0" ] && echo "server: https://${lb_ip}:9345" )
+      cat > /etc/rancher/rke2/config.yaml <<'RKCFG'
+      token: ${rke2_cluster_token}
+      cluster-init: true
       tls-san:
         - ${lb_ip}
-      etcd-heartbeat-interval: "500"
-      etcd-election-timeout: "5000"
-    EOF
+    RKCFG
+%{~ else }
 
-      systemctl enable rke2-server.service
-%{~ if node_index != 0 }
-
-      # Join nodes: wait until the LB is routing port 9345 before starting.
-      # The LB health check is on port 443 (ingress-nginx), which only passes
-      # once node-0's ingress is up. Waiting here avoids failed join attempts
-      # and the systemd restart loop that follows.
-      echo "Waiting for supervisor endpoint ${lb_ip}:9345 to be routable..."
-      until python3 -c "import socket,sys; s=socket.socket(); s.settimeout(5); s.connect(('${lb_ip}', 9345)); s.close()" 2>/dev/null; do
-        sleep 15
+      # Discover node-0's IP via mDNS — avahi-daemon on node-0 advertises
+      # its hostname (${vm_name}-0.local) on the local VLAN automatically.
+      JOIN_IP=""
+      until JOIN_IP=$(avahi-resolve-host-name -4 ${vm_name}-0.local 2>/dev/null | awk '{print $2}') && [ -n "$JOIN_IP" ]; do
+        sleep 5
       done
-      echo "Supervisor endpoint reachable, joining cluster..."
+
+      cat > /etc/rancher/rke2/config.yaml <<RKCFG
+      token: ${rke2_cluster_token}
+      server: https://$JOIN_IP:9345
+      tls-san:
+        - ${lb_ip}
+    RKCFG
 %{~ endif }
-      systemctl start rke2-server.service
 
-      # 2. IMMEDIATE kubectl download
-      echo "Downloading kubectl..."
-      curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-      install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      systemctl enable rke2-server
+      systemctl start rke2-server
 
-      # 3. Wait for Config & API
-      echo "Waiting for rke2.yaml..."
-      until [ -f /etc/rancher/rke2/rke2.yaml ]; do sleep 10; done
+      until [ -f /etc/rancher/rke2/rke2.yaml ]; do sleep 5; done
+      ln -sf /var/lib/rancher/rke2/bin/kubectl /usr/local/bin/kubectl
       export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
-      
-      # 4. Setup User Context
       mkdir -p /home/ubuntu/.kube
       cp /etc/rancher/rke2/rke2.yaml /home/ubuntu/.kube/config
       chown -R ubuntu:ubuntu /home/ubuntu/.kube
       chmod 600 /home/ubuntu/.kube/config
+%{~ if node_index == 0 }
 
-      # 5. Wait for Node Readiness
-      echo "Waiting for nodes to be Ready..."
-      until /usr/local/bin/kubectl get nodes | grep -v "NotReady" | grep -q "Ready"; do sleep 10; done
+      until [ "$(kubectl get nodes --no-headers 2>/dev/null | grep -c ' Ready')" -ge "${node_count}" ]; do
+        sleep 15
+      done
+%{~ if use_metallb }
 
-      if [ "${node_index}" -eq "0" ]; then
-        echo "Initializing Rancher..."
-        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-        /usr/local/bin/helm repo add rancher-latest https://releases.rancher.com/server-charts/latest
-        /usr/local/bin/helm repo update
-        
-        # 6. Two-Stage Ingress Wait (Corrected for DaemonSet)
-        echo "Waiting for Ingress DaemonSet existence..."
-        until /usr/local/bin/kubectl get ds rke2-ingress-nginx-controller -n kube-system; do sleep 10; done
-        
-        echo "Waiting for Ingress DaemonSet pods to be Ready..."
-        until [ "$(/usr/local/bin/kubectl get ds rke2-ingress-nginx-controller -n kube-system -o jsonpath='{.status.numberReady}')" = "$(/usr/local/bin/kubectl get ds rke2-ingress-nginx-controller -n kube-system -o jsonpath='{.status.desiredNumberScheduled}')" ]; do
-          echo "Waiting for Ingress pods... (Ready vs Desired)"
-          sleep 10
-        done
-        
-        # Settle time for the Admission Webhook Service
-        sleep 30 
-        
-        # 7. Cert-Manager
-        /usr/local/bin/kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
-        /usr/local/bin/kubectl wait --for=condition=Available --timeout=600s deployment/cert-manager-webhook -n cert-manager
+      kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/${metallb_version}/config/manifests/metallb-native.yaml
+      kubectl -n metallb-system rollout status deployment/controller --timeout=300s
+      sleep 15
+
+      kubectl apply -f - <<'METALLB'
+      apiVersion: metallb.io/v1beta1
+      kind: IPAddressPool
+      metadata:
+        name: rancher-pool
+        namespace: metallb-system
+      spec:
+        addresses:
+          - ${metallb_ip}/32
+    METALLB
+
+      kubectl apply -f - <<'L2ADV'
+      apiVersion: metallb.io/v1beta1
+      kind: L2Advertisement
+      metadata:
+        name: rancher-l2
+        namespace: metallb-system
+      spec:
+        ipAddressPools:
+          - rancher-pool
+    L2ADV
+
+      until kubectl -n kube-system get ds rke2-ingress-nginx-controller &>/dev/null; do sleep 5; done
+      kubectl -n kube-system rollout status daemonset/rke2-ingress-nginx-controller --timeout=300s
+
+      kubectl apply -f - <<'INGRESSLB'
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: rke2-ingress-lb
+        namespace: kube-system
+        annotations:
+          metallb.universe.tf/loadBalancerIPs: ${metallb_ip}
+      spec:
+        type: LoadBalancer
+        selector:
+          app.kubernetes.io/name: rke2-ingress-nginx
+        ports:
+          - name: http
+            port: 80
+            targetPort: 80
+          - name: https
+            port: 443
+            targetPort: 443
+    INGRESSLB
+%{~ endif }
+
+      kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
+      kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=600s
 %{~ if tls_source == "secret" }
 
-        # 8a. Pre-create TLS secret so Rancher Helm finds it on first install
-        /usr/local/bin/kubectl create namespace cattle-system --dry-run=client -o yaml | /usr/local/bin/kubectl apply -f -
-        /usr/local/bin/kubectl create secret tls tls-rancher-ingress \
-          --cert=/tmp/rancher-tls.crt \
-          --key=/tmp/rancher-tls.key \
-          -n cattle-system \
-          --dry-run=client -o yaml | /usr/local/bin/kubectl apply -f -
-        rm -f /tmp/rancher-tls.crt /tmp/rancher-tls.key
+      kubectl create namespace cattle-system --dry-run=client -o yaml | kubectl apply -f -
+      kubectl create secret tls tls-rancher-ingress \
+        --cert=/tmp/rancher-tls.crt --key=/tmp/rancher-tls.key \
+        -n cattle-system --dry-run=client -o yaml | kubectl apply -f -
+      rm -f /tmp/rancher-tls.crt /tmp/rancher-tls.key
 %{~ endif }
 
-        # 8. Rancher Installation Loop
-        i=1; while [ $i -le 10 ]; do
-          echo "Rancher install attempt $i..."
-          /usr/local/bin/helm upgrade --install rancher rancher-latest/rancher \
-            --namespace cattle-system \
-            --create-namespace \
+      curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      helm repo add rancher-latest https://releases.rancher.com/server-charts/latest
+      helm repo update
+
+      for i in $(seq 1 10); do
+        helm upgrade --install rancher rancher-latest/rancher \
+          --namespace cattle-system --create-namespace \
 %{~ if rancher_version != "" }
-            --version ${rancher_version} \
+          --version ${rancher_version} \
 %{~ endif }
-            --set hostname=${cluster_dns} \
-            --set bootstrapPassword=${rancher_password} \
-            --set replicas=${node_count} \
-            --set global.cattle.psp.enabled=false \
-            --set startupProbe.failureThreshold=60 \
-            --set ingress.tls.source=${tls_source} \
-            --wait --timeout 15m && break
-          i=$((i+1)); sleep 30
-        done
-      fi
-      echo "--- Deployment Script Finished ---" > /dev/console
-    ) > /var/log/rancher-install.log 2>&1 &
+          --set hostname=${cluster_dns} \
+          --set bootstrapPassword=${rancher_password} \
+          --set replicas=${node_count} \
+          --set global.cattle.psp.enabled=false \
+          --set ingress.tls.source=${tls_source} \
+          --wait --timeout 15m && break
+        sleep 30
+      done
+%{~ endif }
+    ) >> /var/log/rancher-install.log 2>&1 &

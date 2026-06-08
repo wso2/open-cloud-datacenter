@@ -112,22 +112,33 @@ variable "network_mac_address" {
   default     = ""
 }
 
-# Kept for backwards-compatibility (used in VLAN creation — currently disabled in the module).
+variable "create_bridge_network" {
+  type        = bool
+  description = "When true, creates a harvester_network (NetworkAttachmentDefinition) named network_name in harvester_namespace before the VMs start. Set false when the NAD already exists (brownfield) — in that case network_name must be the full '<namespace>/<name>' reference."
+  default     = false
+}
+
 variable "cluster_network_name" {
   type        = string
-  description = "Name of the base cluster network in Harvester (e.g. 'mgmt')"
+  description = "Harvester cluster network the VLAN is attached to (e.g. 'mgmt'). Used when create_bridge_network = true."
   default     = "mgmt"
 }
 
 variable "cluster_vlan_id" {
   type        = number
-  description = "VLAN tag ID for the bootstrap node network"
+  description = "VLAN tag ID for the bridge network. Used when create_bridge_network = true."
   default     = 100
 }
 
 variable "cluster_vlan_gateway" {
   type        = string
-  description = "Gateway IP for the new VLAN (optional)"
+  description = "Default gateway IP for the bridge VLAN route. Leave empty to omit the route block. Used when create_bridge_network = true."
+  default     = ""
+}
+
+variable "cluster_vlan_cidr" {
+  type        = string
+  description = "CIDR for the bridge VLAN route (e.g. '0.0.0.0/0'). Required when cluster_vlan_gateway is set. Used when create_bridge_network = true."
   default     = ""
 }
 
@@ -328,4 +339,22 @@ variable "rancher_version" {
   type        = string
   description = "Rancher Helm chart version (e.g. '2.14.0'). Leave empty to install the latest stable release."
   default     = ""
+}
+
+variable "primary_dns" {
+  type        = string
+  description = "Primary DNS server IP (e.g. '8.8.8.8'). When set, this server is configured as the primary resolver via systemd-resolved before any downloads start; DHCP-assigned nameservers remain as secondary. Leave empty to use DHCP DNS only."
+  default     = ""
+}
+
+variable "use_metallb" {
+  type        = bool
+  description = "When true, skip the Harvester LB/IPPool and instead install MetalLB inside the RKE2 cluster. The MetalLB VIP is taken from ippool_start. Designed for bridge-mode clusters where the Harvester LB controller cannot reach VM-network backends due to missing inter-VLAN routing."
+  default     = false
+}
+
+variable "metallb_version" {
+  type        = string
+  description = "MetalLB manifest version to install (e.g. 'v0.14.9'). Only used when use_metallb = true."
+  default     = "v0.14.9"
 }
