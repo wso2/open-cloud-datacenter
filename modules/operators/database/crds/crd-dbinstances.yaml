@@ -1,0 +1,472 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: dbinstances.dbaas.opencloud.wso2.com
+spec:
+  group: dbaas.opencloud.wso2.com
+  names:
+    kind: DBInstance
+    listKind: DBInstanceList
+    plural: dbinstances
+    shortNames:
+    - dbi
+    singular: dbinstance
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.dbInstanceClass
+      name: Class
+      type: string
+    - jsonPath: .status.endpoint.address
+      name: Endpoint
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          DBInstance represents a managed PostgreSQL database on Harvester HCI.
+          Namespaced — each DBInstance lives in a tenant namespace. All Harvester
+          child resources (VM, DataVolume, Secret, Service, ServiceMonitor) are
+          created in the same namespace as the DBInstance.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              DBInstanceSpec defines the desired state of a managed PostgreSQL database.
+
+              Field support status (v1alpha1):
+                - implemented mutable post-create: dbInstanceClass, allocatedStorage,
+                  running, deletionProtection
+                - implemented immutable post-create (modify is refused): networkRef,
+                  osImage, dbName, masterUsername, port, storageType, staticNetwork,
+                  vmPassword, engineVersion
+                - NOT IMPLEMENTED: manageMasterUserPassword, masterUserPasswordRef,
+                  multiAZ, dbParameterGroupRef, tags, s3BackupConfig,
+                  backupRetentionPeriod, preferredBackupWindow. These fields exist in
+                  the schema for forward compatibility but the reconciler does not
+                  apply them. See ARCHITECTURE.md for the roadmap.
+            properties:
+              allocatedStorage:
+                description: |-
+                  AllocatedStorage in GiB.
+                  Mutable: changing this on an Available instance resizes the pgdata
+                  DataVolume (only larger values are accepted by CDI/Longhorn).
+                minimum: 1
+                type: integer
+              backupRetentionPeriod:
+                description: |-
+                  BackupRetentionPeriod in days. 0 (default) = disabled.
+                  NOT YET IMPLEMENTED: no pgBackRest install, schedule, or retention
+                  enforcement runs today. The field is recorded but inert.
+                minimum: 0
+                type: integer
+              dbInstanceClass:
+                description: |-
+                  DBInstanceClass maps to VM CPU/RAM. e.g. "db.t3.medium", "db.m5.large".
+                  Mutable: changing the class on an Available instance resizes the VM.
+                minLength: 1
+                type: string
+              dbName:
+                description: |-
+                  DBName is the initial database to create. Default: the instance name.
+                  Must follow PostgreSQL identifier rules: start with a letter or
+                  underscore, contain only letters, digits, underscores, or "$",
+                  max 63 characters. The reconciler also double-quotes this identifier
+                  when emitting CREATE DATABASE; the regex catches invalid values at
+                  apply time so failures don't appear later inside cloud-init.
+                  Immutable after first reconcile; modify is refused.
+                maxLength: 63
+                pattern: ^[a-zA-Z_][a-zA-Z0-9_$]{0,62}$
+                type: string
+              dbParameterGroupRef:
+                description: |-
+                  DBParameterGroupRef references a DBParameterGroup by name.
+                  NOT YET IMPLEMENTED — the DBParameterGroup CRD does not exist in this
+                  module.
+                type: string
+              deletionProtection:
+                description: |-
+                  DeletionProtection prevents accidental deletion. While true, the
+                  finalizer refuses to tear the instance down.
+                  Mutable.
+                type: boolean
+              dnsServerIP:
+                description: |-
+                  DNSServerIP, when set, pins the VM's resolver via KubeVirt
+                  dnsPolicy=None + dnsConfig.nameservers. Required on Kube-OVN VPC
+                  subnets: KubeVirt's bridge-mode virt-launcher runs an internal DHCP
+                  server that otherwise copies the launcher pod's cluster resolv.conf
+                  (unreachable cluster DNS) into the VM, so the VM can't resolve the apt
+                  archive and cloud-init's package install fails. The control plane
+                  (dc-api) supplies the per-VPC CoreDNS address here. Empty leaves
+                  KubeVirt's default DNS behaviour (correct for cluster-routable VLANs).
+                type: string
+              engineVersion:
+                description: |-
+                  EngineVersion is the PostgreSQL major version, e.g. "16".
+                  NOT YET IMPLEMENTED: cloud-init installs whatever PostgreSQL the OS
+                  image's apt repo provides (Ubuntu 24.04 → PG 16; older → older). The
+                  field is recorded but does not drive package selection.
+                type: string
+              manageMasterUserPassword:
+                description: |-
+                  ManageMasterUserPassword: if true, auto-generate the admin password
+                  and store it in the credentials Secret; if false, read it from
+                  MasterUserPasswordRef.
+                  NOT YET IMPLEMENTED: the controller always generates a random password
+                  regardless of this field's value, and never reads
+                  MasterUserPasswordRef. The fields are reserved.
+                type: boolean
+              masterUserPasswordRef:
+                description: |-
+                  MasterUserPasswordRef points to a K8s Secret containing the
+                  user-supplied admin password.
+                  NOT YET IMPLEMENTED — see ManageMasterUserPassword.
+                properties:
+                  key:
+                    type: string
+                  name:
+                    type: string
+                required:
+                - key
+                - name
+                type: object
+              masterUsername:
+                description: |-
+                  MasterUsername for the admin user. Default "dbadmin".
+                  Must follow PostgreSQL identifier rules: start with a letter or
+                  underscore, contain only letters, digits, underscores, or "$",
+                  max 63 characters. The reconciler also double-quotes this identifier
+                  when emitting CREATE ROLE; the regex catches invalid values at
+                  apply time so failures don't appear later inside cloud-init.
+                  Immutable after first reconcile.
+                maxLength: 63
+                pattern: ^[a-zA-Z_][a-zA-Z0-9_$]{0,62}$
+                type: string
+              multiAZ:
+                description: |-
+                  MultiAZ enables Patroni HA with a standby VM.
+                  NOT YET IMPLEMENTED — no standby is created.
+                type: boolean
+              networkRef:
+                description: |-
+                  NetworkRef is a Harvester NAD reference (namespace/name) for the VLAN
+                  network the database VM attaches to. This is the VM's only network
+                  interface: client traffic, package install during cloud-init, and the
+                  Prometheus metrics scrape all go through it. The NAD must already exist
+                  on the cluster (the controller does not create networks) and the VLAN
+                  must have internet egress.
+                  Immutable after first reconcile.
+                  Example: "iaas-net/vm-subnet-001".
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?\/[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+              osImage:
+                description: |-
+                  OSImage is the Harvester VirtualMachineImage to clone for the VM's
+                  OS disk. Either "<ns>/<name>" or just "<name>" (resolved in the
+                  "default" namespace), or the image's spec.displayName.
+                  Immutable after first reconcile.
+                type: string
+              port:
+                description: |-
+                  Port for PostgreSQL. Default 5432.
+                  Immutable after first reconcile.
+                maximum: 65535
+                minimum: 1
+                type: integer
+              preferredBackupWindow:
+                description: |-
+                  PreferredBackupWindow in UTC, e.g. "02:00-03:00".
+                  NOT YET IMPLEMENTED — see BackupRetentionPeriod.
+                pattern: ^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$
+                type: string
+              running:
+                default: true
+                description: |-
+                  Running controls the VM power state. false = stopped (storage preserved).
+                  Mutable: toggling sets KubeVirt spec.running on the underlying VM.
+                type: boolean
+              s3BackupConfig:
+                description: |-
+                  S3BackupConfig for pgBackRest S3 target.
+                  NOT YET IMPLEMENTED — values are written to /etc/dbaas/bootstrap.env
+                  on the VM but no backup process consumes them.
+                properties:
+                  bucket:
+                    type: string
+                  endpoint:
+                    type: string
+                  region:
+                    type: string
+                  secretRef:
+                    description: SecretRef is a K8s Secret name with accessKey + secretKey.
+                    type: string
+                required:
+                - bucket
+                - endpoint
+                - secretRef
+                type: object
+              staticNetwork:
+                description: |-
+                  StaticNetwork, when set, configures the VM's data NIC with a static
+                  IPv4 address, gateway, and DNS servers instead of running DHCP. Use
+                  this on VLANs that don't have a DHCP server reachable from the VM.
+                  When nil, cloud-init runs DHCP on the data NIC (the default).
+                  Immutable after first reconcile (in-VM netplan reconfiguration is not
+                  implemented).
+                properties:
+                  address:
+                    description: Address is the IPv4 address with CIDR prefix, e.g.
+                      "192.168.40.50/24".
+                    pattern: ^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}\/(3[0-2]|[12]?\d)$
+                    type: string
+                  gateway:
+                    description: Gateway is the IPv4 default gateway, e.g. "192.168.40.1".
+                    pattern: ^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$
+                    type: string
+                  nameservers:
+                    description: |-
+                      Nameservers are the DNS server IPs the VM should use. Supply at
+                      least one — cloud-init will fail to resolve apt mirrors without DNS.
+                    items:
+                      type: string
+                    minItems: 1
+                    type: array
+                  searchDomains:
+                    description: SearchDomains are DNS search-domain suffixes. Optional.
+                    items:
+                      type: string
+                    type: array
+                required:
+                - address
+                - gateway
+                - nameservers
+                type: object
+              storageType:
+                description: |-
+                  StorageType maps to a Longhorn StorageClass. Default "longhorn".
+                  Immutable after first reconcile (StorageClass cannot change on a
+                  bound PVC).
+                type: string
+              tags:
+                additionalProperties:
+                  type: string
+                description: |-
+                  Tags are user-defined labels.
+                  NOT YET IMPLEMENTED — not propagated to child resources or dashboards.
+                type: object
+              vmPassword:
+                description: |-
+                  VMPassword sets the default console/SSH password for the VM user
+                  (ubuntu). For development and debugging only — leave empty in
+                  production. Immutable after first reconcile.
+                type: string
+            required:
+            - allocatedStorage
+            - dbInstanceClass
+            - networkRef
+            type: object
+          status:
+            description: DBInstanceStatus defines the observed state of a DBInstance.
+            properties:
+              appliedSpec:
+                description: |-
+                  AppliedSpec is the snapshot of immutable-after-create spec fields
+                  captured at first successful reconcile. The reconciler refuses to
+                  advance ObservedGeneration when any of these fields differ from the
+                  current spec, because the implementation cannot carry the change
+                  through to the running database. Used for honest modify semantics.
+                properties:
+                  dbName:
+                    type: string
+                  engineVersion:
+                    type: string
+                  masterUsername:
+                    type: string
+                  networkRef:
+                    type: string
+                  osImage:
+                    type: string
+                  port:
+                    type: integer
+                  storageType:
+                    type: string
+                type: object
+              caCertPem:
+                description: CACertPEM is the generated CA for SSL verification.
+                type: string
+              conditions:
+                description: Conditions for each sub-resource.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              endpoint:
+                description: Endpoint is populated when the database is reachable.
+                properties:
+                  address:
+                    type: string
+                  jdbcUrl:
+                    type: string
+                  port:
+                    type: integer
+                required:
+                - address
+                - port
+                type: object
+              grafanaUrl:
+                description: GrafanaURL is the per-instance Grafana dashboard URL.
+                type: string
+              masterUserSecret:
+                description: MasterUserSecret references the K8s Secret with credentials.
+                properties:
+                  name:
+                    type: string
+                  status:
+                    description: Status is "active" or "impaired".
+                    type: string
+                required:
+                - name
+                - status
+                type: object
+              message:
+                description: Message is a human-readable description of the current
+                  state.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration tracks which spec version has been
+                  reconciled.
+                format: int64
+                type: integer
+              phase:
+                description: Phase matches RDS DBInstanceStatus strings.
+                type: string
+              prometheusTarget:
+                description: PrometheusTarget is the scrape target for the instance's
+                  metrics exporter.
+                type: string
+              provisioningPhase:
+                description: ProvisioningPhase tracks which reconcile step we're on.
+                type: string
+              readReplicas:
+                description: ReadReplicas tracks child replica identifiers.
+                items:
+                  type: string
+                type: array
+              resources:
+                description: Resources tracks every Harvester object created for cleanup
+                  and idempotency.
+                properties:
+                  cloudInitSecretName:
+                    description: |-
+                      CloudInitSecretName is the ephemeral Secret that holds cloud-init
+                      userdata and networkdata. It is deleted by the controller as soon as
+                      the VM reaches Available so the installation script and embedded
+                      passwords are not left on-cluster indefinitely.
+                    type: string
+                  dataVolumeName:
+                    type: string
+                  metricsServiceName:
+                    description: |-
+                      MetricsServiceName is the headless Service Prometheus scrapes through.
+                      Tracked separately from ServiceMonitor so the finalizer's TeardownAll
+                      can delete it (forgetting it leaves orphan Services in the tenant ns).
+                    type: string
+                  nadName:
+                    description: |-
+                      NADName is the Multus NetworkAttachmentDefinition the VM's data NIC
+                      attaches to. The controller does not create the NAD; this just records
+                      the reference from spec.networkRef so callers can see it on the CR.
+                    type: string
+                  secretName:
+                    type: string
+                  serviceMonitor:
+                    type: string
+                  vmName:
+                    type: string
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
