@@ -4,7 +4,9 @@ resources:
   - dc-api/base
   - dc-postgres/base
   - cloud-ui/base
-  - arc/base
+  # arc/base (self-hosted GitHub Actions runner) retired — superseded by the
+  # GitOps model: image builds run on GitHub-hosted runners, deploys are done
+  # by Flux, so the in-cluster push-deploy runner has no remaining job.
 
 # keyvault-operator is NOT here. KVI controller + OpenBao instances
 # run on the Harvester cluster (per docs/kvi-controller-design.md),

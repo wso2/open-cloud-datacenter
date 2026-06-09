@@ -473,21 +473,7 @@ cmd_init() {
   auto_or_ask ocd_ref             "OCD pin (tag or branch)"   "flux-bootstrap"   "ocd_ref"           "spike/flux-gitops"
   auto_or_ask git_branch          "Consumer-repo branch"      "flux-bootstrap"   "git_branch"        "spike/flux-gitops"
 
-  # Used to render the ARC dc-runner HelmRelease's githubConfigUrl
-  # patch. THIS IS THE SOURCE REPO WHERE CI WORKFLOWS LIVE — not the
-  # consumer/Flux state repo. ARC registers runners per-repo; a
-  # workflow in repo-A whose `runs-on: dc-runner` won't match a
-  # runner registered to repo-B.
-  #
-  # Read from the 06-flux-bootstrap layer's `runner_github_owner` +
-  # `runner_github_repo` outputs (consumer sets these in tfvars).
-  # Falls back to prompt if those outputs aren't set yet.
-  echo
-  echo "  ℹ  ARC runner repo: the SOURCE repo where your CI workflows live"
-  echo "     (.github/workflows/*.yaml). NOT the consumer/Flux-state repo."
-  echo "     Auto-resolved from 06-flux-bootstrap tfvars when set there."
-  auto_or_ask runner_github_owner "GitHub owner of the SOURCE repo (where workflows live)" "flux-bootstrap" "runner_github_owner" "" "$SLUG_RE"
-  auto_or_ask runner_github_repo  "GitHub repo name of the SOURCE repo"                   "flux-bootstrap" "runner_github_repo"  "" "$SLUG_RE"
+  # dc-runner retired (no arc/base in flux/platform) — no runner_github_* needed.
   auto_or_ask dc_api_tag          "Initial dc-api image tag"  "flux-bootstrap"   "dc_api_initial_tag"           "latest"
   auto_or_ask cloud_ui_tag        "Initial cloud-ui image tag" "flux-bootstrap"  "cloud_ui_initial_tag"         "latest"
   # keyvault-operator image tag is set by the TF module that deploys
@@ -521,8 +507,6 @@ cmd_init() {
       -e "s|ref=v0\\.9\\.0|ref=$ocd_ref|g" \
       -e "s|github.com/wso2/open-cloud-datacenter|github.com/$ocd_owner/$ocd_repo|g" \
       -e "s|    tag: v0\\.9\\.0|    $ocd_ref_field: $ocd_ref|g" \
-      -e "s|CHANGE-ME-github-owner|$runner_github_owner|g" \
-      -e "s|CHANGE-ME-github-repo|$runner_github_repo|g" \
       "$src" > "$dst"
     echo "  wrote $dst"
   }
@@ -645,13 +629,7 @@ cmd_seal() {
   echo "     Used by dc-system + flux-system to pull images."
   ask_secret ghcr_pat                  "GHCR personal-access token (read:packages)"
 
-  echo
-  echo "  ℹ  Runner PAT: SEPARATE classic GitHub PAT for the ARC self-hosted runner"
-  echo "     to register itself on the consumer repo. Generate at:"
-  echo "       https://github.com/settings/tokens (classic)  →  scope: repo"
-  echo "     Kept separate from the GHCR PAT for least-privilege: the runner PAT"
-  echo "     can register/deregister runners + read issues; the pull PAT only reads packages."
-  ask_secret runner_pat                "GitHub PAT for ARC runner registration (repo scope)"
+  # Runner PAT prompt removed — dc-runner retired (no arc/base in flux/platform).
 
   echo
   echo "  ℹ  Ingress TLS cert (covers both $dcapi_hostname and $cloudui_hostname)"
@@ -728,11 +706,7 @@ cmd_seal() {
   # keyvault-system pull secret removed — KVI runs on Harvester
   # (TF-deployed), not on dcapi-controlplane.
 
-  # GitHub runner PAT — read by the ARC runner scale-set HelmRelease in
-  # arc-runners. The key name `github_token` matches what the
-  # gha-runner-scale-set chart expects when `githubConfigSecret: github-runner-pat`.
-  seal github-runner-pat arc-runners \
-       --from-literal=github_token="$runner_pat"
+  # GitHub runner PAT seal removed — dc-runner retired (no arc/base in flux/platform).
 
   # dc-api-tls
   if [[ "$tls_source" == "b" ]]; then
@@ -775,7 +749,6 @@ cmd_seal() {
       print "  - ./sealed-dc-api-tls.yaml"
       print "  - ./sealed-ghcr-pull-secret.yaml"
       print "  - ./sealed-ghcr-pull-secret-flux-system.yaml"
-      print "  - ./sealed-github-runner-pat.yaml"
       skip = 1
       next
     }
