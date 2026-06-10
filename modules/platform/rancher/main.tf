@@ -24,10 +24,6 @@ terraform {
   }
 }
 
-# ── Harvester namespace ───────────────────────────────────────────────────────
-# Creates a dedicated namespace for bootstrap resources when harvester_namespace
-# is not "default". Labelled as infrastructure so the namespace-credential-
-# provisioner skips it (it only provisions credentials for tenant namespaces).
 resource "kubernetes_namespace" "harvester_ns" {
   count = var.harvester_namespace != "default" ? 1 : 0
   metadata {
@@ -36,15 +32,11 @@ resource "kubernetes_namespace" "harvester_ns" {
       "platform.wso2.com/role" = "infrastructure"
     }
   }
-
   lifecycle {
     ignore_changes = [metadata[0].annotations]
   }
 }
 
-# ── Cloud image ───────────────────────────────────────────────────────────────
-# Downloads and registers the image when image_url is provided.
-# Set ubuntu_image_id instead to reference a pre-existing image (brownfield).
 resource "harvester_image" "vm_image" {
   count        = var.image_url != "" ? 1 : 0
   name         = var.image_name
@@ -63,21 +55,9 @@ resource "harvester_image" "vm_image" {
 locals {
   image_id = var.image_url != "" ? harvester_image.vm_image[0].id : var.ubuntu_image_id
 
-  # Parse the Harvester kubeconfig so cloud-init can query the Kubernetes API from
-  # inside each VM to discover its virt-launcher pod IP.  In masquerade mode every
-  # VM gets the same internal address (10.0.2.2), so without the pod IP etcd peer
-  # URLs conflict and the secondary nodes can never join.  The pod IPs are unique
-  # and reachable between VMs via the Calico overlay (10.52.x.x range).
-  #
-  # Only parsed when kubeconfig_path is set AND node_count > 1 (single-node has no
-  # etcd peers so the default 10.0.2.2 node-ip is fine).
-  #
-  # try() guards against file("") when kubeconfig_path is empty — Terraform
-  # evaluates both branches of a ternary for errors, so a plain file() call
-  # with an empty-string path would fail even when the condition is false.
   _kc_content = try(file(var.harvester_kubeconfig_path), "")
   _kc = (
-    var.node_count > 1 && local._kc_content != ""
+    var.node_count > 1 && length(var.node_pools) == 0 && local._kc_content != ""
     ? yamldecode(local._kc_content)
     : null
   )
@@ -85,25 +65,93 @@ locals {
   harvester_ca_b64   = try(local._kc.clusters[0].cluster["certificate-authority-data"], "")
   harvester_cert_b64 = try(local._kc.users[0].user["client-certificate-data"], "")
   harvester_key_b64  = try(local._kc.users[0].user["client-key-data"], "")
+
+  # ── Static node pool helpers ─────────────────────────────────────────────────
+  _static_nodes_flat = flatten([
+    for pool_idx, pool in var.node_pools : [
+      for ip_idx, ip in pool.ips : {
+        key           = "${pool.name}-${ip_idx}"
+        pool_name     = pool.name
+        pool_idx      = pool_idx
+        ip            = ip
+        ip_idx        = ip_idx
+        control_plane = pool.control_plane
+        etcd          = pool.etcd
+        worker        = pool.worker
+      }
+    ]
+  ])
+
+  _cp_nodes     = [for n in local._static_nodes_flat : n if n.control_plane]
+  _first_cp_key = length(local._cp_nodes) > 0 ? local._cp_nodes[0].key : ""
+  _first_cp_ip  = length(local._cp_nodes) > 0 ? local._cp_nodes[0].ip : ""
+
+  static_node_map = {
+    for n in local._static_nodes_flat : n.key => merge(n, {
+      is_init = n.key == local._first_cp_key
+    })
+  }
+
+  use_static_nodes = length(var.node_pools) > 0
+  cp_node_count    = length(local._cp_nodes)
+  total_node_count = local.use_static_nodes ? length(local._static_nodes_flat) : var.node_count
+
+  # Join address for secondary nodes: nginx LB or first CP node IP
+  join_address = var.use_nginx_lb ? var.nginx_lb_ip : local._first_cp_ip
+
+  # Effective LB IP for tls-san and rancher_lb_ip output
+  effective_lb_ip = (
+    var.use_nginx_lb ? var.nginx_lb_ip :
+    var.create_lb ? var.ippool_start :
+    var.static_rancher_ip
+  )
+
+  bridge_network_name = (
+    var.network_type == "bridge" && var.create_bridge_network
+    ? "${var.harvester_namespace}/${var.network_name}"
+    : var.network_name
+  )
+
+  ssh_key_ids = var.create_ssh_key ? [harvester_ssh_key.bootstrap_key[0].id] : var.ssh_key_ids
+
+  # Shared cloud-init template variables
+  _common_ci_vars = {
+    password           = var.vm_password
+    cluster_dns        = var.rancher_hostname
+    rancher_password   = var.bootstrap_password
+    ssh_public_key     = var.create_ssh_key ? tls_private_key.bootstrap_key[0].public_key_openssh : ""
+    rke2_version       = var.rke2_version
+    rancher_version    = var.rancher_version
+    tls_source         = var.use_nginx_lb ? "rancher" : var.tls_source
+    tls_cert_b64       = (!var.use_nginx_lb && var.tls_source == "secret") ? base64encode(var.tls_cert) : ""
+    tls_key_b64        = (!var.use_nginx_lb && var.tls_source == "secret") ? base64encode(var.tls_key) : ""
+    rke2_cluster_token = random_password.rke2_token.result
+    dns_servers        = var.dns_servers
+    lb_ip              = local.effective_lb_ip
+    use_nginx_lb       = var.use_nginx_lb
+    use_rancher_prime  = var.use_rancher_prime
+  }
 }
 
 check "image_source_required" {
   assert {
     condition     = var.image_url != "" || var.ubuntu_image_id != ""
-    error_message = "Either image_url (to download a new image) or ubuntu_image_id (to reference an existing one) must be set."
+    error_message = "Either image_url or ubuntu_image_id must be set."
   }
 }
 
-# ── RKE2 cluster join token ───────────────────────────────────────────────────
-# Generated once and stored in Terraform state. All nodes receive the same token
-# via their individual cloud-init secrets so they can form a cluster.
+check "node_gateway_required_for_static" {
+  assert {
+    condition     = !local.use_static_nodes || var.node_gateway != ""
+    error_message = "node_gateway is required when node_pools is set."
+  }
+}
+
 resource "random_password" "rke2_token" {
   length  = 64
   special = false
 }
 
-# ── SSH key pair (greenfield only) ────────────────────────────────────────────
-# Set create_ssh_key = false to attach existing ssh_key_ids instead.
 resource "tls_private_key" "bootstrap_key" {
   count     = var.create_ssh_key ? 1 : 0
   algorithm = "RSA"
@@ -118,64 +166,13 @@ resource "harvester_ssh_key" "bootstrap_key" {
   depends_on = [kubernetes_namespace.harvester_ns]
 }
 
-# ── Cloud-init secret (greenfield only) ──────────────────────────────────────
-# Set create_cloudinit_secret = false and provide existing_cloudinit_secret_name instead.
-resource "harvester_cloudinit_secret" "cloudinit" {
-  count      = var.create_cloudinit_secret ? var.node_count : 0
-  name       = var.node_count > 1 ? "${var.vm_name}-cloudinit-${count.index}" : "${var.vm_name}-cloudinit"
-  namespace  = var.harvester_namespace
-  depends_on = [kubernetes_namespace.harvester_ns]
-
-  user_data = templatefile("${path.module}/templates/cloud-init.yaml.tpl", {
-    password           = var.vm_password
-    cluster_dns        = var.rancher_hostname
-    rancher_password   = var.bootstrap_password
-    ssh_public_key     = tls_private_key.bootstrap_key[0].public_key_openssh
-    node_index         = count.index
-    node_count         = var.node_count
-    lb_ip              = var.ippool_start
-    rke2_version       = var.rke2_version
-    rancher_version    = var.rancher_version
-    tls_source         = var.tls_source
-    tls_cert_b64       = var.tls_source == "secret" ? base64encode(var.tls_cert) : ""
-    tls_key_b64        = var.tls_source == "secret" ? base64encode(var.tls_key) : ""
-    rke2_cluster_token = random_password.rke2_token.result
-    primary_dns        = var.primary_dns
-    # Pod IP discovery (masquerade) / ConfigMap join coordination (bridge+MetalLB):
-    # both paths use the Harvester Kubernetes API with the embedded kubeconfig creds.
-    harvester_api_url   = local.harvester_api_url
-    harvester_ca_b64    = local.harvester_ca_b64
-    harvester_cert_b64  = local.harvester_cert_b64
-    harvester_key_b64   = local.harvester_key_b64
-    harvester_namespace = var.harvester_namespace
-    # MetalLB: when use_metallb = true, MetalLB is installed on node 0 and the
-    # VIP (ippool_start) is announced via L2 on the VM VLAN instead of using
-    # the Harvester LB controller (which cannot reach bridge-mode VM backends
-    # without inter-VLAN routing from Harvester host nodes to the guest VLAN).
-    use_metallb     = var.use_metallb
-    metallb_version = var.metallb_version
-    metallb_ip      = var.ippool_start
-    vm_name         = var.vm_name
-  })
-}
-
-locals {
-  # Resolve the SSH key IDs: either freshly generated or caller-supplied
-  ssh_key_ids = var.create_ssh_key ? [harvester_ssh_key.bootstrap_key[0].id] : var.ssh_key_ids
-}
-
-# ── Input validation ──────────────────────────────────────────────────────────
-
-# The cloud-init template embeds the generated SSH public key. If create_ssh_key
-# is false the tls_private_key resource is empty, causing an invalid-index error.
 check "ssh_key_required_for_cloudinit" {
   assert {
     condition     = !var.create_cloudinit_secret || var.create_ssh_key
-    error_message = "create_ssh_key must be true when create_cloudinit_secret is true (the cloud-init template embeds the generated SSH public key)."
+    error_message = "create_ssh_key must be true when create_cloudinit_secret is true."
   }
 }
 
-# When reusing an existing cloud-init secret, the name must be provided.
 check "existing_cloudinit_secret_name_required" {
   assert {
     condition     = var.create_cloudinit_secret || var.existing_cloudinit_secret_name != ""
@@ -183,11 +180,6 @@ check "existing_cloudinit_secret_name_required" {
   }
 }
 
-# ── Bridge network (greenfield) ───────────────────────────────────────────────
-# Creates a NetworkAttachmentDefinition in harvester_namespace so bridge-mode VMs
-# can attach to it. The NAD name is var.network_name; VMs reference it as
-# "<namespace>/<name>". Set create_bridge_network = false when the NAD already
-# exists (brownfield) and pass the full "<namespace>/<name>" as network_name.
 resource "harvester_network" "bridge" {
   count = var.network_type == "bridge" && var.create_bridge_network ? 1 : 0
 
@@ -203,26 +195,28 @@ resource "harvester_network" "bridge" {
   depends_on = [kubernetes_namespace.harvester_ns]
 }
 
-locals {
-  # Full NAD reference for the VM spec. When we created the NAD ourselves the
-  # name is short (e.g. "rancher-network"); we prefix the namespace. When the
-  # caller owns a pre-existing NAD they must pass the full "<ns>/<name>" form.
-  bridge_network_name = (
-    var.network_type == "bridge" && var.create_bridge_network
-    ? "${var.harvester_namespace}/${var.network_name}"
-    : var.network_name
-  )
+# ── Legacy count-based cloud-init + VMs (when node_pools is empty) ────────────
+resource "harvester_cloudinit_secret" "cloudinit" {
+  count      = var.create_cloudinit_secret && !local.use_static_nodes ? var.node_count : 0
+  name       = var.node_count > 1 ? "${var.vm_name}-cloudinit-${count.index}" : "${var.vm_name}-cloudinit"
+  namespace  = var.harvester_namespace
+  depends_on = [kubernetes_namespace.harvester_ns]
+
+  user_data = templatefile("${path.module}/templates/cloud-init.yaml.tpl", merge(local._common_ci_vars, {
+    is_init_node     = count.index == 0
+    is_control_plane = true
+    join_ip          = ""
+    total_node_count = var.node_count
+    cp_node_count    = var.node_count
+  }))
 }
 
-# ── Rancher server VM ─────────────────────────────────────────────────────────
 resource "harvester_virtualmachine" "rancher_server" {
-  count                = var.node_count
+  count                = !local.use_static_nodes ? var.node_count : 0
   name                 = var.node_count > 1 ? "${var.vm_name}-${count.index}" : var.vm_name
   namespace            = var.harvester_namespace
   restart_after_update = true
 
-  # Bridge NAD must exist before the VM; storage-network must be set before any
-  # VM starts (Harvester rejects storage-network changes while VMs are running).
   depends_on = [
     null_resource.storage_network,
     harvester_network.bridge,
@@ -236,7 +230,6 @@ resource "harvester_virtualmachine" "rancher_server" {
 
   ssh_keys = local.ssh_key_ids
 
-  # Masquerade (NAT): default for greenfield; no external network required
   dynamic "network_interface" {
     for_each = var.network_type == "masquerade" ? [1] : []
     content {
@@ -245,7 +238,6 @@ resource "harvester_virtualmachine" "rancher_server" {
     }
   }
 
-  # Bridge: for VMs that need direct VLAN access (e.g. existing production VMs)
   dynamic "network_interface" {
     for_each = var.network_type == "bridge" ? [1] : []
     content {
@@ -267,8 +259,6 @@ resource "harvester_virtualmachine" "rancher_server" {
     auto_delete = var.vm_disk_auto_delete
   }
 
-  # USB tablet input device — some VMs require this for correct cursor behaviour
-  # in the Harvester console; set enable_usb_tablet = true to include it.
   dynamic "input" {
     for_each = var.enable_usb_tablet ? [1] : []
     content {
@@ -288,11 +278,97 @@ resource "harvester_virtualmachine" "rancher_server" {
   }
 }
 
-# ── Load Balancer + IP Pool (greenfield only) ─────────────────────────────────
-# Set create_lb = false when the Rancher VM is reachable directly via its
-# bridge IP (no dedicated LB/IP-pool needed).
+# ── Static node pool cloud-init + VMs (when node_pools is set) ───────────────
+resource "harvester_cloudinit_secret" "cloudinit_static" {
+  for_each = local.use_static_nodes && var.create_cloudinit_secret ? local.static_node_map : {}
+
+  name       = "${var.vm_name}-cloudinit-${each.key}"
+  namespace  = var.harvester_namespace
+  depends_on = [kubernetes_namespace.harvester_ns]
+
+  user_data = templatefile("${path.module}/templates/cloud-init.yaml.tpl", merge(local._common_ci_vars, {
+    is_init_node     = each.value.is_init
+    is_control_plane = each.value.control_plane
+    join_ip          = local.join_address
+    total_node_count = local.total_node_count
+    cp_node_count    = local.cp_node_count
+  }))
+
+  network_data = templatefile("${path.module}/templates/network-config.yaml.tpl", {
+    static_ip     = each.value.ip
+    gateway       = var.node_gateway
+    subnet_prefix = var.node_subnet_prefix
+    dns_servers   = length(var.dns_servers) > 0 ? var.dns_servers : ["8.8.8.8"]
+  })
+}
+
+resource "harvester_virtualmachine" "rancher_server_static" {
+  for_each = local.use_static_nodes ? local.static_node_map : {}
+
+  name                 = "${var.vm_name}-${each.key}"
+  namespace            = var.harvester_namespace
+  restart_after_update = true
+
+  depends_on = [
+    null_resource.storage_network,
+    harvester_network.bridge,
+  ]
+
+  cpu    = var.vm_cpu
+  memory = var.vm_memory
+
+  run_strategy = "RerunOnFailure"
+  machine_type = "q35"
+
+  ssh_keys = local.ssh_key_ids
+
+  dynamic "network_interface" {
+    for_each = var.network_type == "masquerade" ? [1] : []
+    content {
+      name = var.network_interface_name
+      type = "masquerade"
+    }
+  }
+
+  dynamic "network_interface" {
+    for_each = var.network_type == "bridge" ? [1] : []
+    content {
+      name         = var.network_interface_name
+      type         = "bridge"
+      network_name = local.bridge_network_name
+      mac_address  = var.network_mac_address != "" ? var.network_mac_address : null
+    }
+  }
+
+  disk {
+    name       = var.vm_disk_name
+    type       = "disk"
+    size       = var.vm_disk_size
+    bus        = "virtio"
+    boot_order = 1
+
+    image       = local.image_id
+    auto_delete = var.vm_disk_auto_delete
+  }
+
+  dynamic "input" {
+    for_each = var.enable_usb_tablet ? [1] : []
+    content {
+      name = "tablet"
+      type = "tablet"
+      bus  = "usb"
+    }
+  }
+
+  cloudinit {
+    user_data_secret_name    = harvester_cloudinit_secret.cloudinit_static[each.key].name
+    network_data_secret_name = harvester_cloudinit_secret.cloudinit_static[each.key].name
+  }
+}
+
+# ── Harvester LoadBalancer + IP Pool (for lk-dev and similar environments) ────
 resource "harvester_loadbalancer" "rancher_lb" {
-  count     = var.create_lb && !var.use_metallb ? 1 : 0
+  count     = var.create_lb ? 1 : 0
   name      = "${var.vm_name}-lb"
   namespace = var.harvester_namespace
 
@@ -319,9 +395,6 @@ resource "harvester_loadbalancer" "rancher_lb" {
     backend_port = 80
   }
 
-  # Required for HA (node_count > 1): secondary nodes join by dialling the LB
-  # supervisor port (9345) so the join address is stable regardless of which
-  # node is currently the active RKE2 init server.
   listener {
     name         = "rke2-supervisor"
     port         = 9345
@@ -334,16 +407,6 @@ resource "harvester_loadbalancer" "rancher_lb" {
     values = harvester_virtualmachine.rancher_server[*].name
   }
 
-  # Health check on port 9345 is safe for masquerade mode: the VIP lives on
-  # mgmt-br which shares L2 with masquerade VM traffic, so probes succeed.
-  # In bridge mode the VIP is on mgmt-br (192.168.11.x) but backends are on
-  # the VLAN (172.24.0.x). The kube-vip probe goes out mgmt-br, hits the
-  # datacenter router, and reaches the VM — but only if inter-VLAN routing is
-  # configured at the switch/router level. When it is not, the probe returns
-  # no response and healthy=0, preventing ANY traffic from being forwarded.
-  # Omitting the healthcheck lets kube-vip treat all backends as healthy and
-  # forward traffic unconditionally, which is safe once the cluster is up, and
-  # lets secondary nodes reach node-0 for the initial join even before 443 is up.
   dynamic "healthcheck" {
     for_each = var.network_type == "masquerade" ? [1] : []
     content {
@@ -357,7 +420,7 @@ resource "harvester_loadbalancer" "rancher_lb" {
 }
 
 resource "harvester_ippool" "rancher_ips" {
-  count = var.create_lb && !var.use_metallb ? 1 : 0
+  count = var.create_lb ? 1 : 0
   name  = "${var.vm_name}-ips"
 
   range {
@@ -376,16 +439,8 @@ resource "harvester_ippool" "rancher_ips" {
 }
 
 # ── Storage class ─────────────────────────────────────────────────────────────
-# Creates a Longhorn StorageClass with a reduced replica count and marks it as
-# the cluster default. The built-in harvester-longhorn (3 replicas) is unset as
-# default so only one default exists at a time.
-# Set manage_storage_class = false to skip (brownfield clusters where the SC
-# already exists, or single-node setups where 3 replicas cannot be satisfied).
 resource "kubernetes_storage_class_v1" "default" {
-  count = var.manage_storage_class ? 1 : 0
-
-  # Must run after harvester-longhorn loses its default annotation, otherwise
-  # the Harvester admission webhook rejects creating a second default SC.
+  count      = var.manage_storage_class ? 1 : 0
   depends_on = [kubernetes_annotations.harvester_longhorn_not_default]
 
   metadata {
@@ -409,8 +464,6 @@ resource "kubernetes_storage_class_v1" "default" {
   }
 }
 
-# Remove the default annotation from the built-in harvester-longhorn StorageClass
-# so there is exactly one cluster default after the new SC is created.
 resource "kubernetes_annotations" "harvester_longhorn_not_default" {
   count       = var.manage_storage_class ? 1 : 0
   api_version = "storage.k8s.io/v1"
@@ -450,9 +503,6 @@ resource "kubernetes_storage_class_v1" "longhorn_rwx" {
 }
 
 # ── Storage network ───────────────────────────────────────────────────────────
-# Configures the Harvester storage-network Setting so Longhorn replication
-# traffic is isolated on a dedicated VLAN rather than sharing the management NIC.
-# Harvester stores the value as a JSON string inside the Setting CRD.
 resource "null_resource" "storage_network" {
   count = var.manage_storage_network ? 1 : 0
 
@@ -475,7 +525,6 @@ resource "null_resource" "storage_network" {
         exclude        = var.storage_network_exclude_ranges
       })
     }
-    # Harvester pre-creates an empty storage-network Setting; patch rather than create.
     command = <<-EOT
       python3 -c "
 import subprocess, json, os
@@ -490,10 +539,6 @@ print('storage-network patched:', patch)
   }
 }
 
-# Patch the built-in longhorn StorageClass replica count.
-# StorageClass parameters are immutable in the Kubernetes API, so the only way
-# to change numberOfReplicas is delete + recreate. kubectl handles this; the
-# kubernetes provider cannot update parameters in-place.
 resource "null_resource" "patch_longhorn_sc" {
   count = var.manage_storage_class ? 1 : 0
 
@@ -505,12 +550,6 @@ resource "null_resource" "patch_longhorn_sc" {
     environment = {
       KUBECONFIG = var.harvester_kubeconfig_path
     }
-    # The longhorn SC is owned by the Longhorn operator, which reconciles it from
-    # the longhorn-storageclass ConfigMap. Patching the SC directly fails because:
-    #   1. parameters are immutable in the Kubernetes API
-    #   2. Longhorn recreates the SC faster than a delete+apply can run
-    # Correct approach: patch the ConfigMap (source of truth), then delete the SC
-    # so Longhorn recreates it from the updated ConfigMap with the new replica count.
     command = <<-EOT
       python3 -c "
 import subprocess, json, re, os
