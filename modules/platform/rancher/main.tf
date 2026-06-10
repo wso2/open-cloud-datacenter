@@ -143,9 +143,9 @@ locals {
     ssh_public_key     = var.create_ssh_key ? tls_private_key.bootstrap_key[0].public_key_openssh : ""
     rke2_version       = var.rke2_version
     rancher_version    = var.rancher_version
-    tls_source         = var.use_nginx_lb ? "rancher" : var.tls_source
-    tls_cert_b64       = (!var.use_nginx_lb && var.tls_source == "secret") ? base64encode(var.tls_cert) : ""
-    tls_key_b64        = (!var.use_nginx_lb && var.tls_source == "secret") ? base64encode(var.tls_key) : ""
+    tls_source         = var.tls_source
+    tls_cert_b64       = var.tls_source == "secret" ? base64encode(var.tls_cert) : ""
+    tls_key_b64        = var.tls_source == "secret" ? base64encode(var.tls_key) : ""
     rke2_cluster_token = random_password.rke2_token.result
     dns_servers        = var.dns_servers
     lb_ip              = local.effective_lb_ip

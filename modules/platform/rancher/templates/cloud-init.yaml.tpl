@@ -11,7 +11,7 @@ ssh_authorized_keys:
 packages:
   - qemu-guest-agent
   - curl
-%{~ if tls_source == "secret" && !use_nginx_lb }
+%{~ if tls_source == "secret" }
 
 write_files:
   - path: /tmp/rancher-tls.crt
@@ -93,9 +93,11 @@ runcmd:
         sleep 15
       done
 
+%{~ if tls_source != "secret" }
       kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.1/cert-manager.yaml
       kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=600s
-%{~ if tls_source == "secret" && !use_nginx_lb }
+%{~ endif }
+%{~ if tls_source == "secret" }
 
       kubectl create namespace cattle-system --dry-run=client -o yaml | kubectl apply -f -
       kubectl create secret tls tls-rancher-ingress \
@@ -126,9 +128,7 @@ runcmd:
           --set bootstrapPassword=${rancher_password} \
           --set replicas=${cp_node_count} \
           --set global.cattle.psp.enabled=false \
-%{~ if !use_nginx_lb }
           --set ingress.tls.source=${tls_source} \
-%{~ endif }
           --wait --timeout 15m && break
         sleep 30
       done
