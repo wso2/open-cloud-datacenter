@@ -60,8 +60,27 @@ resource "harvester_virtualmachine" "nginx_lb" {
     }
   }
 
+  # Harvester auto-creates a cloudinitdisk when a cloud-init secret is attached.
+  # Declare it here so the provider does not try to remove it on every plan.
+  dynamic "disk" {
+    for_each = [1]
+    content {
+      name = "cloudinitdisk"
+      type = "disk"
+      bus  = "virtio"
+      size = "0Gi"
+    }
+  }
+
   cloudinit {
     user_data_secret_name    = harvester_cloudinit_secret.cloudinit.name
     network_data_secret_name = harvester_cloudinit_secret.cloudinit.name
+  }
+
+  lifecycle {
+    ignore_changes = [
+      # Harvester manages the cloudinitdisk size automatically; ignore it to prevent perpetual drift.
+      disk[1].size,
+    ]
   }
 }

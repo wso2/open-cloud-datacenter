@@ -312,9 +312,28 @@ resource "harvester_virtualmachine" "rancher_server" {
     }
   }
 
+  # Harvester auto-creates a cloudinitdisk when a cloud-init secret is attached.
+  # Declare it here so the provider does not try to remove it on every plan.
+  dynamic "disk" {
+    for_each = [1]
+    content {
+      name = "cloudinitdisk"
+      type = "disk"
+      bus  = "virtio"
+      size = "0Gi"
+    }
+  }
+
   cloudinit {
     user_data_secret_name    = var.create_cloudinit_secret ? harvester_cloudinit_secret.cloudinit[count.index].name : var.existing_cloudinit_secret_name
     network_data_secret_name = var.create_cloudinit_secret ? null : var.existing_cloudinit_secret_name
+  }
+
+  lifecycle {
+    ignore_changes = [
+      # Harvester manages the cloudinitdisk size automatically; ignore it to prevent perpetual drift.
+      disk[1].size,
+    ]
   }
 
   provisioner "local-exec" {
@@ -408,9 +427,28 @@ resource "harvester_virtualmachine" "rancher_server_static" {
     }
   }
 
+  # Harvester auto-creates a cloudinitdisk when a cloud-init secret is attached.
+  # Declare it here so the provider does not try to remove it on every plan.
+  dynamic "disk" {
+    for_each = [1]
+    content {
+      name = "cloudinitdisk"
+      type = "disk"
+      bus  = "virtio"
+      size = "0Gi"
+    }
+  }
+
   cloudinit {
     user_data_secret_name    = harvester_cloudinit_secret.cloudinit_static[each.key].name
     network_data_secret_name = harvester_cloudinit_secret.cloudinit_static[each.key].name
+  }
+
+  lifecycle {
+    ignore_changes = [
+      # Harvester manages the cloudinitdisk size automatically; ignore it to prevent perpetual drift.
+      disk[1].size,
+    ]
   }
 }
 
