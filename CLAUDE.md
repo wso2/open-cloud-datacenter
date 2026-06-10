@@ -74,7 +74,7 @@ open-cloud-datacenter (controlplane)/
 │       └── reconciler/             Background goroutine: PENDING/DELETING → real state
 │
 ├── dcctl/                          Cobra CLI (go 1.22; OIDC Authorization Code + PKCE)
-│   ├── cmd/                        login, logout, create/get/list/delete, kubeconfig, tenant, project
+│   ├── cmd/                        noun-verb groups: cmd/<noun>/<verb>.go (vm, cluster, image, vnet, tenant, project, admin, …)
 │   └── internal/{auth,config,client}
 │
 ├── cloud-ui/                       React + Fluent UI web app (Vite + pnpm)
@@ -272,6 +272,7 @@ focused work in isolation, and protect the main conversation from noise.
 | Building or changing CLI commands or output formatting | `cli-developer` — delegate the implementation |
 | Any UI design or web-app work (mockups, React/TS, Fluent UI) | `frontend-developer` — owns the web UI end-to-end |
 | Any Terraform / IaC work (layer code, modules, helm_release modelling, secrets, two-phase applies) | `terraform-specialist` — owns the IaC craft |
+| Inspecting live cluster state (kubectl contexts / SSH) before building on an assumption | `infra-ops` — read-only fact gathering from the real system |
 | Broad codebase exploration spanning multiple files/packages | `Explore` — faster than manual grep loops |
 
 These are not optional steps. A task is not complete until the relevant agents

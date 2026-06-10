@@ -53,6 +53,7 @@ vendor/
 
 # Claude Code runtime artefacts (local-only state)
 .claude/scheduled_tasks.lock
+.claude/settings.local.json
 
 # Pandoc-rendered .docx exports — internal sharing only, not source of truth
 docs/*.docx
