@@ -1,7 +1,6 @@
 ---
 name: api-designer
 description: "Invoke when designing new API endpoints, reviewing API contracts, writing or updating OpenAPI specs, deciding on resource naming, HTTP methods, request/response shapes, error codes, pagination, or versioning strategy. Use before backend-developer starts implementing anything new."
-model: sonnet
 tools: "Read, Write, Edit, Glob, Grep"
 color: blue
 ---

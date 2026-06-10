@@ -1,7 +1,6 @@
 ---
 name: rancher-harvester-specialist
 description: "Invoke when working with Rancher or Harvester APIs, Kubernetes manifests/RBAC/Helm on Harvester-hosted clusters, Harvester-specific CRDs (IPPool, LoadBalancer, VirtualMachineImage), KubeOVN tenant networking, designing abstraction mappings between our cloud API and the underlying infrastructure, or debugging infrastructure-level issues. This agent is the source of truth for what the underlying platform can and cannot do."
-model: sonnet
 tools: "Read, Bash, Grep, Glob"
 color: green
 ---

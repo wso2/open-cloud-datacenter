@@ -1,7 +1,6 @@
 ---
 name: frontend-developer
 description: "Invoke for any UI / web app work on cloud-ui: design discussions, mockup prompts, React/TypeScript implementation, Fluent UI components, OIDC auth wiring, OpenAPI-generated API client, async-provisioning UX patterns, and ongoing UI-feature delivery. Owns the user-facing web layer end-to-end. Does NOT cover the CLI (cli-developer) or backend (backend-developer)."
-model: sonnet
 tools: "Read, Write, Edit, Bash, Glob, Grep, WebFetch"
 color: pink
 ---

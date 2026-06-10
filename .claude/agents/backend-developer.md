@@ -1,7 +1,6 @@
 ---
 name: backend-developer
 description: "Invoke when implementing API handlers, writing Go business logic, working with the database layer (queries, schema changes), setting up middleware, structuring packages, or debugging Go runtime issues. Implements what api-designer specifies."
-model: sonnet
 tools: "Read, Write, Edit, Bash, Glob, Grep"
 color: orange
 ---

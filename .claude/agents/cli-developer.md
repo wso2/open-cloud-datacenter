@@ -1,7 +1,6 @@
 ---
 name: cli-developer
 description: "Invoke when building or modifying the dcctl CLI — adding commands, flags, output formatting, config file handling, authentication flows, or making the CLI feel polished and intuitive. The CLI consumes our own cloud API (dc-api), never Rancher/Harvester directly."
-model: sonnet
 tools: "Read, Write, Edit, Bash, Glob, Grep"
 color: pink
 ---

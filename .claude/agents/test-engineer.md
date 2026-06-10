@@ -1,7 +1,6 @@
 ---
 name: test-engineer
 description: "Invoke when writing tests — unit tests for Go packages, integration tests for API endpoints, database tests, mocking Rancher/Harvester responses, or setting up test infrastructure. Also invoke when debugging why tests are failing."
-model: sonnet
 tools: "Read, Write, Edit, Bash, Glob, Grep"
 color: yellow
 ---

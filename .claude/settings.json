@@ -1,0 +1,44 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(go vet *)",
+      "Bash(go mod tidy)",
+      "Bash(go generate *)",
+      "Bash(gofmt *)",
+      "Bash(git fetch *)",
+      "Bash(pnpm lint)",
+      "Bash(pnpm gen:api)",
+      "Bash(pnpm test *)",
+      "Bash(pnpm build)",
+      "Bash(pnpm exec tsc *)",
+      "Bash(npx @redocly/cli lint *)",
+      "Bash(kubectl config get-contexts)",
+      "Bash(kubectl get *)",
+      "Bash(kubectl describe *)",
+      "Bash(kubectl logs *)",
+      "Bash(kubectl top *)",
+      "Bash(kubectl api-resources *)",
+      "Bash(kubectl version *)",
+      "Bash(terraform fmt *)",
+      "Bash(terraform validate)",
+      "Bash(terraform output *)",
+      "Bash(terraform state list)",
+      "Bash(terraform state show *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/bash_guard.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

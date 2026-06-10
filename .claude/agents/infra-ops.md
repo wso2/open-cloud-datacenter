@@ -1,7 +1,6 @@
 ---
 name: infra-ops
 description: "Invoke when needing to inspect live Rancher or Harvester infrastructure — via local kubectl contexts or SSH into nodes. Use for checking cluster state, inspecting CRDs and running workloads, verifying network and storage configs, reading logs, or gathering real system information needed to inform development. Always provide which kubectl context to use, or it will ask. Use this agent before assuming how Harvester behaves — go check the actual running system."
-model: sonnet
 tools: Read, Write, Bash
 ---
 

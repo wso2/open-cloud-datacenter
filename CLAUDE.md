@@ -126,6 +126,9 @@ Every public endpoint of dc-api is described in `dc-api/openapi.yaml` (OpenAPI
 
 ### Adding a new endpoint, end to end
 
+**Use the `add-endpoint` skill for this — it encodes the checklist below and must
+be invoked (not paraphrased) whenever a task adds or changes an endpoint.**
+
 1. Design the request/response with `api-designer`; add it to `openapi.yaml`; lint.
 2. Implement the Go handler; `go build ./...`.
 3. Wire it into `router.go`.

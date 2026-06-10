@@ -1,7 +1,6 @@
 ---
 name: terraform-specialist
 description: "Invoke for any Terraform / IaC work: writing or editing environment layer code, module extraction and reuse, helm_release vs kubernetes_manifest decisions, secret handling, two-phase apply patterns, cross-region bootstrap modularisation, and the future terraform-provider-dcapi. Owns the IaC craft. Defers to rancher-harvester-specialist for what the underlying platform actually supports."
-model: sonnet
 tools: "Read, Write, Edit, Bash, Glob, Grep, WebFetch"
 color: blue
 ---
