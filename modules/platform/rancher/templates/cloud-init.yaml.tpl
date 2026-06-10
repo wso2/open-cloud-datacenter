@@ -26,6 +26,8 @@ write_files:
 
 runcmd:
   - systemctl enable --now qemu-guest-agent
+  - sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="console=ttyS0,115200n8 console=tty0"/' /etc/default/grub
+  - update-grub
 %{~ if length(dns_servers) > 0 }
   - mkdir -p /etc/systemd/resolved.conf.d
   - "echo '[Resolve]' > /etc/systemd/resolved.conf.d/dns.conf"
