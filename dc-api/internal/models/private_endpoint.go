@@ -27,7 +27,13 @@ type PrivateEndpointTargetType string
 
 const (
 	PrivateEndpointTargetKeyVault PrivateEndpointTargetType = "key_vault"
-	// Future: PrivateEndpointTargetDatabase / PrivateEndpointTargetCache / ...
+	// PrivateEndpointTargetDatabase identifies a DNS-only host record for a
+	// managed Database. Unlike key_vault endpoints these do NOT spin up a
+	// proxy pod — the DB VM is already in the tenant VPC, so the Corefile
+	// just needs an A record pointing at the VM's data-NIC IP. The row's
+	// `proxy_pod_name` stays NULL; `backend_addr` is informational (the VM's
+	// own ip:port) and never consumed by any proxy.
+	PrivateEndpointTargetDatabase PrivateEndpointTargetType = "database"
 )
 
 // PrivateEndpointSpec is the caller-supplied intent to create a Private

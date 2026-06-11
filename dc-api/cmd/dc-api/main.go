@@ -27,6 +27,7 @@ import (
 	"github.com/wso2/dc-api/internal/api/middleware"
 	"github.com/wso2/dc-api/internal/config"
 	"github.com/wso2/dc-api/internal/db"
+	"github.com/wso2/dc-api/internal/dns"
 	"github.com/wso2/dc-api/internal/providers"
 	"github.com/wso2/dc-api/internal/providers/common"
 	"github.com/wso2/dc-api/internal/providers/dbaas"
@@ -342,6 +343,15 @@ func main() {
 		// talk to the dbaas REST gateway, only the DBInstance CRD. Pre-req:
 		// dbaas controller + CRD installed on the same K8s API server.
 		dbaasProvisioner = dbaas.NewClient(kvClient.Dynamic())
+	}
+
+	// ── DNS reconciler (DBaaS) ────────────────────────────────────────────────
+	// Watches the `databases` table and writes per-VPC CoreDNS host records
+	// (<db-name>.db.dc.internal → endpoint IP) once a VPC-mode DB reaches
+	// ACTIVE. Only meaningful when endpointProvisioner is wired (KubeOVN);
+	// without it there is no Corefile to update.
+	if endpointProvisioner != nil {
+		go dns.New(repo, endpointProvisioner, log.Logger).Run(ctx)
 	}
 
 	// ── Router ────────────────────────────────────────────────────────────────

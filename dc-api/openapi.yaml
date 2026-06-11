@@ -7712,7 +7712,9 @@ components:
         A managed Database resource. Spec fields come from create-time
         input; status fields (`status`, `message`, `endpoint_address`,
         `endpoint_port`) are populated from the live DBInstance CR status
-        on every GET.
+        on every GET. `endpoint_hostname` is populated from the
+        private_endpoints row written by the DNS reconciler once the
+        database reaches ACTIVE with an IP (VPC-mode databases only).
       required:
         - id
         - tenant_id
@@ -7766,10 +7768,26 @@ components:
           description: Human-readable status message from the controller.
         endpoint_address:
           type: string
-          description: IP or hostname clients connect to. Empty until ACTIVE.
+          description: |
+            IPv4 address assigned to the database's data-NIC. Empty until
+            ACTIVE. For VPC-mode databases, prefer `endpoint_hostname` over
+            this — the IP may change on VM reschedule, but the hostname
+            re-points automatically.
         endpoint_port:
           type: integer
           description: TCP port. Empty until ACTIVE.
+        endpoint_hostname:
+          type: string
+          readOnly: true
+          description: |
+            DNS name resolvable inside the tenant's VPC (e.g.
+            `my-db.db.dc.internal`). Resolves to `endpoint_address` via the
+            per-VPC CoreDNS pod. Populated by the DNS reconciler once a
+            VPC-mode database reaches ACTIVE with an IP; empty for
+            legacy-mode (non-VPC) databases and during the brief window
+            between ACTIVE and DNS registration. Prefer this over
+            `endpoint_address` for client connection strings.
+          example: "orders-db.db.dc.internal"
         created_at:
           type: string
           format: date-time

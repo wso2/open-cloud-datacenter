@@ -497,7 +497,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 					})
 
 					// ── Task 1 — DBaaS Databases ────────────────────────────
-					dbHandler := handlers.NewDatabaseHandler(deps.Repo, deps.DatabaseProvisioner, deps.DBaaSOSImage, deps.Log)
+					dbHandler := handlers.NewDatabaseHandler(deps.Repo, deps.DatabaseProvisioner, deps.EndpointProvisioner, deps.DBaaSOSImage, deps.Log)
 					r.Route("/databases", func(r chi.Router) {
 						r.Use(middleware.ResourceScope("id")) // resource-scope grants authorize actions on a database; no-op for the {id}-less collection routes
 						r.Method(http.MethodPost, "/", gate(rbac.ActionDBServerWrite, dbHandler.Create))                     // POST   .../databases

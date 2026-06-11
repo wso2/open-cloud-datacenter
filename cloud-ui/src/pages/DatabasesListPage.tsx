@@ -54,6 +54,7 @@ interface Database {
   status: string;
   endpoint_address?: string;
   endpoint_port?: number;
+  endpoint_hostname?: string;
   created_at: string;
 }
 
@@ -241,7 +242,9 @@ export default function DatabasesListPage() {
                   <TableCell className={styles.tableMutedCell}>{db.instance_class}</TableCell>
                   <TableCell className={styles.tableMutedCell}>{db.allocated_storage_gb} GB</TableCell>
                   <TableCell className={styles.tableMutedCell}>
-                    {db.endpoint_address && db.endpoint_port
+                    {db.endpoint_hostname && db.endpoint_port
+                      ? `${db.endpoint_hostname}:${db.endpoint_port}`
+                      : db.endpoint_address && db.endpoint_port
                       ? `${db.endpoint_address}:${db.endpoint_port}`
                       : '—'}
                   </TableCell>

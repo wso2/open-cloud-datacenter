@@ -47,6 +47,7 @@ interface Database {
   message?: string;
   endpoint_address?: string;
   endpoint_port?: number;
+  endpoint_hostname?: string;
   created_at: string;
   updated_at: string;
 }
@@ -345,9 +346,20 @@ export default function DatabaseDetailPage() {
           <div className={styles.value}>{db.network_mode}</div>
           <div className={styles.label}>Endpoint</div>
           <div className={`${styles.value} ${styles.mono}`}>
-            {db.endpoint_address && db.endpoint_port
-              ? `${db.endpoint_address}:${db.endpoint_port}`
-              : '—'}
+            {db.endpoint_hostname && db.endpoint_port ? (
+              <>
+                <div>{`${db.endpoint_hostname}:${db.endpoint_port}`}</div>
+                {db.endpoint_address && (
+                  <div style={{ color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 }}>
+                    {db.endpoint_address}
+                  </div>
+                )}
+              </>
+            ) : db.endpoint_address && db.endpoint_port ? (
+              `${db.endpoint_address}:${db.endpoint_port}`
+            ) : (
+              '—'
+            )}
           </div>
           <div className={styles.label}>Created</div>
           <div className={styles.value}>{fmtDate(db.created_at)}</div>
