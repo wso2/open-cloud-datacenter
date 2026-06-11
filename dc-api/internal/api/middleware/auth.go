@@ -26,14 +26,13 @@
 //	Google      | https://accounts.google.com
 //	Dex         | https://dex.example.com
 //
-// The only customisation point is the group-to-tenant mapping, which is
-// controlled by two env vars:
+// The only group dc-api interprets is the platform-admin group, controlled
+// by one env var:
 //
-//	DCAPI_TENANT_GROUP_PREFIX  (default: "dc-tenant-")
-//	DCAPI_ADMIN_GROUP          (default: "dc-admin")
+//	DCAPI_ADMIN_GROUP  (default: "dc-admin")
 //
-// If your IdP uses a different group naming scheme, just change these values.
-// No code changes required.
+// Tenant membership is NEVER derived from IdP groups — it lives exclusively
+// in the role_assignments table, populated by explicit invites.
 //
 // ── How JWT Validation Works ──────────────────────────────────────────────────
 //
@@ -42,17 +41,10 @@
 //  3. go-oidc fetches the IdP's JWKS (public keys) from /.well-known/openid-configuration.
 //     Keys are cached; we don't hit the IdP on every request.
 //  4. We verify: signature valid, not expired, audience matches.
-//  5. We extract the "groups" claim and map it to a tenantID.
-//  6. We inject tenantID + userID into the request context.
-//
-// ── M1.5 RBAC additions (Chunk 3) ────────────────────────────────────────────
-//
-// The Validate() flow now also:
-//   - Injects principal_type, principal_id, is_admin into context.
-//   - Enforces autoprovision policy: first login with a valid dc-tenant-<x> group
-//     either inserts a 'member' role_assignment row (DCAPI_RBAC_AUTOPROVISION=true,
-//     the default) or returns 403 (=false, for stricter production environments).
-//   - Admins (dc-admin group) bypass the membership lookup entirely.
+//  5. We inject principal_type, principal_id, user_id and is_admin (admin
+//     group / DCAPI_PLATFORM_ADMIN_SUBS) into the request context. Tenant and
+//     project scoping happen later, in TenantContext / ProjectContext, against
+//     the role_assignments table.
 package middleware
 
 import (
@@ -69,7 +61,6 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/google/uuid"
-	"github.com/rs/zerolog/log"
 	"github.com/wso2/dc-api/internal/api/respond"
 	"github.com/wso2/dc-api/internal/models"
 	"golang.org/x/oauth2"
@@ -102,20 +93,7 @@ const (
 	ContextKeyPrincipalType contextKey = "principal_type"
 	ContextKeyPrincipalID   contextKey = "principal_id"
 	ContextKeyIsAdmin       contextKey = "is_admin"
-	// ContextKeyIdPTenants holds the slice of tenant names (with the
-	// dc-tenant- prefix stripped) the IdP claimed for the caller. Used by
-	// TenantContext middleware to distinguish "tenant not found" (404) from
-	// "in IdP group, no role row yet" (403).
-	ContextKeyIdPTenants contextKey = "idp_tenants"
 )
-
-// IdPTenantsFromContext returns the tenant names the IdP claimed for the
-// caller. Empty slice for service accounts (their tenant comes from the SA
-// record, not the JWT) and admins.
-func IdPTenantsFromContext(ctx context.Context) []string {
-	v, _ := ctx.Value(ContextKeyIdPTenants).([]string)
-	return v
-}
 
 // TenantFromContext extracts the tenant ID injected by Auth middleware.
 func TenantFromContext(ctx context.Context) (string, bool) {
@@ -197,10 +175,8 @@ type Claims struct {
 // import of the db package from middleware.
 //
 // Methods:
-//   - ListRoleAssignmentsForPrincipal — OIDC autoprovision check (Chunk 3).
-//   - CreateRoleAssignment — OIDC autoprovision insert (Chunk 3).
-//   - UpsertTenant — populate the tenants registry on first sighting of
-//     any dc-tenant-<id> group claim, so admins can enumerate empty tenants.
+//   - ListRoleAssignmentsForPrincipal — membership checks in the
+//     TenantContext / ProjectContext middlewares.
 //   - GetServiceAccountByTokenLookupID — SA auth lookup by indexed prefix (Chunk 5).
 //   - UpdateServiceAccountLastUsed — SA auth last-used timestamp (Chunk 5).
 type AuthRepo interface {
@@ -209,16 +185,6 @@ type AuthRepo interface {
 		principalType models.PrincipalType,
 		principalID string,
 	) ([]models.RoleAssignment, error)
-
-	CreateRoleAssignment(
-		ctx context.Context,
-		ra models.RoleAssignment,
-	) (*models.RoleAssignment, error)
-
-	UpsertTenant(
-		ctx context.Context,
-		id, name, asgardeoGroup, createdBy string,
-	) (*models.Tenant, error)
 
 	// GetTenantUUIDBySlug returns the immutable tenant_uuid for the slug.
 	// Returns (uuid.Nil, nil) when no row exists (TenantContext maps that to
@@ -262,14 +228,10 @@ type AuthRepo interface {
 // AuthConfig holds the configurable parts of the auth middleware.
 // All fields have sensible defaults; only override what you need.
 type AuthConfig struct {
-	// TenantGroupPrefix is the prefix used to identify tenant groups.
-	// Groups matching "<prefix><name>" map to tenant "<name>".
-	// Default: "dc-tenant-"
-	TenantGroupPrefix string
-
-	// AdminGroup is the group name whose members get the "admin" tenant role.
-	// Default: "dc-admin". Kept as a legacy fallback alongside
-	// PlatformAdminSubs (which is the Option D preferred mechanism).
+	// AdminGroup is the IdP group whose members get the platform "admin"
+	// role. Default: "dc-admin". This is the ONLY IdP group dc-api
+	// interprets — tenant membership lives exclusively in the
+	// role_assignments table (invites), never in IdP groups.
 	AdminGroup string
 
 	// PlatformAdminSubs is the set of IdP `sub` values that should be
@@ -277,27 +239,10 @@ type AuthConfig struct {
 	// var (comma-separated). When the caller's sub is in this set OR they
 	// hold the AdminGroup, isAdmin is true. Membership check is O(1).
 	PlatformAdminSubs map[string]struct{}
-
-	// AutoProvisionMembers, when true, inserts a 'member' role_assignment row
-	// the first time a user with a matching dc-tenant-<x> group is seen in JWT.
-	// When false, users with no role_assignments row get 403 — an owner must
-	// explicitly invite them first.
-	// Default (Option D): false — autoprovision is a legacy fallback.
-	AutoProvisionMembers bool
 }
 
 // defaults fills zero-value string fields with their defaults.
-// AutoProvisionMembers is intentionally NOT touched here: the zero value of a
-// bool is false, so we cannot distinguish "caller explicitly passed false" from
-// "caller forgot to set it". main.go reads DCAPI_RBAC_AUTOPROVISION and sets
-// the field before calling NewAuth. Integration tests set it explicitly in
-// AuthConfig{AutoProvisionMembers: true/false}. Only empty AuthConfig{} (no
-// auto-provision field set at all) would silently default to false — which is
-// the safe production default.
 func (c *AuthConfig) defaults() {
-	if c.TenantGroupPrefix == "" {
-		c.TenantGroupPrefix = "dc-tenant-"
-	}
 	if c.AdminGroup == "" {
 		c.AdminGroup = "dc-admin"
 	}
@@ -306,13 +251,12 @@ func (c *AuthConfig) defaults() {
 // ─────────────────────────── Auth (production) ──────────────────────────────
 
 // Auth is the authentication + tenant-resolution middleware.
-// Create once at startup: auth, err := middleware.NewAuth(ctx, issuer, audiences, cfg, repo)
+// Create once at startup: auth, err := middleware.NewAuth(ctx, issuer, audiences, cfg)
 // Use with chi: r.Use(auth.Validate)
 type Auth struct {
 	verifier  *oidc.IDTokenVerifier
 	audiences []string
 	cfg       AuthConfig
-	repo      AuthRepo
 	// F7 BFF: when set, requests without an Authorization header fall
 	// back to extracting the access token from the dcapi_session cookie.
 	// nil when BFF is not configured (DCAPI_BFF_* env vars unset) —
@@ -333,9 +277,8 @@ type Auth struct {
 //	future Terraform provider, …). The verifier itself runs with audience
 //	checking disabled and we enforce it manually so multi-value lists work.
 //
-// cfg: group-to-tenant mapping config (use AuthConfig{} for all defaults).
-// repo: data-access implementation used for the M1.5 autoprovision membership check.
-func NewAuth(ctx context.Context, issuerURL string, audiences []string, cfg AuthConfig, repo AuthRepo) (*Auth, error) {
+// cfg: admin-group config (use AuthConfig{} for all defaults).
+func NewAuth(ctx context.Context, issuerURL string, audiences []string, cfg AuthConfig) (*Auth, error) {
 	cfg.defaults()
 
 	if len(audiences) == 0 {
@@ -351,7 +294,7 @@ func NewAuth(ctx context.Context, issuerURL string, audiences []string, cfg Auth
 	// Skip the built-in audience check; we enforce it ourselves below so
 	// the operator can authorise multiple IdP clients via DCAPI_OIDC_AUDIENCE.
 	verifier := provider.Verifier(&oidc.Config{SkipClientIDCheck: true})
-	return &Auth{verifier: verifier, audiences: audiences, cfg: cfg, repo: repo}, nil
+	return &Auth{verifier: verifier, audiences: audiences, cfg: cfg}, nil
 }
 
 // WithCookieAccessToken wires an optional session-cookie token source.
@@ -419,15 +362,7 @@ func (a *Auth) Validate(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx, ok := a.cfg.buildContext(r.Context(), claims, a.repo)
-		if !ok {
-			respond.Error(w, http.StatusForbidden,
-				fmt.Sprintf("Forbidden: user has no DC tenant group (expected group prefixed with %q or %q)",
-					a.cfg.TenantGroupPrefix, a.cfg.AdminGroup))
-			return
-		}
-
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r.WithContext(a.cfg.buildContext(r.Context(), claims)))
 	})
 }
 
@@ -436,126 +371,23 @@ func (a *Auth) Validate(next http.Handler) http.Handler {
 // buildContext runs the per-request context-enrichment logic after JWT claims
 // are verified. Shared between Auth (production) and TestModeAuth.
 //
-// Tenant selection is NOT performed here. Auth middleware only establishes
-// "who you are" + "what tenants the IdP says you belong to" + autoprovisions
-// missing rows. The active tenant for a request is set by the
-// TenantContext middleware mounted on /v1/tenants/{tenant_id}/... based on
-// the URL path. This allows a single JWT carrying multiple dc-tenant-* groups
-// to drive the cloud-ui tenant switcher.
-//
-// Steps:
-//  1. Walk claims.Groups to determine isAdmin and collect every dc-tenant-*
-//     group (after stripping the prefix).
-//  2. If !isAdmin AND no dc-tenant-* groups AND repo lookup yields no existing
-//     role_assignments rows: return (nil, false) → caller writes 403.
-//  3. For non-admin callers: list role_assignments once; for each dc-tenant-*
-//     group not already represented and AutoProvisionMembers=true, insert a
-//     'member' row. (AutoProvisionMembers=false skips inserts — the user can
-//     still authenticate; the TenantContext middleware will 403 them when
-//     they try to access a tenant they don't have a row for.)
-//  4. Inject principal_type / principal_id / user_id / is_admin into context.
-//     ContextKeyTenantID is NOT set here.
-//
-// Return values:
-//   - (ctx, true)  — success; principal context populated
-//   - (nil, false) — no usable IdP group AND no existing membership; 403
-func (c *AuthConfig) buildContext(reqCtx context.Context, claims Claims, repo AuthRepo) (context.Context, bool) {
+// Auth middleware only establishes "who you are" (principal identity +
+// is_admin). Every valid token authenticates; a principal with no
+// role_assignments rows simply has access to nothing — the TenantContext /
+// ProjectContext middlewares gate each scoped request against the
+// role_assignments table (membership truth lives there, never in IdP
+// groups). The only IdP group dc-api interprets is AdminGroup; the
+// PlatformAdminSubs env list promotes the same way.
+func (c *AuthConfig) buildContext(reqCtx context.Context, claims Claims) context.Context {
 	isAdmin := false
-	tenantGroups := make([]string, 0, len(claims.Groups))
-	seen := make(map[string]struct{})
-
-	// Option D: env-var admin list takes precedence; AdminGroup is the
-	// legacy fallback. Either path promotes.
 	if _, ok := c.PlatformAdminSubs[claims.Sub]; ok {
 		isAdmin = true
 	}
 	for _, g := range claims.Groups {
 		if g == c.AdminGroup {
 			isAdmin = true
-			continue
+			break
 		}
-		if strings.HasPrefix(g, c.TenantGroupPrefix) {
-			t := strings.TrimPrefix(g, c.TenantGroupPrefix)
-			if t == "" {
-				continue
-			}
-			if _, ok := seen[t]; ok {
-				continue
-			}
-			seen[t] = struct{}{}
-			tenantGroups = append(tenantGroups, t)
-		}
-	}
-
-	// Option D: tenants registry is populated explicitly:
-	//   - POST /v1/admin/tenants (admin pre-creates)
-	//   - POST /v1/tenants/{tid}/members (handler UPSERTs on first invite)
-	// The middleware no longer touches the registry. With autoprovision off
-	// by default and IdP groups no longer treated as membership truth,
-	// every tenant registration becomes a deliberate operator action.
-
-	// For non-admin callers we also need to know about any role_assignments
-	// rows that aren't tied to a current dc-tenant-* group (e.g. tenants the
-	// user was explicitly invited into without being in the IdP group). Those
-	// rows still entitle them to authenticate.
-	var hadExistingMembership bool
-	if !isAdmin && repo != nil {
-		assignments, err := repo.ListRoleAssignmentsForPrincipal(reqCtx, models.PrincipalTypeUser, claims.Sub)
-		if err != nil {
-			log.Error().Err(err).Str("sub", claims.Sub).Msg("auth: failed to list role assignments")
-			// Fail open on DB hiccup — TenantContext middleware will still
-			// gate every tenant-scoped request individually.
-		} else {
-			hadExistingMembership = len(assignments) > 0
-
-			// Build a set of tenants the user already has any row for, so
-			// we only insert autoprovision rows for the genuinely-missing
-			// ones.
-			already := make(map[string]struct{}, len(assignments))
-			for _, a := range assignments {
-				if a.ScopeType == models.ScopeTypeTenant {
-					already[a.ScopeID] = struct{}{}
-				}
-			}
-
-			if c.AutoProvisionMembers {
-				for _, t := range tenantGroups {
-					if _, ok := already[t]; ok {
-						continue
-					}
-					// Phase 6a: TenantContext refuses any request whose URL
-					// slug isn't in `tenants`. Autoprovision used to rely on
-					// just CreateRoleAssignment; we now ALSO UPSERT the
-					// tenants row so the freshly-provisioned membership is
-					// actually usable on the next request.
-					if _, err := repo.UpsertTenant(reqCtx, t, t, c.TenantGroupPrefix+t, "autoprovision-from-asgardeo-group"); err != nil {
-						log.Warn().Err(err).Str("tenant", t).
-							Msg("auth: autoprovision UpsertTenant failed (best-effort, continuing)")
-					}
-					_, err := repo.CreateRoleAssignment(reqCtx, models.RoleAssignment{
-						ID:            uuid.New(),
-						PrincipalType: models.PrincipalTypeUser,
-						PrincipalID:   claims.Sub,
-						ScopeType:     models.ScopeTypeTenant,
-						ScopeID:       t,
-						Role:          models.RoleMember,
-						GrantedBy:     "autoprovision-from-asgardeo-group",
-					})
-					if err != nil {
-						// Unique-constraint violations are harmless races
-						// between concurrent first-logins for the same group.
-						log.Warn().Err(err).Str("sub", claims.Sub).Str("tenant", t).
-							Msg("auth: autoprovision role_assignment insert failed (may be duplicate)")
-					}
-				}
-			}
-		}
-	}
-
-	// Reject only when there is no way for the caller to act on dc-api: not
-	// admin, no IdP tenant groups, and no pre-existing membership rows.
-	if !isAdmin && len(tenantGroups) == 0 && !hadExistingMembership {
-		return nil, false
 	}
 
 	// Inject principal context. Tenant scoping comes from TenantContext later.
@@ -563,8 +395,7 @@ func (c *AuthConfig) buildContext(reqCtx context.Context, claims Claims, repo Au
 	ctx = context.WithValue(ctx, ContextKeyPrincipalType, models.PrincipalTypeUser)
 	ctx = context.WithValue(ctx, ContextKeyPrincipalID, claims.Sub)
 	ctx = context.WithValue(ctx, ContextKeyIsAdmin, isAdmin)
-	ctx = context.WithValue(ctx, ContextKeyIdPTenants, tenantGroups)
-	return ctx, true
+	return ctx
 }
 
 // bearerToken extracts the token string from "Authorization: Bearer <token>".
@@ -613,20 +444,16 @@ type AuthValidator interface {
 type TestModeAuth struct {
 	cfg     AuthConfig
 	pubKeys []*rsa.PublicKey
-	repo    AuthRepo // may be nil; nil means skip autoprovision (legacy test behaviour)
 }
 
 // NewTestModeAuth constructs a TestModeAuth from a JWK Set JSON blob.
 // The jwksJSON is produced by JWTMinter.PublicKeyJWKS() in the test package.
 //
-// Pass repo to enable the M1.5 autoprovision membership check in integration
-// tests. Pass nil to keep legacy behaviour (no membership lookup).
-//
 // Example test wiring:
 //
 //	minter, _ := test.NewJWTMinter()
-//	auth, _ := middleware.NewTestModeAuth(minter.PublicKeyJWKS(), middleware.AuthConfig{...}, repo)
-func NewTestModeAuth(jwksJSON []byte, cfg AuthConfig, repo AuthRepo) (*TestModeAuth, error) {
+//	auth, _ := middleware.NewTestModeAuth(minter.PublicKeyJWKS(), middleware.AuthConfig{...})
+func NewTestModeAuth(jwksJSON []byte, cfg AuthConfig) (*TestModeAuth, error) {
 	cfg.defaults()
 	var jwkset struct {
 		Keys []struct {
@@ -657,12 +484,11 @@ func NewTestModeAuth(jwksJSON []byte, cfg AuthConfig, repo AuthRepo) (*TestModeA
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("no RSA keys parsed from test JWKS")
 	}
-	return &TestModeAuth{cfg: cfg, pubKeys: keys, repo: repo}, nil
+	return &TestModeAuth{cfg: cfg, pubKeys: keys}, nil
 }
 
 // Validate is the Chi middleware entrypoint for test-mode auth.
-// Runs the same buildContext logic as the production Auth so integration tests
-// exercise the autoprovision code path.
+// Runs the same buildContext logic as the production Auth.
 func (a *TestModeAuth) Validate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tokenStr, err := bearerToken(r)
@@ -675,14 +501,7 @@ func (a *TestModeAuth) Validate(next http.Handler) http.Handler {
 			respond.Error(w, http.StatusUnauthorized, "Unauthorized: "+err.Error())
 			return
 		}
-		ctx, ok := a.cfg.buildContext(r.Context(), *claims, a.repo)
-		if !ok {
-			respond.Error(w, http.StatusForbidden,
-				fmt.Sprintf("Forbidden: user has no DC tenant group (expected prefix %q or %q)",
-					a.cfg.TenantGroupPrefix, a.cfg.AdminGroup))
-			return
-		}
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r.WithContext(a.cfg.buildContext(r.Context(), *claims)))
 	})
 }
 

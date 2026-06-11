@@ -99,11 +99,7 @@ type RouterDeps struct {
 	// auth path. When nil, those routes are not registered and the only
 	// auth surface is the Bearer-header /v1/* dcctl uses.
 	AuthService *auth.Service
-	// TenantGroupPrefix mirrors the auth middleware's setting. Used by
-	// POST /v1/admin/tenants to derive the Asgardeo group name from the
-	// supplied tenant id.
-	TenantGroupPrefix string
-	Log               zerolog.Logger
+	Log         zerolog.Logger
 }
 
 // NewRouter creates and returns the fully configured Chi router.
@@ -242,7 +238,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 		// Admin tenant registry — pre-register empty tenants so they're
 		// visible to GET /v1/tenants before any member has logged in.
 		// Platform-admin-only (enforced in the handler itself).
-		adminTenantHandler := handlers.NewAdminTenantHandler(deps.Repo, deps.TenantGroupPrefix, deps.TenantNSProvisioner, deps.Log)
+		adminTenantHandler := handlers.NewAdminTenantHandler(deps.Repo, deps.TenantNSProvisioner, deps.Log)
 		r.Post("/admin/tenants", adminTenantHandler.Create) // POST /v1/admin/tenants
 
 		// PATCH /v1/admin/tenants/{tenant_id} — adjust the tenant capacity cap.

@@ -99,8 +99,9 @@ You'll need, at a minimum:
 - An **issuer URL** (e.g. `https://api.asgardeo.io/t/<org>`).
 - A **dcctl public client** (Authorization Code + PKCE, redirect `http://localhost:8085/callback`).
 - A **DC-API resource server / audience identifier** that the dcctl client requests.
-- Yourself in groups `dc-admin` and `dc-tenant-<yourname>` (or change the
-  prefixes via `DCAPI_TENANT_GROUP_PREFIX` / `DCAPI_ADMIN_GROUP`).
+- Yourself in the `dc-admin` group (or change the name via
+  `DCAPI_ADMIN_GROUP`) — the only IdP group dc-api interprets. Tenants and
+  members are created through the API (`dcctl admin tenant create`, invites).
 
 ---
 
@@ -439,7 +440,7 @@ cd cloud-ui && pnpm gen:api
 | `failed to bootstrap external network resources` (`ProviderNetwork/Vlan/Subnet/NAD`) | KubeOVN not installed on Harvester, or the bridge name is wrong.              | Run §4 sanity checks. Install KubeOVN if the CRDs are absent.                                                                                        |
 | `failed to initialise OIDC auth middleware` / `oidc: issuer did not match`       | `DCAPI_OIDC_ISSUER` does not exactly match the IdP's published issuer.        | `curl <issuer>/.well-known/openid-configuration` and copy the `issuer` field verbatim. Trailing slashes matter.                                       |
 | `Unauthorized: invalid token` on dcctl login                                     | Token audience doesn't match `DCAPI_OIDC_AUDIENCE`.                           | Add the dcctl client ID to the audience list. For Asgardeo, also ensure the DC-API resource is in the dcctl app's Requested Audience.                |
-| `Forbidden: user has no DC tenant group`                                         | Logged-in user is not in any `dc-tenant-<x>` group on the IdP.                | Add the user to the right group, log out, `dcctl login` again.                                                                                       |
+| `GET /v1/tenants` returns `[]` after login                                       | The user has no role_assignments rows yet.                                    | Invite the user to a tenant (`dcctl tenant member create <email>`), or as admin register a tenant first.                                              |
 | `connect: connection refused` on first request                                   | dc-api never made it past startup.                                            | Re-read the dc-api logs — every fatal exits with a descriptive `Fatal` line.                                                                         |
 | `dc-postgres` won't start                                                        | Port 5432 already in use by another local Postgres.                           | `lsof -iTCP:5432` and stop the conflicting process, or edit `docker-compose.yaml` to remap the port and update `DCAPI_DB_URL`.                       |
 | `failed to connect to PostgreSQL`                                                | Wrong password / wrong port / container not ready.                            | `docker compose ps` and `docker compose logs postgres`. Reset: `make db-reset`.                                                                       |

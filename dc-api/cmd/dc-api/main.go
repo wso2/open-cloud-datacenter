@@ -226,17 +226,14 @@ func main() {
 		}
 	}
 	oidcAuth, err := middleware.NewAuth(ctx, cfg.OIDCIssuer, cfg.OIDCAudience, middleware.AuthConfig{
-		TenantGroupPrefix:    cfg.TenantGroupPrefix,
-		AdminGroup:           cfg.AdminGroup,
-		PlatformAdminSubs:    platformAdminSubs,
-		AutoProvisionMembers: cfg.RBACAutoProvision,
-	}, repo)
+		AdminGroup:        cfg.AdminGroup,
+		PlatformAdminSubs: platformAdminSubs,
+	})
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to initialise OIDC auth middleware")
 	}
 	log.Info().
 		Str("issuer", cfg.OIDCIssuer).
-		Bool("autoprovision", cfg.RBACAutoProvision).
 		Int("platform_admin_subs", len(platformAdminSubs)).
 		Msg("OIDC middleware ready")
 
@@ -271,7 +268,6 @@ func main() {
 			CookieSecure:       cfg.BFFCookieSecure,
 			SessionKey:         sessionKey,
 			AdminGroup:         cfg.AdminGroup,
-			TenantGroupPrefix:  cfg.TenantGroupPrefix,
 			PlatformAdminSubs:  platformAdminSubs,
 		})
 		if err != nil {
@@ -391,7 +387,6 @@ func main() {
 		DirectoryProvider:   directoryProvider,
 		AuthMiddleware:      authMiddleware,
 		AuthService:         bffSvc,
-		TenantGroupPrefix:   cfg.TenantGroupPrefix,
 		Log:                 log.Logger,
 	})
 

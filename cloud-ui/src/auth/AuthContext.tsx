@@ -33,7 +33,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email?: string;
             expires_at: string;
             is_admin: boolean;
-            tenants?: string[];
           }) => {
             if (!cancelled) {
               setUser({
@@ -41,7 +40,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 email: raw.email,
                 expiresAt: raw.expires_at,
                 isAdmin: raw.is_admin ?? false,
-                tenants: raw.tenants ?? [],
               });
             }
           });

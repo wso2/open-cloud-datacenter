@@ -3802,7 +3802,6 @@ paths:
                 email: "alice@example.com"
                 expires_at: "2026-05-16T12:00:00Z"
                 is_admin: false
-                tenants: ["test", "cs-team"]
         "401":
           description: |
             No `dcapi_session` cookie present, cookie decryption failed,
@@ -6476,11 +6475,9 @@ components:
           type: string
           description: |
             principal_id of the granter. Special prefixes mark
-            non-human sources: `autoprovision-from-asgardeo-group`
-            (legacy autoprovision path, default off in Option D),
-            `member-invite:<inviter-sub>` (when the row was created
-            implicitly by an admin invite), or a bare sub when
-            granted explicitly via the role-assignments API.
+            non-human sources: `member-invite:<inviter-sub>` (when the
+            row was created implicitly by an admin invite), or a bare
+            sub when granted explicitly via the role-assignments API.
           example: 01abc123-0000-0000-0000-user000000099
         display_alias:
           type: string
@@ -6853,18 +6850,12 @@ components:
       properties:
         id:
           type: string
-          description: Tenant slug identifier. Matches the Asgardeo group suffix after `DCAPI_TENANT_GROUP_PREFIX`.
+          description: Tenant slug identifier.
           example: cs-team
         name:
           type: string
           description: Human-readable display name. Defaults to `id` when not set explicitly.
           example: Customer Success
-        asgardeo_group:
-          type: string
-          description: |
-            Full Asgardeo group name backing this tenant (e.g. `dc-tenant-cs-team`).
-            Populated automatically by autoprovision and by admin registration.
-          example: dc-tenant-cs-team
         description:
           type: string
           description: Optional free-form description set by the admin who registered the tenant.
@@ -6875,11 +6866,11 @@ components:
         created_by:
           type: string
           description: |
-            Audit field — `autoprovision` when the row was created by the auth
-            middleware on first sighting of a `dc-tenant-*` group claim, or
-            the Asgardeo `sub` of the platform admin who called
-            `POST /v1/admin/tenants` explicitly.
-          example: autoprovision
+            Audit field — the IdP `sub` of the platform admin who called
+            `POST /v1/admin/tenants` (prefixed `admin:`), or
+            `role-grant:<granter-sub>` when the row was upserted by the
+            first role assignment into the tenant.
+          example: admin:01abc123-0000-0000-0000-user000000001
         cpu_cores_cap:
           type: integer
           minimum: 1
@@ -6957,8 +6948,6 @@ components:
           type: string
           description: |
             Tenant slug. Must match `^[a-z][a-z0-9-]{0,30}[a-z0-9]$`.
-            Will be combined with `DCAPI_TENANT_GROUP_PREFIX` to derive
-            the Asgardeo group name (e.g. id=`cs-team` → group `dc-tenant-cs-team`).
           example: cs-team
         name:
           type: string
@@ -7076,28 +7065,21 @@ components:
             sources promote (either suffices):
 
             1. The user's `sub` is in the comma-separated
-               `DCAPI_PLATFORM_ADMIN_SUBS` env var (Option D preferred
-               path — decouples admin status from the IdP).
-            2. The user holds the Asgardeo group named by
-               `DCAPI_ADMIN_GROUP` (default `dc-admin`; legacy fallback).
+               `DCAPI_PLATFORM_ADMIN_SUBS` env var (decouples admin
+               status from the IdP).
+            2. The user holds the IdP group named by
+               `DCAPI_ADMIN_GROUP` (default `dc-admin`) — the only IdP
+               group dc-api interprets.
 
             Derived at login time and cached in the session cookie — no
             live IdP lookup. Platform admins bypass per-tenant RBAC
             checks and see every tenant via `GET /v1/tenants`.
+
+            Tenant membership is never derived from IdP groups — clients
+            enumerate accessible tenants via `GET /v1/tenants`
+            (role_assignments-backed).
           default: false
           example: true
-        tenants:
-          type: array
-          items:
-            type: string
-          description: |
-            Tenant identifiers the user has access to according to the
-            ID token's `groups` claim (strips the `DCAPI_TENANT_GROUP_PREFIX`
-            from each `dc-tenant-*` group). Cached at login time.
-            For admins this list is informational only — admins access
-            every tenant regardless of group membership; use
-            `GET /v1/tenants` to enumerate the actual visible set.
-          example: ["test", "cs-team", "hiran"]
 
     # ── Networking ─────────────────────────────────────────────────────────────
 

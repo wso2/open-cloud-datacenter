@@ -188,16 +188,10 @@ func (t *TenantContext) Validate(next http.Handler) http.Handler {
 			}
 		}
 
-		// Distinguish "in IdP group but no role row" (actionable 403 — owner
-		// must invite) from "no IdP affinity to this tenant" (404 — don't
-		// leak whether the tenant exists).
-		for _, t := range IdPTenantsFromContext(r.Context()) {
-			if t == urlTenant {
-				respond.Error(w, http.StatusForbidden,
-					"no membership in tenant "+urlTenant+"; ask an owner to invite you")
-				return
-			}
-		}
+		// No membership row at any scope admits the caller: answer 404 so
+		// the existence of tenants the caller has no business with is never
+		// leaked. (Membership truth lives in role_assignments — IdP groups
+		// play no part.)
 		respond.Error(w, http.StatusNotFound, "tenant not found")
 	})
 }

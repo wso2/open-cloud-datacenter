@@ -181,14 +181,13 @@ func newTestEnv(ctx context.Context) (*TestEnv, error) {
 		return nil, fmt.Errorf("create dynamic kube client: %w", err)
 	}
 
-	// Pass repo so the M1.5 autoprovision flow runs in integration tests.
-	// AutoProvisionMembers=true preserves M1 behaviour: any user with a valid
-	// dc-tenant-<x> group is auto-enrolled as a 'member' on first request.
+	// Wire the repo into the minter so MintToken seeds tenants +
+	// role_assignments rows (the explicit replacement for the removed
+	// group-autoprovision behaviour — membership truth is the DB).
+	jwtMinter.Repo = repo
 	testAuth, err := middleware.NewTestModeAuth(jwtMinter.PublicKeyJWKS(), middleware.AuthConfig{
-		TenantGroupPrefix:    "dc-tenant-",
-		AdminGroup:           "dc-admin",
-		AutoProvisionMembers: true,
-	}, repo)
+		AdminGroup: "dc-admin",
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create test auth middleware: %w", err)
 	}
@@ -272,7 +271,7 @@ func newSubEnv(t *testing.T, cfg middleware.AuthConfig) *TestEnv {
 	if err != nil {
 		t.Fatalf("newSubEnv: configure F20: %v", err)
 	}
-	testAuth, err := middleware.NewTestModeAuth(env.JWT.PublicKeyJWKS(), cfg, env.DB)
+	testAuth, err := middleware.NewTestModeAuth(env.JWT.PublicKeyJWKS(), cfg)
 	if err != nil {
 		t.Fatalf("newSubEnv: create test auth: %v", err)
 	}

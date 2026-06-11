@@ -18,10 +18,12 @@ import RegisterTenantDialog from '../components/RegisterTenantDialog';
 
 /**
  * Full-screen gate shown when a session is valid but GET /v1/tenants
- * returns an empty array (Option D: dc-api owns tenancy, IdP is authn-only).
+ * returns an empty array (dc-api owns tenancy; the IdP is authn-only).
  *
  * Two variants:
- *   - Regular user (is_admin: false): share-your-sub screen
+ *   - Regular user (is_admin: false): ask-an-admin-to-invite-you screen.
+ *     Invites are by email/directory picker, so the user only needs to
+ *     share their name or email — never an opaque account ID.
  *   - Platform admin (is_admin: true) with no tenants registered yet:
  *     opens the register-tenant dialog (shared with TenantSwitcher
  *     and TenantPickerPage via RegisterTenantDialog).
@@ -111,8 +113,8 @@ export default function NoTenantsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const handleCopy = () => {
-    if (!user?.sub) return;
-    void navigator.clipboard.writeText(user.sub).then(() => {
+    if (!user?.email) return;
+    void navigator.clipboard.writeText(user.email).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
@@ -150,23 +152,24 @@ export default function NoTenantsPage() {
           <>
             <Title2>You don&apos;t have access to any tenants yet</Title2>
             <Body1 className={styles.body}>
-              Your account is authenticated but you haven&apos;t been invited to any tenant.
-              Share your account ID below with a platform administrator and ask them to
-              invite you. Once you&apos;re added, sign out and sign back in to refresh
-              your session.
+              Your account is authenticated but you haven&apos;t been invited to any
+              tenant. Ask an administrator of your team&apos;s tenant to invite you —
+              they can find you in the member picker by your name, or invite the
+              email below directly. Access applies as soon as you&apos;re added;
+              just refresh this page.
             </Body1>
 
-            {user?.sub && (
+            {user?.email && (
               <div className={styles.subBlock}>
-                <span className={styles.subLabel}>Your account ID</span>
+                <span className={styles.subLabel}>Your email</span>
                 <div className={styles.subValueWrap}>
-                  <span className={styles.subValue}>{user.sub}</span>
+                  <span className={styles.subValue}>{user.email}</span>
                   <Button
                     appearance="subtle"
                     size="small"
                     icon={<Copy20Regular />}
                     onClick={handleCopy}
-                    aria-label="Copy account ID"
+                    aria-label="Copy email"
                   >
                     {copied ? 'Copied' : 'Copy'}
                   </Button>

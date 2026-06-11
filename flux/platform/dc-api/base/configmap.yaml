@@ -13,7 +13,8 @@ data:
   DCAPI_HARVESTER_NAMESPACE: "default"
   DCAPI_VM_PROVIDER: "harvester"
   DCAPI_CLUSTER_PROVIDER: "rancher"
-  DCAPI_TENANT_GROUP_PREFIX: "dc-tenant-"
+  # The ONLY IdP group dc-api interprets (platform admin). Tenant
+  # membership lives in the role_assignments table, never in IdP groups.
   DCAPI_ADMIN_GROUP: "dc-admin"
   # Placeholders — patched by per-env overlay.
   DCAPI_OIDC_ISSUER: ""

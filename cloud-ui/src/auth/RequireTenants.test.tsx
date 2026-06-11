@@ -13,7 +13,6 @@ const ADMIN: AuthUser = {
   sub: 'admin-sub',
   expiresAt: '2099-01-01T00:00:00Z',
   isAdmin: true,
-  tenants: [],
 };
 
 function authValue(user: AuthUser | null): AuthContextValue {

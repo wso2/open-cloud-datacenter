@@ -40,29 +40,24 @@ var tenantIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}[a-z0-9]$`)
 
 // AdminTenantHandler handles POST /v1/admin/tenants.
 type AdminTenantHandler struct {
-	repo              *db.Repository
-	tenantGroupPrefix string
-	tenantNS          providers.TenantNamespaceProvisioner // may be nil in tests
-	log               zerolog.Logger
+	repo     *db.Repository
+	tenantNS providers.TenantNamespaceProvisioner // may be nil in tests
+	log      zerolog.Logger
 }
 
 // NewAdminTenantHandler constructs the handler with injected dependencies.
-// tenantGroupPrefix matches DCAPI_TENANT_GROUP_PREFIX; we use it to derive
-// the Asgardeo group name from the supplied tenant id.
 // tenantNS is the per-tenant namespace provisioner — when nil (test fixture
 // / no Kubernetes backend), the namespace creation step is skipped and the
 // tenant row is still committed.
 func NewAdminTenantHandler(
 	repo *db.Repository,
-	tenantGroupPrefix string,
 	tenantNS providers.TenantNamespaceProvisioner,
 	log zerolog.Logger,
 ) *AdminTenantHandler {
 	return &AdminTenantHandler{
-		repo:              repo,
-		tenantGroupPrefix: tenantGroupPrefix,
-		tenantNS:          tenantNS,
-		log:               log,
+		repo:     repo,
+		tenantNS: tenantNS,
+		log:      log,
 	}
 }
 
@@ -126,10 +121,9 @@ func (h *AdminTenantHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	t := models.Tenant{
-		ID:            req.ID,
-		Name:          name,
-		AsgardeoGroup: h.tenantGroupPrefix + req.ID,
-		Description:   req.Description,
+		ID:          req.ID,
+		Name:        name,
+		Description: req.Description,
 		CPUCoresCap:   req.CPUCoresCap,
 		MemoryGBCap:   req.MemoryGBCap,
 		StorageGBCap:  req.StorageGBCap,

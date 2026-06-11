@@ -47,14 +47,13 @@ type Config struct {
 	// session set by one pod is readable by the next.
 	SessionKey []byte
 
-	// AdminGroup and TenantGroupPrefix mirror the auth middleware's
-	// settings. Used at callback time to derive Session.IsAdmin and
-	// Session.Tenants from the ID token's `groups` claim, so /v1/auth/me
-	// can answer admin / membership questions without re-parsing JWTs.
+	// AdminGroup mirrors the auth middleware's setting. Used at callback
+	// time to derive Session.IsAdmin from the ID token's `groups` claim,
+	// so /v1/auth/me can answer the admin question without re-parsing
+	// JWTs. The only IdP group dc-api interprets — tenant membership
+	// lives in the role_assignments table, never in groups.
 	// When AdminGroup is empty the default "dc-admin" is used.
-	// When TenantGroupPrefix is empty the default "dc-tenant-" is used.
-	AdminGroup        string
-	TenantGroupPrefix string
+	AdminGroup string
 
 	// PlatformAdminSubs is the same env-driven set the auth middleware
 	// uses (Option D). When the caller's IdP sub is in this set, IsAdmin
@@ -101,9 +100,6 @@ func NewService(ctx context.Context, cfg Config) (*Service, error) {
 	// forgot to pass them through.
 	if cfg.AdminGroup == "" {
 		cfg.AdminGroup = "dc-admin"
-	}
-	if cfg.TenantGroupPrefix == "" {
-		cfg.TenantGroupPrefix = "dc-tenant-"
 	}
 
 	provider, err := oidc.NewProvider(ctx, cfg.Issuer)

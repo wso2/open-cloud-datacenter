@@ -6,7 +6,7 @@ date: 2026-05-09
 
 # M1.5 RBAC — Membership and Roles
 
-> **Note:** Role vocabulary has moved to RBAC v2. See [rbac-v2.md](rbac-v2.md) for the current action-based model and role catalog. This document covers M1.5 semantics and the autoprovision / member-invite workflow; it uses examples from the v1 era and will be superseded when v2 fully ships.
+> **Note:** Role vocabulary has moved to RBAC v2. See [rbac-v2.md](rbac-v2.md) for the current action-based model and role catalog. This document covers M1.5 semantics and the member-invite workflow; it uses examples from the v1 era and will be superseded when v2 fully ships.
 
 **Related design doc:** [MILESTONES.md § M1.5](../MILESTONES.md#m15--full-rbac-before-m2-after-m1-e2e-test-passes)
 
@@ -51,13 +51,10 @@ The mental model: Asgardeo answers *"who are you?"*. DC-API answers *"what can y
               └────────────────────┘
 ```
 
-When a user logs in via `dcctl login`, Asgardeo issues a JWT. DC-API validates the signature and extracts the user's email and groups. Then:
+When a user logs in via `dcctl login`, the IdP issues a JWT. DC-API validates the signature and extracts the user's identity. Then:
 
-1. **If the user is in the `dc-admin` group** → they're a platform admin, can do anything
-2. **If the user is NOT a member of any tenant in DC-API** → depends on `DCAPI_RBAC_AUTOPROVISION`:
-   - `true` (dev default): auto-grant `member` role if the JWT contains a `dc-tenant-<name>` group
-   - `false` (prod recommended): reject with 403; they must be invited explicitly
-3. **If the user IS a member** → look up their role(s) and enforce per-operation
+1. **If the user is in the `dc-admin` group** (or their sub is in `DCAPI_PLATFORM_ADMIN_SUBS`) → they're a platform admin, can do anything. This is the ONLY IdP group DC-API interprets.
+2. **Otherwise** → every authenticated request is gated against the `role_assignments` table. A user with no rows authenticates fine but has access to nothing (`GET /v1/tenants` returns an empty list; tenant-scoped paths return 404) until an owner or admin invites them.
 
 This design is **forward-compatible with M5**: when the hierarchy lands, the table schema stays the same, just with more scope types.
 
@@ -68,7 +65,7 @@ This design is **forward-compatible with M5**: when the hierarchy lands, the tab
 | `owner` | Yes | Yes | Yes | Yes | Yes | Full control within scope; can manage team membership |
 | `member` | Yes | Yes | Yes | No | No | Day-to-day developer; can't delete or manage people |
 | `viewer` | No | Yes | No | No | No | Read-only; auditors, CI dashboards, approval flows |
-| `platform-admin` | Yes | Yes | Yes | Yes | Yes | Via Asgardeo `dc-admin` group; never stored in `role_assignments` |
+| `platform-admin` | Yes | Yes | Yes | Yes | Yes | Via the `dc-admin` IdP group; never stored in `role_assignments` |
 
 **Effective role** is the most permissive role a principal holds across the scope chain. In M1.5 the chain is always one element (the tenant). In M5 it grows to resource → resource group → subscription → tenant, and you take the max permission across all four.
 
@@ -92,98 +89,19 @@ This user can now act on all resources in the `acme` tenant.
 
 ## Adding a Human to a Tenant
 
-### Step 1: Create the Asgardeo group
-
-The user must be in an Asgardeo group named `dc-tenant-<tenant-slug>`. For tenant `acme`:
-
-1. Open Asgardeo console → Groups
-2. Create group `dc-tenant-acme`
-3. Add the user to the group
-
-See [asgardeo-setup.md](asgardeo-setup.md) for detailed steps.
-
-### Step 2: First login
-
-When the user runs `dcctl login` for the first time:
-
-```bash
-dcctl login
-# Browser opens, user authenticates in Asgardeo
-# JWT contains groups: ["dc-tenant-acme"]
-```
-
-**If autoprovision is ON** (`DCAPI_RBAC_AUTOPROVISION=true`, dev default):
-- DC-API checks: does this user have a `dc-tenant-acme` group?
-- If yes: inserts a `member` role assignment row automatically
-- User is now a member of the `acme` tenant
-
-**If autoprovision is OFF** (`DCAPI_RBAC_AUTOPROVISION=false`, prod recommended):
-- DC-API checks: does this user exist in the `role_assignments` table?
-- If no: returns 403, tells them to ask an owner to invite them
-- No auto-insert happens; an existing `owner` must run the next step
-
-### Step 3: Manual invite (optional, prod only)
-
-If autoprovision is off, an existing tenant owner invites the user:
+Membership is granted by invitation — there is no IdP-side group to create. An existing tenant owner (or a platform admin) invites the user by email:
 
 ```bash
 dcctl tenant member create alice@acme.com --role Contributor --tenant acme
 ```
 
-This inserts a `role_assignments` row even if the user has never logged in. When they do log in later, they'll have access.
+(cloud-ui's grant dialog does the same with a directory-backed member picker.) This inserts a `role_assignments` row even if the user has never logged in. When they log in, they have access immediately — membership is evaluated per request from the table, so no re-login is needed after an invite.
 
 **Email-based invites** require the directory provider to be configured (all four `DCAPI_IDP_*` environment variables must be set; see the "IdP Directory Configuration" section below). If the directory is not configured, or if the email does not resolve to exactly one user, the API returns 422; in that case, invite the user by their OIDC `sub` instead:
 
 ```bash
 dcctl tenant member create 01abc123-0000-0000-0000-user000000001 --role Contributor --tenant acme
 ```
-
-## Autoprovision Explained
-
-### Dev mode (autoprovision ON)
-
-**Environment:** `DCAPI_RBAC_AUTOPROVISION=true` (default)
-
-**Behavior:** First login with a valid `dc-tenant-<x>` group → instant `member` role.
-
-**Pros:**
-- Low friction for local dev and testing
-- Developers can self-onboard into shared dev/test tenants
-- Matches M1 behavior (backward compatible)
-
-**Cons:**
-- Not suitable for production (no explicit approval)
-- Creates membership rows even for typos in group names
-
-**When to use:** Local dev, CI integration tests, pre-prod staging.
-
-### Prod mode (autoprovision OFF)
-
-**Environment:** `DCAPI_RBAC_AUTOPROVISION=false`
-
-**Behavior:** First login without an existing `role_assignments` row → 403. Owner must explicitly invite.
-
-**Pros:**
-- Explicit audit trail for every access grant
-- Prevents accidental over-provisioning
-- Complies with zero-trust onboarding policies
-
-**Cons:**
-- Higher overhead (owner must run `dcctl tenant member create` for each hire)
-- Requires coordination between teams
-
-**When to use:** Production, regulated industries, multi-tenant platforms.
-
-### Migrating from dev to prod
-
-When you flip `DCAPI_RBAC_AUTOPROVISION=false` for the first time:
-
-1. All existing `role_assignments` rows stay in the database — no data loss
-2. New first-time users will be rejected with 403 instead of auto-provisioned
-3. Existing users who already have rows are unaffected
-4. Owners must now explicitly invite new hires
-
-**No migration script needed** — the row format is unchanged.
 
 ## Roles in Practice
 
@@ -416,16 +334,9 @@ Both rows are valid in the same database. The middleware walks the scope chain (
 
 ## Gotchas
 
-### Removed from Asgardeo group
+### Offboarding a member
 
-If an employee leaves and you remove them from the `dc-tenant-acme` group in Asgardeo, their JWT will no longer contain that group. On their next login, DC-API sees a JWT without the group — but **the `role_assignments` row still exists** (deliberately, for audit history).
-
-**What happens:**
-- If the JWT doesn't contain the `dc-tenant-acme` group, the user's effective role is empty
-- They get 403 on any `dcctl` command
-- An owner can explicitly remove them with `dcctl tenant member delete <sub>`
-
-This is by design: the removal audit trail is permanent.
+Disabling or deleting the user in the IdP stops them authenticating at all. Their `role_assignments` rows are removed explicitly by an owner with `dcctl tenant member delete <sub>` — the grant/revoke history stays in `audit_events`.
 
 ### Token rotation with same secret
 
@@ -475,11 +386,10 @@ Service account creation, deletion, and token usage are also audited. The `last_
 
 | Variable | Default | Notes |
 |---|---|---|
-| `DCAPI_RBAC_AUTOPROVISION` | `true` | `true` = auto-grant member on first login; `false` = require explicit invite |
-| `DCAPI_TENANT_GROUP_PREFIX` | `dc-tenant-` | IdP group prefix that identifies tenants (e.g. `dc-tenant-acme` maps to tenant `acme`) |
-| `DCAPI_ADMIN_GROUP` | `dc-admin` | IdP group name for platform admins |
+| `DCAPI_ADMIN_GROUP` | `dc-admin` | IdP group name for platform admins — the ONLY IdP group DC-API interprets |
+| `DCAPI_PLATFORM_ADMIN_SUBS` | (empty) | Comma-separated IdP `sub` values promoted to platform admin without any group |
 
-Change these if your IdP uses different naming conventions.
+Tenant membership is never derived from IdP groups; it lives exclusively in the `role_assignments` table, populated by invites.
 
 ### IdP Directory Configuration (Optional)
 

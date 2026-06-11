@@ -87,7 +87,7 @@ Cluster lifecycle (RKE2 provisioning, kubeconfig retrieval). DC-API talks to Ran
 
 ## 3.6 Asgardeo (identity)
 
-Single OIDC provider for the whole platform. DC-API trusts exactly one issuer. Tenant isolation is enforced by Asgardeo groups (`dc-tenant-<name>`) mapped to DC-API roles in code (not in Rancher configuration). Enterprise tenants use Asgardeo's federation capability for corporate SSO; DC-API still sees a single trusted issuer.
+Single OIDC provider for the whole platform. DC-API trusts exactly one issuer. Tenant isolation is enforced by DC-API's own role_assignments registry (invite-based membership, evaluated per request in code — not in Rancher configuration, and not via IdP groups). Enterprise tenants use Asgardeo's federation capability for corporate SSO; DC-API still sees a single trusted issuer.
 
 ## 3.7 GitHub Actions ARC runner (CI/CD)
 

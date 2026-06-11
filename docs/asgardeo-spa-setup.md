@@ -158,14 +158,18 @@ VITE_API_BASE=https://dcapi.lk.internal.wso2.com
 
 ## Step 5: Verify the group claim
 
-DC-API derives `tenantID` from a group claim on the JWT (prefix
-`dc-tenant-` per the existing setup). The SPA needs the same claim to be
-present in the access token Asgardeo issues to it.
+DC-API reads exactly one group from the JWT: the platform-admin group
+(`DCAPI_ADMIN_GROUP`, default `dc-admin`). Tenant membership comes from
+DC-API's own role_assignments registry, never from groups. The SPA needs
+the `groups` claim present in its tokens so admins are recognised.
 
 1. App **Protocol** tab → **OpenID Connect** subsection → **Scopes** →
    ensure `groups` is checked.
 2. App **User Attributes & Stores** tab → **OIDC Scopes** → ensure
-   `Groups` is mapped under `groups` scope.
+   `Groups` is mapped under `groups` scope — **requested, not mandatory**:
+   a mandatory `groups` attribute makes Asgardeo block group-less users at
+   login with a "complete your profile" prompt, and most users hold no
+   groups at all in this model.
 
 The SPA only requests this scope; the DC-API server-side validation is
 unchanged.

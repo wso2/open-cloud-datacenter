@@ -5,9 +5,9 @@ import { createContext } from 'react';
  * The browser never sees the access token — it lives in the HttpOnly
  * dcapi_session cookie held by dc-api.
  *
- * Fields map 1-to-1 to the AuthMe schema in openapi.yaml. `is_admin`
- * and `tenants` drive the no-tenants welcome screen introduced in
- * Option D (dc-api owns tenancy; IdP is authn-only).
+ * Fields map 1-to-1 to the AuthMe schema in openapi.yaml. Tenant
+ * membership is NOT part of identity — RequireTenants reads it from
+ * GET /v1/tenants (role_assignments-backed).
  */
 export interface AuthUser {
   sub: string;
@@ -16,16 +16,11 @@ export interface AuthUser {
   expiresAt: string;
   /**
    * True when the signed-in user is a platform admin (sourced from
-   * DCAPI_PLATFORM_ADMIN_SUBS or the dc-admin Asgardeo group).
-   * Admins bypass per-tenant RBAC and can see all tenants.
+   * DCAPI_PLATFORM_ADMIN_SUBS or the dc-admin IdP group — the only IdP
+   * group dc-api interprets). Admins bypass per-tenant RBAC and can see
+   * all tenants.
    */
   isAdmin: boolean;
-  /**
-   * Tenant IDs from the ID-token groups claim (stripped prefix).
-   * For non-admins this is the authoritative "what can you access" list.
-   * Empty array = user is authenticated but has no tenant invitations yet.
-   */
-  tenants: string[];
 }
 
 export interface AuthContextValue {

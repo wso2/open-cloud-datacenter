@@ -798,27 +798,24 @@ type AuthMe struct {
 	// sources promote (either suffices):
 	//
 	// 1. The user's `sub` is in the comma-separated
-	//    `DCAPI_PLATFORM_ADMIN_SUBS` env var (Option D preferred
-	//    path — decouples admin status from the IdP).
-	// 2. The user holds the Asgardeo group named by
-	//    `DCAPI_ADMIN_GROUP` (default `dc-admin`; legacy fallback).
+	//    `DCAPI_PLATFORM_ADMIN_SUBS` env var (decouples admin
+	//    status from the IdP).
+	// 2. The user holds the IdP group named by
+	//    `DCAPI_ADMIN_GROUP` (default `dc-admin`) — the only IdP
+	//    group dc-api interprets.
 	//
 	// Derived at login time and cached in the session cookie — no
 	// live IdP lookup. Platform admins bypass per-tenant RBAC
 	// checks and see every tenant via `GET /v1/tenants`.
+	//
+	// Tenant membership is never derived from IdP groups — clients
+	// enumerate accessible tenants via `GET /v1/tenants`
+	// (role_assignments-backed).
 	IsAdmin *bool `json:"is_admin,omitempty"`
 
 	// Sub OIDC subject identifier — the IdP's stable, opaque user ID.
 	// Matches the `sub` claim in the Asgardeo ID token.
 	Sub string `json:"sub"`
-
-	// Tenants Tenant identifiers the user has access to according to the
-	// ID token's `groups` claim (strips the `DCAPI_TENANT_GROUP_PREFIX`
-	// from each `dc-tenant-*` group). Cached at login time.
-	// For admins this list is informational only — admins access
-	// every tenant regardless of group membership; use
-	// `GET /v1/tenants` to enumerate the actual visible set.
-	Tenants *[]string `json:"tenants,omitempty"`
 }
 
 // Bastion defines model for Bastion.
@@ -1189,11 +1186,12 @@ type CreateProjectRequest struct {
 type CreateRoleAssignmentRequest struct {
 	// DisplayAlias Optional mnemonic the granter sets so cloud-ui can show a
 	// readable name in the role-assignment list instead of the opaque
-	// `user_sub`. Defaults to the invite email when the grant uses
-	// `user_email` and no alias is supplied; otherwise purely what the
-	// inviter typed. Never propagated to the IdP, and no IdP attribute
-	// beyond that invite-time email default is ever stored.
-	// Stored verbatim, max 256 chars by convention.
+	// `user_sub`. Defaults to the resolved IdP display name (falling
+	// back to the invite email when the directory has no display name)
+	// when the grant uses `user_email` and no alias is supplied;
+	// otherwise purely what the inviter typed. Never propagated to the
+	// IdP, and nothing beyond that one-time invite-time default is ever
+	// stored. Stored verbatim, max 256 chars by convention.
 	DisplayAlias *string `json:"display_alias,omitempty"`
 
 	// RoleDefinition Role-definition key to grant — any catalog key from
@@ -1205,9 +1203,10 @@ type CreateRoleAssignmentRequest struct {
 	// exclusive with `user_sub` — exactly one of the two is required.
 	// dc-api resolves the email to an OIDC `sub` via a live SCIM2
 	// point lookup against the deployment's directory provider at
-	// request time, stores only the resolved `sub`, and uses the email
-	// as the default `display_alias` when none is supplied. The email
-	// itself is not persisted beyond that inviter-visible alias.
+	// request time, stores only the resolved `sub`, and uses the
+	// resolved IdP display name (falling back to the email when the
+	// directory has no display name) as the default `display_alias`
+	// when none is supplied. Nothing else from the lookup is persisted.
 	//
 	// Returns 422 when the email does not resolve to exactly one IdP
 	// user (no match or ambiguous), and 422 when no directory provider
@@ -1294,8 +1293,6 @@ type CreateTenantRequest struct {
 	Description *string `json:"description,omitempty"`
 
 	// Id Tenant slug. Must match `^[a-z][a-z0-9-]{0,30}[a-z0-9]$`.
-	// Will be combined with `DCAPI_TENANT_GROUP_PREFIX` to derive
-	// the Asgardeo group name (e.g. id=`cs-team` → group `dc-tenant-cs-team`).
 	Id string `json:"id"`
 
 	// MemoryGbCap Optional memory cap (GB). 0 = default (256).
@@ -2034,18 +2031,17 @@ type RoleAssignment struct {
 	// email-based invites consult the directory provider live to
 	// resolve `user_email` → `sub`, but the only IdP-derived values
 	// persisted are the `sub` itself and — when the inviter supplies
-	// no alias — the invite email used as this field's default.
-	// Otherwise it is purely what the inviter typed when they added
-	// the principal.
+	// no alias — the resolved IdP display name (falling back to the
+	// invite email when the directory has no display name) copied once
+	// into this field as its default. Otherwise it is purely what the
+	// inviter typed when they added the principal.
 	DisplayAlias *string   `json:"display_alias,omitempty"`
 	GrantedAt    time.Time `json:"granted_at"`
 
 	// GrantedBy principal_id of the granter. Special prefixes mark
-	// non-human sources: `autoprovision-from-asgardeo-group`
-	// (legacy autoprovision path, default off in Option D),
-	// `member-invite:<inviter-sub>` (when the row was created
-	// implicitly by an admin invite), or a bare sub when
-	// granted explicitly via the role-assignments API.
+	// non-human sources: `member-invite:<inviter-sub>` (when the
+	// row was created implicitly by an admin invite), or a bare
+	// sub when granted explicitly via the role-assignments API.
 	GrantedBy string `json:"granted_by"`
 
 	// Id UUID of the role_assignments row
@@ -2242,10 +2238,6 @@ type SystemPoolSpecSize string
 // carries `roles`); `Tenant` is the canonical record without a
 // principal context.
 type Tenant struct {
-	// AsgardeoGroup Full Asgardeo group name backing this tenant (e.g. `dc-tenant-cs-team`).
-	// Populated automatically by autoprovision and by admin registration.
-	AsgardeoGroup *string `json:"asgardeo_group,omitempty"`
-
 	// CpuCoresCap Tenant capacity ceiling for CPU cores. Set by platform admin at
 	// tenant create (or via PATCH `/v1/admin/tenants/{tenant_id}`).
 	// Tenant owners distribute this budget across projects via the
@@ -2256,16 +2248,16 @@ type Tenant struct {
 	// CreatedAt When this tenant record was first inserted into the `tenants` table.
 	CreatedAt time.Time `json:"created_at"`
 
-	// CreatedBy Audit field — `autoprovision` when the row was created by the auth
-	// middleware on first sighting of a `dc-tenant-*` group claim, or
-	// the Asgardeo `sub` of the platform admin who called
-	// `POST /v1/admin/tenants` explicitly.
+	// CreatedBy Audit field — the IdP `sub` of the platform admin who called
+	// `POST /v1/admin/tenants` (prefixed `admin:`), or
+	// `role-grant:<granter-sub>` when the row was upserted by the
+	// first role assignment into the tenant.
 	CreatedBy *string `json:"created_by,omitempty"`
 
 	// Description Optional free-form description set by the admin who registered the tenant.
 	Description *string `json:"description,omitempty"`
 
-	// Id Tenant slug identifier. Matches the Asgardeo group suffix after `DCAPI_TENANT_GROUP_PREFIX`.
+	// Id Tenant slug identifier.
 	Id string `json:"id"`
 
 	// MemoryGbCap Tenant capacity ceiling for memory (GB). Same model as `cpu_cores_cap`.

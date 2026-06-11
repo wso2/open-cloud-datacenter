@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -119,8 +118,9 @@ func (s *Service) HandleCallback(log zerolog.Logger) http.HandlerFunc {
 		}
 
 		// Pull a few claims so /v1/auth/me can answer without re-verifying.
-		// `groups` is parsed here and projected into IsAdmin + Tenants so the
-		// BFF endpoint never needs to re-decode the JWT.
+		// `groups` is parsed here only to derive IsAdmin — tenant
+		// membership comes from the role_assignments table (GET /v1/tenants),
+		// never from IdP groups.
 		var claims struct {
 			Sub    string   `json:"sub"`
 			Email  string   `json:"email"`
@@ -128,29 +128,15 @@ func (s *Service) HandleCallback(log zerolog.Logger) http.HandlerFunc {
 		}
 		_ = idToken.Claims(&claims)
 
-		// Option D: env-var sub list takes precedence; AdminGroup is the
-		// legacy fallback. Either promotes.
+		// Env-var sub list and AdminGroup both promote.
 		var sessionIsAdmin bool
 		if _, ok := s.cfg.PlatformAdminSubs[claims.Sub]; ok {
 			sessionIsAdmin = true
 		}
-		sessionTenants := make([]string, 0, len(claims.Groups))
-		seenTenant := make(map[string]struct{}, len(claims.Groups))
 		for _, g := range claims.Groups {
 			if g == s.cfg.AdminGroup {
 				sessionIsAdmin = true
-				continue
-			}
-			if strings.HasPrefix(g, s.cfg.TenantGroupPrefix) {
-				t := strings.TrimPrefix(g, s.cfg.TenantGroupPrefix)
-				if t == "" {
-					continue
-				}
-				if _, ok := seenTenant[t]; ok {
-					continue
-				}
-				seenTenant[t] = struct{}{}
-				sessionTenants = append(sessionTenants, t)
+				break
 			}
 		}
 
@@ -172,7 +158,6 @@ func (s *Service) HandleCallback(log zerolog.Logger) http.HandlerFunc {
 			Subject:      claims.Sub,
 			Email:        claims.Email,
 			IsAdmin:      sessionIsAdmin,
-			Tenants:      sessionTenants,
 		}
 		sessionValue, err := s.codec.EncodeSession(sess)
 		if err != nil {
@@ -262,21 +247,16 @@ func (s *Service) HandleMe(log zerolog.Logger) http.HandlerFunc {
 		// middleware already does that on every /v1/* call, and /v1/auth/me
 		// is meant to be cheap for the SPA to hit on mount.
 		//
-		// is_admin and tenants are derived once at callback time from the
-		// ID token's `groups` claim and cached in the session cookie, so
-		// the SPA can render admin UI / populate the tenant switcher
-		// without a separate JWT decode step.
-		tenants := sess.Tenants
-		if tenants == nil {
-			tenants = []string{}
-		}
+		// is_admin is derived once at callback time from the ID token's
+		// `groups` claim and cached in the session cookie. The SPA reads
+		// tenant membership from GET /v1/tenants (role_assignments-backed),
+		// not from here.
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"sub":        sess.Subject,
 			"email":      sess.Email,
 			"expires_at": sess.ExpiresAt,
 			"is_admin":   sess.IsAdmin,
-			"tenants":    tenants,
 		})
 	}
 }

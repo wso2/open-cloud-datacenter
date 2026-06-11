@@ -24,14 +24,13 @@ type Session struct {
 	// happens inside the auth middleware on every API call anyway).
 	Subject string `json:"s"`
 	Email   string `json:"m,omitempty"`
-	// IsAdmin and Tenants are derived from the `groups` claim in the ID
-	// token at callback time so /v1/auth/me can answer "am I admin?" /
-	// "which tenants am I in?" without re-parsing the JWT. The same
-	// derivation runs again inside the auth middleware on every /v1/*
-	// call; storing them here is purely for the BFF endpoint's
-	// convenience.
-	IsAdmin bool     `json:"adm,omitempty"`
-	Tenants []string `json:"t,omitempty"`
+	// IsAdmin is derived from the `groups` claim in the ID token at
+	// callback time so /v1/auth/me can answer "am I admin?" without
+	// re-parsing the JWT. The same derivation runs again inside the auth
+	// middleware on every /v1/* call; storing it here is purely for the
+	// BFF endpoint's convenience. Tenant membership is never cached in
+	// the session — the SPA reads GET /v1/tenants (role_assignments).
+	IsAdmin bool `json:"adm,omitempty"`
 }
 
 // Expired returns true once the access token is past its expiry. A

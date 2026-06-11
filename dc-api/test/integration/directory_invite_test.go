@@ -101,16 +101,14 @@ var _ directory.Provider = (*fakeDirectoryProvider)(nil)
 
 // directorySubEnv builds a fresh httptest.Server over the shared env's repo +
 // JWT minter with all-nop compute/cluster/network backends and the given
-// directory provider (nil = feature dark). AutoProvisionMembers=false so tests
-// control role rows exactly (mirrors rbacSubEnv). Works identically in live
+// directory provider (nil = feature dark). Tests control role rows exactly
+// (mirrors rbacSubEnv). Works identically in live
 // and DCAPI_TEST_NOP=1 modes — nothing here touches the cluster.
 func directorySubEnv(t *testing.T, dir directory.Provider) *TestEnv {
 	t.Helper()
 	testAuth, err := middleware.NewTestModeAuth(env.JWT.PublicKeyJWKS(), middleware.AuthConfig{
-		TenantGroupPrefix:    "dc-tenant-",
-		AdminGroup:           "dc-admin",
-		AutoProvisionMembers: false,
-	}, env.DB)
+		AdminGroup: "dc-admin",
+	})
 	require.NoError(t, err, "directorySubEnv: create test auth")
 
 	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, NoColor: true}).With().Timestamp().Logger()

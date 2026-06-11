@@ -23,10 +23,10 @@ Asgardeo organization: "myorg"
 │
 ├── Groups
 │   ├── dc-admin                          ← Platform admins
-│   └── dc-tenant-<yourname>              ← Your personal tenant
+│                                          (tenants live in dc-api's DB, not in groups)
 │
 └── User: you
-    └── Member of: dc-admin, dc-tenant-<yourname>
+    └── Member of: dc-admin
 ```
 
 ---
@@ -108,9 +108,7 @@ Repeat this for the **DC-API** application (Step 2) if you plan to use client cr
    | Group Name              | Purpose                        |
    |-------------------------|--------------------------------|
    | `dc-admin`              | Platform administrators        |
-   | `dc-tenant-<yourname>`  | Your personal tenant           |
 
-   Replace `<yourname>` with a short identifier, e.g., `dc-tenant-hiran`.
 
 3. Click **Save** for each group.
 
@@ -121,7 +119,7 @@ Repeat this for the **DC-API** application (Step 2) if you plan to use client cr
 1. Go to **User Management** → **Users**.
 2. Click on your user account.
 3. Go to the **Groups** tab.
-4. Assign yourself to both `dc-admin` and `dc-tenant-<yourname>`.
+4. Assign yourself to `dc-admin`. (This is the ONLY group dc-api interprets — tenants are registered via `POST /v1/admin/tenants` / `dcctl admin tenant create`, and members are invited by email.)
 5. Click **Save**.
 
 ---
@@ -138,7 +136,6 @@ export DCAPI_OIDC_ISSUER="https://api.asgardeo.io/t/<org>"
 export DCAPI_OIDC_AUDIENCE="<dc-api-client-id>"
 
 # Group mapping (defaults match what we created above — no change needed)
-# export DCAPI_TENANT_GROUP_PREFIX="dc-tenant-"
 # export DCAPI_ADMIN_GROUP="dc-admin"
 ```
 
@@ -168,7 +165,7 @@ dcctl login
 #   Tenant: <yourname>
 ```
 
-If you see `Forbidden: user has no DC tenant group`, your user is not yet in a `dc-tenant-*` group — revisit Step 6.
+If `GET /v1/tenants` comes back empty, you haven't been invited to any tenant yet (or, as an admin, none are registered) — register a tenant and invite members.
 
 ---
 
@@ -197,8 +194,9 @@ To use Keycloak, Okta, or any other OIDC provider instead of Asgardeo:
 
 1. Create a **public client** (Authorization Code + PKCE) for dcctl.
 2. Create an **API resource** or **audience** for DC-API.
-3. Create groups with the naming convention `dc-admin` and `dc-tenant-<name>`
-   (or change `DCAPI_TENANT_GROUP_PREFIX` / `DCAPI_ADMIN_GROUP` to match your convention).
+3. Create a `dc-admin` group for platform admins (or change `DCAPI_ADMIN_GROUP`
+   to match your convention). No other groups are needed — tenant membership is
+   managed inside dc-api via invites.
 4. Update the two environment variables:
    ```bash
    export DCAPI_OIDC_ISSUER="<your-idp-issuer>"

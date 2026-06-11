@@ -54,32 +54,19 @@ type Config struct {
 	// commas still works and behaves like a one-element list.
 	OIDCAudience []string `envconfig:"OIDC_AUDIENCE" required:"true"`
 
-	// TenantGroupPrefix: groups matching "<prefix><name>" map to tenant "<name>".
-	// Override if your IdP uses a different group naming convention.
-	TenantGroupPrefix string `envconfig:"TENANT_GROUP_PREFIX" default:"dc-tenant-"`
-
-	// AdminGroup: members of this Asgardeo group get the "admin" role in
-	// DC-API. Legacy mechanism — preferred way (Option D) is to list the
-	// Asgardeo subs of platform admins in PlatformAdminSubs. AdminGroup
-	// stays as a fallback during the transition; either path promotes.
+	// AdminGroup: members of this IdP group get the "admin" role in DC-API.
+	// This is the ONLY IdP group dc-api interprets — tenant membership lives
+	// exclusively in the role_assignments table (invites), never in IdP
+	// groups. PlatformAdminSubs promotes the same way; either path works.
 	AdminGroup string `envconfig:"ADMIN_GROUP" default:"dc-admin"`
 
-	// PlatformAdminSubs is a comma-separated list of Asgardeo `sub` values
-	// for users who should bypass per-tenant RBAC. This is the Option D
-	// preferred path because it decouples platform admin from any IdP-side
-	// group machinery — useful when an operator wants admin status to
-	// survive an IdP migration or to add an admin without console access.
-	// Either this list OR membership in AdminGroup promotes a user.
-	// Empty = no env-driven admins (rely solely on AdminGroup).
+	// PlatformAdminSubs is a comma-separated list of IdP `sub` values for
+	// users who should bypass per-tenant RBAC. It decouples platform admin
+	// from any IdP-side group machinery — useful when an operator wants
+	// admin status to survive an IdP migration or to add an admin without
+	// console access. Either this list OR membership in AdminGroup promotes
+	// a user. Empty = no env-driven admins (rely solely on AdminGroup).
 	PlatformAdminSubs []string `envconfig:"PLATFORM_ADMIN_SUBS"`
-
-	// RBACAutoProvision: when true, the first time a user with a valid
-	// dc-tenant-<x> group is seen, DC-API auto-inserts a 'member'
-	// role_assignment row. Option D treats autoprovision as legacy — the
-	// new default is `false`, which means new members must be explicitly
-	// invited via POST /v1/tenants/{tid}/members. Set to true to restore
-	// the M1.5 self-onboarding behaviour for environments that prefer it.
-	RBACAutoProvision bool `envconfig:"RBAC_AUTOPROVISION" default:"false"`
 
 	// ── Harvester ─────────────────────────────────────────────────────────────
 	// HarvesterKubeconfig: base64-encoded kubeconfig for the Harvester cluster.

@@ -127,9 +127,7 @@ func insertRole(t *testing.T, subEnv *TestEnv, sub, tenantID string, role models
 func rbacSubEnv(t *testing.T) *TestEnv {
 	t.Helper()
 	return newSubEnv(t, middleware.AuthConfig{
-		TenantGroupPrefix:    "dc-tenant-",
-		AdminGroup:           "dc-admin",
-		AutoProvisionMembers: false,
+		AdminGroup: "dc-admin",
 	})
 }
 

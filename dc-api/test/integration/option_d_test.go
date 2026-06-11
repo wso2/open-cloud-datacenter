@@ -40,10 +40,8 @@ func optionDSubEnv(t *testing.T, platformAdminSubs ...string) *TestEnv {
 		subs[s] = struct{}{}
 	}
 	return newSubEnv(t, middleware.AuthConfig{
-		TenantGroupPrefix:    "dc-tenant-",
-		AdminGroup:           "dc-admin",
-		PlatformAdminSubs:    subs,
-		AutoProvisionMembers: false,
+		AdminGroup: "dc-admin",
+		PlatformAdminSubs: subs,
 	})
 }
 

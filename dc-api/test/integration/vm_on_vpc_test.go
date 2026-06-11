@@ -157,11 +157,9 @@ func newSubEnvWithHarvester(t *testing.T) *TestEnv {
 	}
 
 	cfg := middleware.AuthConfig{
-		TenantGroupPrefix:    "dc-tenant-",
-		AdminGroup:           "dc-admin",
-		AutoProvisionMembers: true,
+		AdminGroup: "dc-admin",
 	}
-	testAuth, err := middleware.NewTestModeAuth(env.JWT.PublicKeyJWKS(), cfg, env.DB)
+	testAuth, err := middleware.NewTestModeAuth(env.JWT.PublicKeyJWKS(), cfg)
 	if err != nil {
 		t.Fatalf("newSubEnvWithHarvester: create test auth: %v", err)
 	}
