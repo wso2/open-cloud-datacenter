@@ -89,18 +89,24 @@ const useStyles = makeStyles({
   },
 });
 
-/** Derive a display name and two-letter initials for the avatar. */
-function deriveIdentity(name?: string, email?: string, sub?: string): {
+/**
+ * Derive a display name and two-letter initials for the avatar. The opaque
+ * OIDC sub is deliberately NOT used: a UUID makes meaningless initials and
+ * an unreadable title (it stays visible in the Account ID row instead).
+ * With no name or email claim the avatar falls back to the person glyph.
+ */
+function deriveIdentity(name?: string, email?: string): {
   displayName: string;
-  initials: string;
+  initials: string | undefined;
 } {
-  const displayName = name?.trim() || email?.trim() || sub?.trim() || 'User';
-  const base = name?.trim() || (email ? email.split('@')[0] : sub) || 'User';
+  const displayName = name?.trim() || email?.trim() || 'User';
+  const base = name?.trim() || (email ? email.split('@')[0] : '');
+  if (!base) return { displayName, initials: undefined };
   const parts = base.split(/[\s._-]+/).filter(Boolean);
   const initials =
     ((parts[0]?.[0] ?? '') + (parts.length > 1 ? (parts.at(-1)?.[0] ?? '') : (parts[0]?.[1] ?? '')))
       .toUpperCase()
-      .slice(0, 2) || 'U';
+      .slice(0, 2) || undefined;
   return { displayName, initials };
 }
 
@@ -120,7 +126,7 @@ export default function UserMenu() {
   const { user, logout } = useAuth();
   const [copied, setCopied] = useState(false);
 
-  const { displayName, initials } = deriveIdentity(user?.name, user?.email, user?.sub);
+  const { displayName, initials } = deriveIdentity(user?.name, user?.email);
   const expiry = formatExpiry(user?.expiresAt);
 
   const copySub = () => {
