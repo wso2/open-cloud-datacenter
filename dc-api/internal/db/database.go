@@ -185,6 +185,80 @@ func (r *Repository) DeleteDatabase(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// ListVPCDatabasesPendingDNS returns every VPC-mode Database that has
+// reached ACTIVE, has an endpoint IP assigned, but does not yet have a
+// matching `private_endpoints` row (target_type='database'). The DNS
+// reconciler consumes this list to register host records.
+//
+// endpoint_address is populated by the dbaas controller (read via the
+// GET handler's status overlay) — rows where the overlay has not yet run
+// or where the controller has not yet reported an IP are excluded so the
+// reconciler does not attempt to register an empty record.
+func (r *Repository) ListVPCDatabasesPendingDNS(ctx context.Context) ([]*models.Database, error) {
+	const q = `
+		SELECT d.id, d.tenant_id, d.tenant_uuid, d.project_id, d.project_uuid,
+		       d.name, d.engine, d.engine_version, d.instance_class, d.allocated_storage_gb,
+		       d.network_mode, d.vnet_id, d.subnet_id, d.nad_ref,
+		       d.status, d.message,
+		       d.endpoint_address, d.endpoint_port,
+		       d.credentials_consumed_at, d.created_at, d.updated_at
+		FROM   databases d
+		WHERE  d.network_mode = 'vpc'
+		  AND  d.status = 'ACTIVE'
+		  AND  d.endpoint_address IS NOT NULL
+		  AND  d.endpoint_address != ''
+		  AND  d.vnet_id IS NOT NULL
+		  AND NOT EXISTS (
+		    SELECT 1 FROM private_endpoints pe
+		    WHERE pe.target_type = 'database' AND pe.target_id = d.id
+		  )
+		ORDER BY d.created_at ASC`
+
+	rows, err := r.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("db list vpc databases pending dns: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*models.Database, 0)
+	for rows.Next() {
+		d := &models.Database{}
+		var engine, networkMode, status string
+		var engineVersion, nadRef, message, endpointAddress *string
+		var endpointPort *int
+		if err := rows.Scan(
+			&d.ID, &d.TenantID, &d.TenantUUID, &d.ProjectID, &d.ProjectUUID,
+			&d.Name, &engine, &engineVersion, &d.InstanceClass, &d.AllocatedStorageGB,
+			&networkMode, &d.VNetID, &d.SubnetID, &nadRef,
+			&status, &message,
+			&endpointAddress, &endpointPort,
+			&d.CredentialsConsumedAt, &d.CreatedAt, &d.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("db scan database (dns pending): %w", err)
+		}
+		d.Engine = models.DatabaseEngine(engine)
+		d.NetworkMode = models.DatabaseNetworkMode(networkMode)
+		d.Status = models.ResourceStatus(status)
+		if engineVersion != nil {
+			d.EngineVersion = *engineVersion
+		}
+		if nadRef != nil {
+			d.NadRef = *nadRef
+		}
+		if message != nil {
+			d.Message = *message
+		}
+		if endpointAddress != nil {
+			d.EndpointAddress = *endpointAddress
+		}
+		if endpointPort != nil {
+			d.EndpointPort = *endpointPort
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 // UpdateDatabaseStatus writes the latest controller-reported state to the
 // row. Called from the GET handler (status overlay) and (later) the
 // reconciler. endpointAddress/endpointPort may be empty/0 until the

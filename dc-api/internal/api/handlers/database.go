@@ -47,6 +47,7 @@ import (
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
 	"github.com/wso2/dc-api/internal/providers/common"
+	"github.com/wso2/dc-api/internal/providers/endpoints"
 	"github.com/wso2/dc-api/internal/rbac"
 )
 
@@ -56,6 +57,11 @@ type DatabaseHandler struct {
 	// provisioner is optional. Nil falls back to DB-only synchronous CRUD
 	// (used by tests + dc-api deployments without a Kubernetes backend).
 	provisioner providers.DatabaseProvisioner
+	// endpointProvisioner drives the per-VPC CoreDNS Corefile and is used
+	// by Delete to remove a database's DNS record before the VM goes away.
+	// Nil when KubeOVN isn't the network provider; the handler skips DNS
+	// teardown in that case (no Corefile to touch).
+	endpointProvisioner endpoints.Provisioner
 	// osImage is the operator-configured Harvester VM image the controller
 	// boots database VMs from (DCAPI_DBAAS_OS_IMAGE). Stamped into every
 	// DBInstance CR. Empty leaves the controller's own default.
@@ -66,8 +72,21 @@ type DatabaseHandler struct {
 // NewDatabaseHandler constructs a DatabaseHandler. Pass nil for provisioner
 // to keep the DB-only fallback behaviour. osImage is the operator-configured
 // default OS image ("namespace/name"); empty defers to the controller default.
-func NewDatabaseHandler(repo *db.Repository, provisioner providers.DatabaseProvisioner, osImage string, log zerolog.Logger) *DatabaseHandler {
-	return &DatabaseHandler{repo: repo, provisioner: provisioner, osImage: osImage, log: log}
+// endpointProvisioner may be nil when KubeOVN is not the network provider.
+func NewDatabaseHandler(
+	repo *db.Repository,
+	provisioner providers.DatabaseProvisioner,
+	endpointProvisioner endpoints.Provisioner,
+	osImage string,
+	log zerolog.Logger,
+) *DatabaseHandler {
+	return &DatabaseHandler{
+		repo:                repo,
+		provisioner:         provisioner,
+		endpointProvisioner: endpointProvisioner,
+		osImage:             osImage,
+		log:                 log,
+	}
 }
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
@@ -110,8 +129,9 @@ type databaseResponse struct {
 	Status  string `json:"status"`
 	Message string `json:"message,omitempty"`
 
-	EndpointAddress string `json:"endpoint_address,omitempty"`
-	EndpointPort    int    `json:"endpoint_port,omitempty"`
+	EndpointAddress  string `json:"endpoint_address,omitempty"`
+	EndpointPort     int    `json:"endpoint_port,omitempty"`
+	EndpointHostname string `json:"endpoint_hostname,omitempty"`
 
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
@@ -139,6 +159,7 @@ func databaseToResponse(d *models.Database) databaseResponse {
 		Message:            d.Message,
 		EndpointAddress:    d.EndpointAddress,
 		EndpointPort:       d.EndpointPort,
+		EndpointHostname:   d.EndpointHostname,
 		CreatedAt:          d.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:          d.UpdatedAt.Format(time.RFC3339),
 	}
@@ -442,6 +463,16 @@ func (h *DatabaseHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// DNS teardown — remove the per-VPC CoreDNS host record BEFORE the VM goes
+	// away so no client can resolve to a dying IP. Idempotent + no-op when no
+	// DNS was ever registered (legacy-mode DBs, or DBs deleted before
+	// reaching ACTIVE).
+	if err := h.teardownDatabaseDNS(r.Context(), d); err != nil {
+		h.log.Error().Err(err).Str("database_id", d.ID.String()).Msg("teardown database dns")
+		writeError(w, http.StatusInternalServerError, "failed to teardown dns: "+err.Error())
+		return
+	}
+
 	// Operator-side teardown. Idempotent on the adapter (NotFound → success).
 	if h.provisioner != nil {
 		ns := common.NamespaceForProject(d.TenantID, d.ProjectID)
@@ -598,10 +629,92 @@ func (h *DatabaseHandler) Credentials(w http.ResponseWriter, r *http.Request) {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// overlayLiveStatus mutates resp in place with the controller's live status.
-// No-op when the provisioner is nil. Errors are logged + swallowed so the
-// caller still gets a DB-only view rather than a 500.
+// teardownDatabaseDNS removes the DNS record for a database before its VM is
+// deleted. Idempotent and safe to call when no PE row exists (no-op).
+//
+// Ordering rationale:
+//   - SyncCorefile (rewrites the per-VPC Corefile without this database's
+//     entry) runs BEFORE the PE row is deleted. If SyncCorefile fails, the
+//     Postgres state is unchanged and the customer's DELETE retry runs the
+//     whole sequence again — idempotent.
+//   - If SyncCorefile succeeds but the PE row delete fails, the Corefile is
+//     correct (record gone) but Postgres has an orphan PE row. The next
+//     DELETE retry will find that orphan, call SyncCorefile again (idempotent
+//     no-op since the entry is already absent), and delete the row.
+//
+// Returns nil when h.endpointProvisioner is nil (no KubeOVN → no Corefile)
+// or when no PE row exists for this database (DNS never registered).
+func (h *DatabaseHandler) teardownDatabaseDNS(ctx context.Context, d *models.Database) error {
+	if h.endpointProvisioner == nil {
+		return nil
+	}
+	peRows, err := h.repo.ListPrivateEndpointsByTarget(ctx, models.PrivateEndpointTargetDatabase, d.ID)
+	if err != nil {
+		return fmt.Errorf("list private_endpoints for database %s: %w", d.ID, err)
+	}
+	for _, pe := range peRows {
+		vnet, err := h.repo.GetVNetInternal(ctx, pe.VNetID)
+		if err != nil {
+			return fmt.Errorf("get vnet %s for database dns teardown: %w", pe.VNetID, err)
+		}
+		siblings, err := h.repo.ListPrivateEndpointsByVNet(ctx, pe.VNetID)
+		if err != nil {
+			return fmt.Errorf("list private_endpoints in vnet %s: %w", pe.VNetID, err)
+		}
+		remaining := make([]endpoints.HostRecord, 0, len(siblings))
+		for _, s := range siblings {
+			if s.ID == pe.ID {
+				continue
+			}
+			if s.Hostname == "" || s.IPAddress == "" {
+				continue
+			}
+			remaining = append(remaining, endpoints.HostRecord{
+				Hostname:  s.Hostname,
+				IPAddress: s.IPAddress,
+			})
+		}
+		if err := h.endpointProvisioner.SyncCorefile(ctx, vnet.BackendUID, remaining); err != nil {
+			return fmt.Errorf("sync corefile for vpc %s: %w", vnet.BackendUID, err)
+		}
+		if err := h.repo.DeletePrivateEndpoint(ctx, pe.ID); err != nil {
+			return fmt.Errorf("delete private_endpoint row %s: %w", pe.ID, err)
+		}
+		h.log.Info().
+			Str("database_id", d.ID.String()).
+			Str("hostname", pe.Hostname).
+			Str("vpc", vnet.BackendUID).
+			Msg("dns record removed")
+	}
+	return nil
+}
+
+// overlayLiveStatus mutates resp in place with the controller's live status
+// AND the DNS-registered hostname from the private_endpoints row (written by
+// the DatabaseDNSReconciler once the DB reaches ACTIVE with an IP). Errors on
+// either lookup are logged + swallowed so the caller still gets a partial
+// view rather than a 500.
 func (h *DatabaseHandler) overlayLiveStatus(ctx context.Context, d *models.Database, resp *databaseResponse) {
+	// ── DNS hostname overlay ──────────────────────────────────────────────
+	// Done first because it has no dependency on the operator-side provisioner
+	// (the reconciler that writes these rows runs independently). Looks up
+	// the private_endpoints row for this database and surfaces its hostname
+	// only when the registration is ACTIVE — FAILED rows (e.g. hostname
+	// collision) are skipped so we don't return a name CoreDNS isn't serving.
+	if peRows, err := h.repo.ListPrivateEndpointsByTarget(ctx, models.PrivateEndpointTargetDatabase, d.ID); err == nil {
+		for _, pe := range peRows {
+			if pe.Status == models.StatusActive && pe.Hostname != "" {
+				resp.EndpointHostname = pe.Hostname
+				break
+			}
+		}
+	} else {
+		h.log.Warn().Err(err).
+			Str("database_id", d.ID.String()).
+			Msg("load private_endpoint hostname; returning view without DNS")
+	}
+
+	// ── Controller-side live status overlay ────────────────────────────────
 	if h.provisioner == nil {
 		return
 	}
@@ -617,8 +730,9 @@ func (h *DatabaseHandler) overlayLiveStatus(ctx context.Context, d *models.Datab
 	if st == nil {
 		return
 	}
-	if phase := mapDatabasePhaseToStatus(st.Phase); phase != "" {
-		resp.Status = phase
+	newStatus := mapDatabasePhaseToStatus(st.Phase)
+	if newStatus != "" {
+		resp.Status = newStatus
 	}
 	if st.Message != "" {
 		resp.Message = st.Message
@@ -628,6 +742,26 @@ func (h *DatabaseHandler) overlayLiveStatus(ctx context.Context, d *models.Datab
 	}
 	if st.EndpointPort != 0 {
 		resp.EndpointPort = st.EndpointPort
+	}
+
+	// Persist CR state back to Postgres when the row is out of date.
+	// Without this, the DNS reconciler (which reads from Postgres, not Kubernetes)
+	// never sees ACTIVE+IP and never registers the DNS record.
+	// Only write when something actually changed to avoid unnecessary DB churn.
+	statusChanged := newStatus != "" && models.ResourceStatus(newStatus) != d.Status
+	addrChanged := resp.EndpointAddress != "" && resp.EndpointAddress != d.EndpointAddress
+	if statusChanged || addrChanged {
+		if err := h.repo.UpdateDatabaseStatus(
+			ctx, d.ID,
+			models.ResourceStatus(resp.Status),
+			resp.Message,
+			resp.EndpointAddress,
+			resp.EndpointPort,
+		); err != nil {
+			h.log.Warn().Err(err).
+				Str("database_id", d.ID.String()).
+				Msg("persist database status from CR; DNS reconciler will retry next tick")
+		}
 	}
 }
 

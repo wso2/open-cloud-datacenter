@@ -214,6 +214,22 @@ func (p *KubeOVNProvisioner) Provision(ctx context.Context, in ProvisionInput) (
 	}, nil
 }
 
+// SyncCorefile rewrites the per-VPC Corefile so its hosts block contains
+// exactly the given records. Callers that own host-record state in their own
+// tables (e.g. the DBaaS DNS reconciler that derives records from the
+// `databases` table without going through the proxy-pod path) use this to
+// keep the Corefile in sync without invoking the full Provision/Teardown
+// machinery.
+//
+// The records are written verbatim — the caller is responsible for assembling
+// the complete list (its own records plus any siblings from other host-record
+// sources in the same VPC, e.g. private_endpoints rows). The Corefile is the
+// union of every record source, so passing only a partial list would silently
+// drop the omitted entries.
+func (p *KubeOVNProvisioner) SyncCorefile(ctx context.Context, vnetBackendUID string, hosts []HostRecord) error {
+	return p.regenerateVpcCorefile(ctx, vnetBackendUID, hosts)
+}
+
 // Teardown implements Provisioner.Teardown.
 //
 // Order matters: Deployment first (pod terminates, Multus LSP releases the
@@ -676,7 +692,9 @@ func (p *KubeOVNProvisioner) renderCorefile(hosts []HostRecord) string {
 	}
 	return fmt.Sprintf(`.:53 {
     errors
-    health { lameduck 5s }
+    health {
+        lameduck 5s
+    }
     ready
 %s    forward . %s { max_concurrent 1000 }
     cache 300

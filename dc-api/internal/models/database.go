@@ -79,6 +79,13 @@ type Database struct {
 	EndpointAddress string `json:"endpoint_address,omitempty"`
 	EndpointPort    int    `json:"endpoint_port,omitempty"`
 
+	// EndpointHostname is the DNS name registered in the tenant's per-VPC
+	// CoreDNS once the DatabaseDNSReconciler has run for this DB. Resolves
+	// to EndpointAddress inside the VPC. Empty for legacy-mode (non-VPC)
+	// databases and until the reconciler has registered the record.
+	// Customers should prefer this over EndpointAddress for client config.
+	EndpointHostname string `json:"endpoint_hostname,omitempty"`
+
 	// CredentialsConsumedAt is nil until GET .../credentials has been called
 	// once; subsequent calls return 410 Gone (shown-once — same as KeyVault,
 	// per managed-services contract §8).

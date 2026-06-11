@@ -96,6 +96,12 @@ type TeardownInput struct {
 type Provisioner interface {
 	Provision(ctx context.Context, in ProvisionInput) (ProvisionResult, error)
 	Teardown(ctx context.Context, in TeardownInput) error
+
+	// SyncCorefile rewrites the per-VPC Corefile with the given full host-record
+	// list, without creating or destroying any proxy resources. Used by callers
+	// that own host-record state in their own tables (e.g. the DBaaS DNS
+	// reconciler) and need to keep CoreDNS in sync without touching nginx pods.
+	SyncCorefile(ctx context.Context, vnetBackendUID string, hosts []HostRecord) error
 }
 
 // BackendResolver is implemented by each managed-service handler to translate
