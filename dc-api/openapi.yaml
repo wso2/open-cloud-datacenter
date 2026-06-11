@@ -6773,10 +6773,12 @@ components:
 
     ActivityEvent:
       type: object
-      required: [id, resource_id, resource_name, resource_type, action, actor_id, created_at]
+      required: [id, resource_name, resource_type, action, actor_id, created_at]
       description: |
-        One audit event in a project's activity feed — the append-only
-        `audit_events` row joined with the owning resource's name and type.
+        One audit event in a project's activity feed. The owning resource's
+        name and type are snapshotted onto the event when it is recorded, so
+        events keep rendering after the resource is deleted — history is not
+        erased by deletion.
       properties:
         id:
           type: string
@@ -6786,11 +6788,14 @@ components:
         resource_id:
           type: string
           format: uuid
-          description: UUID of the resource the event was recorded against.
+          description: |
+            UUID of the resource the event was recorded against. Absent once
+            the resource has been deleted — clients should only build deep
+            links when this field is present.
           example: 3a1c2e5d-1234-5678-abcd-000000000001
         resource_name:
           type: string
-          description: Name of the resource at read time.
+          description: Name of the resource, snapshotted when the event was recorded.
           example: vm-web-1
         resource_type:
           type: string

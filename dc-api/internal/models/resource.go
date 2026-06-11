@@ -190,14 +190,14 @@ type AuditEvent struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-// ActivityEntry is one row of a project's activity feed: an AuditEvent joined
-// with the owning resource's name and type so clients can render a readable
-// line ("vm-web-1 CREATE") without a second lookup. Events belong to resources
-// (audit_events.resource_id FK, ON DELETE CASCADE), so entries disappear with
-// their resource — the feed reflects live resources only.
+// ActivityEntry is one row of a project's activity feed: an AuditEvent plus
+// the owning resource's name and type, snapshotted onto the event at write
+// time so clients can render a readable line ("vm-web-1 CREATE") even after
+// the resource is deleted. ResourceID is uuid.Nil (omitted from JSON) once the
+// resource is gone — clients use it for deep links while it lasts.
 type ActivityEntry struct {
 	ID           uuid.UUID      `json:"id"`
-	ResourceID   uuid.UUID      `json:"resource_id"`
+	ResourceID   uuid.UUID      `json:"resource_id,omitzero"`
 	ResourceName string         `json:"resource_name"`
 	ResourceType ResourceType   `json:"resource_type"`
 	Action       string         `json:"action"`   // e.g., "CREATE", "DELETE", "STATUS_CHANGE"

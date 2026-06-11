@@ -921,3 +921,35 @@ DROP TRIGGER IF EXISTS databases_updated_at ON databases;
 CREATE TRIGGER databases_updated_at
     BEFORE UPDATE ON databases
     FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+-- ─────────────────────── Activity feed durability ────────────────────────────
+-- audit_events originally carried only resource_id behind an ON DELETE CASCADE
+-- FK, so deleting a resource erased its entire history — including the DELETE
+-- event itself. Snapshot the resource identity onto each event at write time
+-- and soften the FK to SET NULL: the feed reads the snapshot, so history
+-- outlives the resource. resource_id stays as a live-resource pointer (NULL
+-- once the resource is gone).
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS resource_name TEXT;
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS resource_type TEXT;
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS tenant_uuid  UUID;
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS project_uuid UUID;
+ALTER TABLE audit_events ALTER COLUMN resource_id DROP NOT NULL;
+
+-- Idempotent FK swap without a DO block: drop both possible names, re-add.
+ALTER TABLE audit_events DROP CONSTRAINT IF EXISTS audit_events_resource_id_fkey;
+ALTER TABLE audit_events DROP CONSTRAINT IF EXISTS audit_events_resource_id_setnull_fkey;
+ALTER TABLE audit_events ADD CONSTRAINT audit_events_resource_id_setnull_fkey
+    FOREIGN KEY (resource_id) REFERENCES resources(id) ON DELETE SET NULL;
+
+-- Backfill snapshots for pre-migration events whose resource still exists
+-- (events whose resource was already deleted have cascaded away — nothing
+-- left to backfill).
+UPDATE audit_events ae
+SET    resource_name = res.name,
+       resource_type = res.type::text,
+       tenant_uuid   = res.tenant_uuid,
+       project_uuid  = res.project_uuid
+FROM   resources res
+WHERE  ae.resource_id = res.id AND ae.resource_name IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_audit_project_time ON audit_events (project_uuid, created_at DESC);

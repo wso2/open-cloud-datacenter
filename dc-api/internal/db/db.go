@@ -726,12 +726,21 @@ func (r *Repository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// AppendAuditEvent records a state transition. This is append-only — never updated.
+// AppendAuditEvent records a state transition. This is append-only — never
+// updated. The owning resource's name/type and tenant/project UUIDs are
+// snapshotted onto the event row (INSERT … SELECT, atomic with the lookup) so
+// the activity feed keeps rendering the event after the resource is deleted.
+// A missing resource row makes the insert a silent no-op — the same situations
+// the old NOT NULL FK would have rejected.
 func (r *Repository) AppendAuditEvent(ctx context.Context, ev *models.AuditEvent) error {
 	const q = `
 		INSERT INTO audit_events
-			(resource_id, actor_id, action, from_status, to_status, message)
-		VALUES ($1, $2, $3, $4, $5, $6)`
+			(resource_id, actor_id, action, from_status, to_status, message,
+			 resource_name, resource_type, tenant_uuid, project_uuid)
+		SELECT res.id, $2, $3, $4, $5, $6,
+		       res.name, res.type::text, res.tenant_uuid, res.project_uuid
+		FROM   resources res
+		WHERE  res.id = $1`
 
 	_, err := r.pool.Exec(ctx, q,
 		ev.ResourceID, ev.ActorID, ev.Action,

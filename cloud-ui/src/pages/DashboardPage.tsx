@@ -405,7 +405,7 @@ export default function DashboardPage() {
                   <div
                     key={ev.id}
                     className={styles.listRow}
-                    onClick={route ? () => navigate(`../${route}/${ev.resource_id}`) : undefined}
+                    onClick={route && ev.resource_id ? () => navigate(`../${route}/${ev.resource_id}`) : undefined}
                   >
                     <span className={styles.listName}>
                       <span className={styles.empty}>{ev.action} </span>

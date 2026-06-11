@@ -171,6 +171,32 @@ func TestActivity_FeedPaginationAndIsolation(t *testing.T) {
 	assert.Empty(t, pageB.Items)
 	assert.Nil(t, findActivityEvent(pageB.Items, vmID, "CREATE"),
 		"project A's CREATE event leaked into project B's feed")
+
+	// ── 8. History survives resource deletion ────────────────────────────────
+	// Deleting the resource row (what the reconciler does once the backend
+	// confirms deletion) must NOT erase the feed: the snapshot columns keep
+	// every event renderable; only the live resource_id pointer disappears.
+	require.NoError(t, env.DB.Delete(ctx, uuid.MustParse(vmID)),
+		"direct resource-row delete (reconciler path)")
+
+	after, _, status, err := client.ListActivity(ctx, "?limit=100")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+	assert.Equal(t, want, after.Total,
+		"deleting the resource must not change the event count")
+
+	var survived *ActivityEventDTO
+	for i := range after.Items {
+		if after.Items[i].ResourceName == vmName && after.Items[i].Action == "CREATE" {
+			survived = &after.Items[i]
+			break
+		}
+	}
+	require.NotNil(t, survived, "CREATE event must survive resource deletion")
+	assert.Empty(t, survived.ResourceID,
+		"resource_id must be omitted once the resource is gone (no dangling deep links)")
+	assert.Equal(t, string(models.ResourceTypeVM), survived.ResourceType,
+		"resource_type snapshot must survive deletion")
 }
 
 // TestActivity_ViewerCanRead proves the gate is at viewer level: a principal

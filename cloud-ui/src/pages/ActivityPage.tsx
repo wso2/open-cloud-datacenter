@@ -152,7 +152,7 @@ export default function ActivityPage() {
                         <ActionText action={ev.action} />
                       </TableCell>
                       <TableCell>
-                        {route ? (
+                        {route && ev.resource_id ? (
                           <span
                             className={local.resourceLink}
                             onClick={() => navigate(`../${route}/${ev.resource_id}`)}

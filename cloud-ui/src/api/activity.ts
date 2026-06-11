@@ -12,7 +12,8 @@ import { useApi } from './useApi';
 
 export interface ActivityEvent {
   id: string;
-  resource_id: string;
+  /** Absent once the resource has been deleted — only deep-link when present. */
+  resource_id?: string;
   resource_name: string;
   resource_type: string;
   action: string;
