@@ -32,3 +32,16 @@ failure mode.
 7. **Go module path `github.com/wso2/dc-api`.** The logical module name is fixed
    independent of where the repo is hosted; change it with
    `go mod edit -module` only if the canonical import path changes.
+
+8. **IdP directory reads are proxied, never stored.** dc-api reads users and
+   groups from the IdP over SCIM2 (read-only) to power the invite picker and
+   invite-by-email. Reads are live and discarded: the database stores only the
+   OIDC `sub` and the inviter-typed `display_alias` (on an email invite with
+   no alias, the directory display name or email is copied once at grant time
+   as the default — never synced). Responses expose minimal fields only
+   (display name, email/username, `sub`/id, group names). Directory listing is
+   gated to roles that perform invitations
+   (`authorization/roleAssignments/write`), the M2M credential carries
+   read-only VIEW scopes, and the IdP stays swappable behind the
+   `internal/directory` SCIM2 interface. The feature is entirely dark when the
+   `DCAPI_IDP_*` config is unset.

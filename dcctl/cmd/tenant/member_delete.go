@@ -19,13 +19,17 @@ func newMemberDeleteCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "delete <user_sub>",
-		Short: "Remove a user from the tenant",
-		Long: `Remove a user from the active (or specified) tenant.
+		Short: "Revoke a user's role assignments on the tenant",
+		Long: `Revoke all of a user's role assignments on the active (or specified) tenant.
+
+The argument is the user's OIDC subject ("sub") — the PRINCIPAL_ID column
+of "dcctl tenant member list". Unlike create, delete does not accept an
+email address. Removing the last Owner of a tenant is refused.
 
 Examples:
-  dcctl tenant member delete alice@example.com
-  dcctl tenant member delete alice@example.com --yes
-  dcctl tenant member delete alice@example.com --tenant other-tenant`,
+  dcctl tenant member delete 01abc123-0000-0000-0000-user000000001
+  dcctl tenant member delete 01abc123-0000-0000-0000-user000000001 --yes
+  dcctl tenant member delete 01abc123-0000-0000-0000-user000000001 --tenant other-tenant`,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -53,9 +57,9 @@ func runMemberDelete(ctx context.Context, userSub, tenantID string, force bool) 
 	}
 
 	apiClient := client.New(creds.AccessToken)
-	resp, err := apiClient.Typed.RemoveMemberWithResponse(ctx, tenantID, userSub)
+	resp, err := apiClient.Typed.DeleteTenantRoleAssignmentWithResponse(ctx, tenantID, userSub)
 	if err != nil {
-		return fmt.Errorf("DELETE /v1/tenants/%s/members/%s: %w", tenantID, userSub, err)
+		return fmt.Errorf("DELETE /v1/tenants/%s/role-assignments/%s: %w", tenantID, userSub, err)
 	}
 	if resp.StatusCode() >= http.StatusMultipleChoices {
 		return cliutil.APIErrorf(resp.StatusCode(), resp.Body)

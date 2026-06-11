@@ -52,6 +52,24 @@ patches:
         path: /data/DCAPI_VPC_EXTERNAL_GATEWAY
         value: "CHANGE-ME-gateway"
 
+  # IdP directory (optional): uncomment to enable invite-by-email and the
+  # member picker. dc-api FAILS FAST when DCAPI_IDP_* is half-configured —
+  # only set these once `init-flux.sh seal` has also sealed
+  # DCAPI_IDP_CLIENT_ID/SECRET (it auto-pulls them from the asgardeo-auth
+  # layer's directory_client_id/_secret outputs when that env registers a
+  # read-only directory M2M app).
+  # - target: { kind: ConfigMap, name: dc-api-config }
+  #   patch: |-
+  #     - op: replace
+  #       path: /data/DCAPI_IDP_SCIM_BASE_URL
+  #       value: "https://api.asgardeo.io/t/CHANGE-ME-asgardeo-org/scim2"
+  #     - op: replace
+  #       path: /data/DCAPI_IDP_TOKEN_URL
+  #       value: "https://api.asgardeo.io/t/CHANGE-ME-asgardeo-org/oauth2/token"
+  #     - op: replace
+  #       path: /data/DCAPI_IDP_SCOPES
+  #       value: "internal_user_mgt_list internal_user_mgt_view internal_group_mgt_view"
+
   - target: { kind: Ingress, name: dc-api }
     patch: |-
       - op: replace

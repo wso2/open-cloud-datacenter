@@ -224,12 +224,12 @@ func pollUntilDone(ctx context.Context, tenantID, projectID string, apiClient *c
 		}
 		vm := resp.JSON200
 		switch vm.Status {
-		case dcapi.PENDING:
+		case dcapi.ResourceStatusPENDING:
 			continue
-		case dcapi.ACTIVE:
+		case dcapi.ResourceStatusACTIVE:
 			fmt.Println(" done!")
 			return vm, nil
-		case dcapi.FAILED:
+		case dcapi.ResourceStatusFAILED:
 			fmt.Println()
 			return nil, fmt.Errorf("VM provisioning failed: %s", cliutil.DerefOrDash(vm.Message))
 		}

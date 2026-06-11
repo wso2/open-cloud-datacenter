@@ -413,6 +413,28 @@ DELETE /v1/tenants/{tid}/role-definitions/{id}
 holds a set of assignments — changing access = add one / remove one. The v1
 remove-then-re-add dance (and its access-gap window) disappears by construction.
 
+### 9.1 Invite by email
+
+The role-assignment POST endpoints accept **either** `user_sub` **or** `user_email`, but not both:
+
+```json
+{
+  "user_email": "alice@example.com",
+  "role_definition": "Contributor"
+}
+```
+
+When `user_email` is supplied, dc-api resolves it to an OIDC `sub` via the optional SCIM2 directory provider (all four `DCAPI_IDP_*` environment variables must be configured). If the directory is not configured, or if the email does not match exactly one user, the API returns `422 Unprocessable Entity`.
+
+Fallback when email invite fails: grant by raw `user_sub` instead, which always works.
+
+**Error responses:**
+- `422` — directory not configured, or email is ambiguous / not found
+- `501` — directory provider is disabled (feature dark)
+- `502` — directory provider is configured but the IdP upstream request failed
+
+The directory endpoints themselves (`GET /v1/tenants/{tenant_id}/directory/users` and `.../directory/groups`) are gated to principals holding `authorization/roleAssignments/write` — the inviter roles (Owner, User Access Administrator). See [rbac.md IdP Directory Configuration](rbac.md#idp-directory-configuration-optional) for the full setup guide.
+
 ---
 
 ## 10. How this wires to the UI (and CLI)

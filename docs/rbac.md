@@ -6,6 +6,8 @@ date: 2026-05-09
 
 # M1.5 RBAC — Membership and Roles
 
+> **Note:** Role vocabulary has moved to RBAC v2. See [rbac-v2.md](rbac-v2.md) for the current action-based model and role catalog. This document covers M1.5 semantics and the autoprovision / member-invite workflow; it uses examples from the v1 era and will be superseded when v2 fully ships.
+
 **Related design doc:** [MILESTONES.md § M1.5](../MILESTONES.md#m15--full-rbac-before-m2-after-m1-e2e-test-passes)
 
 ## What This Is
@@ -125,10 +127,16 @@ dcctl login
 If autoprovision is off, an existing tenant owner invites the user:
 
 ```bash
-dcctl tenant add-member alice@acme.com --role member --tenant acme
+dcctl tenant member create alice@acme.com --role Contributor --tenant acme
 ```
 
 This inserts a `role_assignments` row even if the user has never logged in. When they do log in later, they'll have access.
+
+**Email-based invites** require the directory provider to be configured (all four `DCAPI_IDP_*` environment variables must be set; see the "IdP Directory Configuration" section below). If the directory is not configured, or if the email does not resolve to exactly one user, the API returns 422; in that case, invite the user by their OIDC `sub` instead:
+
+```bash
+dcctl tenant member create 01abc123-0000-0000-0000-user000000001 --role Contributor --tenant acme
+```
 
 ## Autoprovision Explained
 
@@ -161,7 +169,7 @@ This inserts a `role_assignments` row even if the user has never logged in. When
 - Complies with zero-trust onboarding policies
 
 **Cons:**
-- Higher overhead (owner must run `dcctl tenant add-member` for each hire)
+- Higher overhead (owner must run `dcctl tenant member create` for each hire)
 - Requires coordination between teams
 
 **When to use:** Production, regulated industries, multi-tenant platforms.
@@ -179,31 +187,37 @@ When you flip `DCAPI_RBAC_AUTOPROVISION=false` for the first time:
 
 ## Roles in Practice
 
-### Add a member
+### Add a contributor
 
 ```bash
-dcctl tenant add-member bob@acme.com --role member --tenant acme
+dcctl tenant member create bob@acme.com --role Contributor --tenant acme
 ```
 
 Output:
 ```
-Added bob@acme.com as member in tenant acme
-Role assignments ID: 550e8400-e29b-41d4-a716-446655440000
+Granted Contributor to bob@acme.com on tenant acme (principal 01abc123-0000-0000-0000-user000000002).
 ```
 
 What it does:
-- Inserts a `role_assignments` row with `scope_type=tenant`, `scope_id=acme`, `role=member`
-- If a row with the same (principal_id, scope_type, scope_id, role) already exists: returns 200 (idempotent, no error)
-- Appends an audit event: actor=you, action=MEMBER_ADDED
-- Prints the new role assignment ID
+- Inserts a `role_assignments` row with `scope_type=tenant`, `scope_uuid=<acme-uuid>`, `role_definition=Contributor`
+- If a row with the same (principal_id, scope_type, scope_uuid, role_definition) already exists: returns 200 (idempotent, no error)
+- Appends an audit event: actor=you, action=ROLE_ASSIGNMENT_CREATED
+- Prints the principal ID (the OIDC `sub` if granted by email, or the `user_sub` directly)
 
-### Add a viewer
+A Contributor can create, read, and update resources but cannot delete them or manage access:
+- `dcctl create vm ...` ✓
+- `dcctl get vm <id>` ✓
+- `dcctl list vms` ✓
+- `dcctl delete vm <id>` ✗ (403)
+- `dcctl tenant member create ...` ✗ (403)
+
+### Add a reader
 
 ```bash
-dcctl tenant add-member audit@acme.com --role viewer --tenant acme
+dcctl tenant member create audit@acme.com --role Reader --tenant acme
 ```
 
-The viewer can read everything but can't create, update, or delete:
+A Reader can inspect resources but cannot create, update, or delete:
 - `dcctl get vm <id>` ✓
 - `dcctl list vms` ✓
 - `dcctl create vm ...` ✗ (403)
@@ -212,47 +226,47 @@ The viewer can read everything but can't create, update, or delete:
 ### Add an owner
 
 ```bash
-dcctl tenant add-member cto@acme.com --role owner --tenant acme
+dcctl tenant member create cto@acme.com --role Owner --tenant acme
 ```
 
-Owners can invite/remove members, delete resources, etc. Only other owners can invite a new owner (one owner can always do what other owners can do).
+Owners can invite/remove members, manage all resources, delete resources, etc. Only other owners can invite a new owner (one owner can always do what other owners can do).
 
 ### List members
 
 ```bash
-dcctl tenant list-members --tenant acme
+dcctl tenant member list --tenant acme
 ```
 
 Output:
 ```
-PRINCIPAL_ID              ROLE      GRANTED_AT            GRANTED_BY
-alice@acme.com            member    2026-05-09T10:00:00Z  admin@wso2.com
-bob@acme.com              member    2026-05-09T10:02:00Z  alice@acme.com
-cto@acme.com              owner     2026-05-09T10:05:00Z  admin@wso2.com
+PRINCIPAL_ID                        ALIAS          ROLE           GRANTED_AT            GRANTED_BY
+01abc123-0000-0000-0000-user000000001  alice          Contributor    2026-05-09T10:00:00Z  admin@wso2.com
+01abc123-0000-0000-0000-user000000002  bob            Contributor    2026-05-09T10:02:00Z  alice@acme.com
+01abc123-0000-0000-0000-user000000003  CTO (external) Owner          2026-05-09T10:05:00Z  admin@wso2.com
 ```
 
 Service accounts also appear here if they're assigned roles:
 
 ```
-SERVICE_ACCOUNT_ID                        ROLE      GRANTED_AT            GRANTED_BY
-550e8400-e29b-41d4-a716-446655440000      member    2026-05-09T11:00:00Z  cto@acme.com
+PRINCIPAL_ID                        ALIAS            ROLE         GRANTED_AT            GRANTED_BY
+550e8400-e29b-41d4-a716-446655440000  ci-deployer    Contributor  2026-05-09T11:00:00Z  cto@acme.com
 ```
 
 ## Removing Members
 
 ```bash
-dcctl tenant remove-member alice@acme.com --tenant acme
+dcctl tenant member delete 01abc123-0000-0000-0000-user000000001 --tenant acme
 ```
 
-This deletes **all** `role_assignments` rows for that principal in that tenant scope (she might have had multiple roles; now they're all gone). Rows are deleted, audit event is appended.
+This deletes **all** `role_assignments` rows for that principal in that tenant scope (they might have held multiple roles; now they're all gone). Rows are deleted, audit event is appended. The argument is the principal's `sub` (the opaque OIDC subject returned when the member was invited).
 
 ### The "last owner" guard
 
-You cannot remove the last owner of a tenant. If only `cto@acme.com` is an owner:
+You cannot remove the last owner of a tenant. If only one principal holds an Owner role at tenant scope:
 
 ```bash
-dcctl tenant remove-member cto@acme.com --tenant acme
-# Error: cannot remove the last owner of tenant acme
+dcctl tenant member delete 01abc123-0000-0000-0000-cto000000001 --tenant acme
+# Error: cannot remove the last principal holding authorization/roleAssignments/write at tenant scope
 ```
 
 **Rationale:** prevents locking out the entire tenant. If you need to transfer ownership, add a new owner first, then remove the old one.
@@ -363,8 +377,9 @@ The token is immediately revoked. Any request with the deleted SA's token will g
 Members of the Asgardeo group `dc-admin` are **platform admins**. They bypass all role assignment checks:
 
 ```bash
-# In Asgardeo:
-dcctl tenant add-member admin@wso2.com --role owner --tenant acme
+# In Asgardeo, add admin@wso2.com to the dc-admin group.
+# Then, optionally (for audit purposes), grant them an explicit Owner role:
+dcctl tenant member create admin@wso2.com --role Owner --tenant acme
 # But if admin@wso2.com is in dc-admin group, the role row is optional.
 # They have access to all tenants regardless.
 ```
@@ -408,7 +423,7 @@ If an employee leaves and you remove them from the `dc-tenant-acme` group in Asg
 **What happens:**
 - If the JWT doesn't contain the `dc-tenant-acme` group, the user's effective role is empty
 - They get 403 on any `dcctl` command
-- An owner can explicitly remove them with `dcctl tenant remove-member`
+- An owner can explicitly remove them with `dcctl tenant member delete <sub>`
 
 This is by design: the removal audit trail is permanent.
 
@@ -421,7 +436,7 @@ Don't try to reuse a deleted SA's name and expect the old token to work. Once de
 Once you remove someone from the IdP, revoke their DC-API membership explicitly:
 
 ```bash
-dcctl tenant remove-member alice@acme.com --tenant acme
+dcctl tenant member delete 01abc123-0000-0000-0000-user000000001 --tenant acme
 ```
 
 If you don't, the row sits in the audit trail forever (which is fine — it documents they once had access). It just doesn't grant access anymore because the JWT won't authenticate.
@@ -456,13 +471,39 @@ Service account creation, deletion, and token usage are also audited. The `last_
 
 ## Environment Variables (DC-API)
 
+### RBAC Core
+
 | Variable | Default | Notes |
 |---|---|---|
 | `DCAPI_RBAC_AUTOPROVISION` | `true` | `true` = auto-grant member on first login; `false` = require explicit invite |
-| `DCAPI_TENANT_GROUP_PREFIX` | `dc-tenant-` | Asgardeo group prefix for tenant mapping |
-| `DCAPI_ADMIN_GROUP` | `dc-admin` | Asgardeo group name for platform admins |
+| `DCAPI_TENANT_GROUP_PREFIX` | `dc-tenant-` | IdP group prefix that identifies tenants (e.g. `dc-tenant-acme` maps to tenant `acme`) |
+| `DCAPI_ADMIN_GROUP` | `dc-admin` | IdP group name for platform admins |
 
 Change these if your IdP uses different naming conventions.
+
+### IdP Directory Configuration (Optional)
+
+When all four of these variables are set, dc-api enables live directory browsing for invite pickers and email-based role assignments:
+
+| Variable | Required | Notes |
+|---|---|---|
+| `DCAPI_IDP_SCIM_BASE_URL` | If any are set | SCIM2 endpoint URL of your IdP (e.g. `https://api.asgardeo.io/t/<org>/scim2`). The four `*_BASE_URL`/`*_TOKEN_URL`/`*_CLIENT_ID`/`*_CLIENT_SECRET` variables must be set together or all unset; partial sets cause startup failure. |
+| `DCAPI_IDP_TOKEN_URL` | If any are set | OAuth2 token endpoint for the machine-to-machine credential (e.g. `https://api.asgardeo.io/t/<org>/oauth2/token`). |
+| `DCAPI_IDP_CLIENT_ID` | If any are set | Client ID of a machine-to-machine OAuth2 app with user/group VIEW scopes only (never write). |
+| `DCAPI_IDP_CLIENT_SECRET` | If any are set | Client secret for the above app. |
+| `DCAPI_IDP_SCOPES` | For Asgardeo / WSO2 IS | OAuth2 scopes requested with the client_credentials grant (space- or comma-separated). **Required for Asgardeo and WSO2 Identity Server**, which only attach SCIM permissions to the token when scopes are explicitly requested — without them every SCIM call returns 403. Other IdPs may need none. Optional and excluded from the all-or-nothing startup check. Grant LIST/VIEW scopes ONLY. Asgardeo value: `internal_user_mgt_list internal_user_mgt_view internal_group_mgt_view`. |
+| `DCAPI_IDP_USERSTORE_DOMAIN` | No (default `DEFAULT`) | Restricts directory reads to one userstore via the WSO2 SCIM2 `domain` query parameter. Without it the IdP returns every account in the organization — including console administrators and collaborators, who are not invite candidates. `DEFAULT` is Asgardeo's consumer-user store; on-prem WSO2 Identity Server typically wants `PRIMARY`. Set explicitly empty to list all stores; non-WSO2 SCIM servers ignore the parameter. |
+
+**Granting the SCIM scopes (Asgardeo console):** open your M2M app → **API Authorization** → authorize the **SCIM2 Users API** (`internal_user_mgt_list`, `internal_user_mgt_view`) and the **SCIM2 Groups API** (`internal_group_mgt_view`), then set those three on `DCAPI_IDP_SCOPES`. Do not authorize any create/update/delete SCIM scopes — dc-api never writes to the IdP.
+
+**What this enables:**
+- `GET /v1/tenants/{tenant_id}/directory/users` — searchable user listing (for invite-by-email type-ahead in cloud-ui and dcctl)
+- `GET /v1/tenants/{tenant_id}/directory/groups` — group listing
+- Email-based invites: `dcctl tenant member create alice@example.com --role Contributor` — the email is resolved to an OIDC `sub` at invite time via SCIM2
+
+**When disabled** (all four unset): the feature is dark. Directory endpoints return `501 Not Implemented`, and role assignment requests must use `user_sub` instead of `user_email`.
+
+**Guardrails:** dc-api proxies SCIM2 reads live and stores nothing. Only the OIDC `sub` (and an inviter-provided `display_alias`) are persisted. See [decisions.md decision #8](decisions.md).
 
 ## See Also
 

@@ -27,6 +27,7 @@ import (
 	"github.com/wso2/dc-api/internal/api/middleware"
 	"github.com/wso2/dc-api/internal/config"
 	"github.com/wso2/dc-api/internal/db"
+	"github.com/wso2/dc-api/internal/directory"
 	"github.com/wso2/dc-api/internal/providers"
 	"github.com/wso2/dc-api/internal/providers/common"
 	"github.com/wso2/dc-api/internal/providers/dbaas"
@@ -344,6 +345,28 @@ func main() {
 		dbaasProvisioner = dbaas.NewClient(kvClient.Dynamic())
 	}
 
+	// ── IdP SCIM2 directory (optional, read-only) ────────────────────────────
+	// Fail fast on a half-configured DCAPI_IDP_* set; build the provider only
+	// when all four variables are present. A nil provider keeps the feature
+	// dark (directory endpoints → 501, invite-by-email → 422).
+	if err := cfg.ValidateDirectory(); err != nil {
+		log.Fatal().Err(err).Msg("IdP directory config is incomplete — set all DCAPI_IDP_* variables or none")
+	}
+	var directoryProvider directory.Provider
+	if cfg.DirectoryConfigured() {
+		directoryProvider = directory.NewSCIM2Client(
+			cfg.IDPSCIMBaseURL, cfg.IDPTokenURL, cfg.IDPClientID, cfg.IDPClientSecret,
+			cfg.IDPScopes, cfg.IDPUserstoreDomain, nil)
+		log.Info().
+			Str("scim_base_url", cfg.IDPSCIMBaseURL).
+			Str("client_id", cfg.IDPClientID).
+			Str("scopes", cfg.IDPScopes).
+			Str("userstore_domain", cfg.IDPUserstoreDomain).
+			Msg("IdP directory enabled (SCIM2) — invite picker and invite-by-email active")
+	} else {
+		log.Info().Msg("IdP directory disabled (DCAPI_IDP_* unset) — invite by user_sub only")
+	}
+
 	// ── Router ────────────────────────────────────────────────────────────────
 	// All wiring happens in NewRouter. main.go does not know about individual routes.
 	router := api.NewRouter(api.RouterDeps{
@@ -365,6 +388,7 @@ func main() {
 		EndpointProvisioner: endpointProvisioner,
 		KeyVaultBackendAddr: cfg.KeyVaultBackendAddr,
 		KeyVaultBackendPort: cfg.KeyVaultBackendPort,
+		DirectoryProvider:   directoryProvider,
 		AuthMiddleware:      authMiddleware,
 		AuthService:         bffSvc,
 		TenantGroupPrefix:   cfg.TenantGroupPrefix,

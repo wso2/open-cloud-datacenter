@@ -153,10 +153,10 @@ func pollSubnetUntilDone(ctx context.Context, tenantID, projectID string, apiCli
 		}
 		s := resp.JSON200
 		switch s.Status {
-		case dcapi.ACTIVE:
+		case dcapi.ResourceStatusACTIVE:
 			fmt.Println(" done!")
 			return s, nil
-		case dcapi.FAILED:
+		case dcapi.ResourceStatusFAILED:
 			fmt.Println()
 			return nil, fmt.Errorf("Subnet provisioning failed: %s", cliutil.DerefOrDash(s.Message))
 		}

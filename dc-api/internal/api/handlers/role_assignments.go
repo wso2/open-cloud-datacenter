@@ -26,6 +26,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/wso2/dc-api/internal/api/middleware"
 	"github.com/wso2/dc-api/internal/db"
+	"github.com/wso2/dc-api/internal/directory"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/rbac"
 )
@@ -44,18 +46,27 @@ import (
 // project scope.
 type RoleAssignmentsHandler struct {
 	repo *db.Repository
-	log  zerolog.Logger
+	// directory is the optional IdP directory provider used to resolve
+	// user_email → sub on email-based invites. Nil when the deployment has no
+	// directory configured — invite-by-email then returns 422 per the spec.
+	directory directory.Provider
+	log       zerolog.Logger
 }
 
 // NewRoleAssignmentsHandler creates a RoleAssignmentsHandler with injected deps.
-func NewRoleAssignmentsHandler(repo *db.Repository, log zerolog.Logger) *RoleAssignmentsHandler {
-	return &RoleAssignmentsHandler{repo: repo, log: log}
+// dir may be nil (directory feature dark).
+func NewRoleAssignmentsHandler(repo *db.Repository, dir directory.Provider, log zerolog.Logger) *RoleAssignmentsHandler {
+	return &RoleAssignmentsHandler{repo: repo, directory: dir, log: log}
 }
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
 
 type createRoleAssignmentRequest struct {
-	UserSub string `json:"user_sub"`
+	// UserSub and UserEmail identify the principal — exactly one of the two is
+	// required. UserEmail is resolved to a sub via the directory provider at
+	// request time; only the sub is stored.
+	UserSub   string `json:"user_sub"`
+	UserEmail string `json:"user_email,omitempty"`
 	// RoleDefinition is the v2 role-definition key to grant — any catalog key
 	// (e.g. "Owner", "Contributor", "Reader", "VirtualMachineContributor"). This is
 	// the only role vocabulary the API accepts; the v1 owner/member/viewer ranks
@@ -65,8 +76,11 @@ type createRoleAssignmentRequest struct {
 }
 
 func (req *createRoleAssignmentRequest) validate() error {
-	if req.UserSub == "" {
-		return fmt.Errorf("user_sub is required")
+	if (req.UserSub == "") == (req.UserEmail == "") {
+		return fmt.Errorf("exactly one of user_sub or user_email is required")
+	}
+	if strings.ContainsAny(req.UserEmail, `"\`) {
+		return fmt.Errorf("user_email contains invalid characters")
 	}
 	if req.RoleDefinition == "" {
 		return fmt.Errorf("role_definition is required")
@@ -186,15 +200,62 @@ func (h *RoleAssignmentsHandler) Create(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Resolve user_email → sub via the directory provider (live point lookup;
+	// only the resolved sub is persisted). When no alias was
+	// supplied, the resolved IdP display name (falling back to the email) is
+	// used as the display_alias default.
+	principalID := req.UserSub
+	displayAlias := req.DisplayAlias
+	resolvedFromEmail := false
+	if req.UserEmail != "" {
+		if h.directory == nil {
+			writeError(w, http.StatusUnprocessableEntity,
+				"invite by user_email requires a directory provider, and none is configured on this deployment; invite by user_sub instead")
+			return
+		}
+		user, err := h.directory.LookupUserByEmail(r.Context(), req.UserEmail)
+		switch {
+		case errors.Is(err, directory.ErrUserNotFound):
+			writeError(w, http.StatusUnprocessableEntity,
+				fmt.Sprintf("user_email '%s' does not match any IdP user", req.UserEmail))
+			return
+		case errors.Is(err, directory.ErrAmbiguous):
+			writeError(w, http.StatusUnprocessableEntity,
+				fmt.Sprintf("user_email '%s' matches more than one IdP user; invite by user_sub instead", req.UserEmail))
+			return
+		case errors.Is(err, directory.ErrBadFilter):
+			writeError(w, http.StatusBadRequest, "user_email contains invalid characters")
+			return
+		case err != nil:
+			// Log the detailed error (which embeds the internal SCIM URL and IdP
+			// host) server-side only; return a generic body so the upstream URL
+			// never leaks to API clients. See directoryUpstreamErrorMsg.
+			h.log.Error().Err(err).Str("scope", string(scope.Type)).Str("scope_id", scope.ID).
+				Msg("directory lookup for invite-by-email failed")
+			writeError(w, http.StatusBadGateway, directoryUpstreamErrorMsg)
+			return
+		}
+		principalID = user.Sub
+		// Default the alias to the resolved IdP display name (user decision),
+		// falling back to the invited email when the IdP has no display name.
+		if displayAlias == "" {
+			displayAlias = user.DisplayName
+			if displayAlias == "" {
+				displayAlias = req.UserEmail
+			}
+		}
+		resolvedFromEmail = true
+	}
+
 	ra, err := h.repo.CreateRoleAssignment(r.Context(), models.RoleAssignment{
 		PrincipalType:  models.PrincipalTypeUser,
-		PrincipalID:    req.UserSub,
+		PrincipalID:    principalID,
 		ScopeType:      scope.Type,
 		ScopeID:        scope.ID,
 		ScopeUUID:      scope.UUID,
 		RoleDefinition: req.RoleDefinition,
 		GrantedBy:      callerID,
-		DisplayAlias:   req.DisplayAlias,
+		DisplayAlias:   displayAlias,
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "23505") || strings.Contains(err.Error(), "duplicate key") {
@@ -203,7 +264,7 @@ func (h *RoleAssignmentsHandler) Create(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		h.log.Error().Err(err).Str("scope", string(scope.Type)).Str("scope_id", scope.ID).
-			Str("user_sub", req.UserSub).Msg("create role assignment failed")
+			Str("user_sub", principalID).Msg("create role assignment failed")
 		writeError(w, http.StatusInternalServerError, "failed to create role assignment")
 		return
 	}
@@ -218,12 +279,21 @@ func (h *RoleAssignmentsHandler) Create(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Audit: record email resolution explicitly. Emails in audit_events are
+	// fine — audit is internal; the no-PII rule applies to the
+	// role_assignments row (where display_alias defaults to the resolved IdP
+	// display name, falling back to the email).
+	auditMsg := fmt.Sprintf("granted %s to %s at %s %s",
+		req.RoleDefinition, principalID, scope.Type, scope.ID)
+	if resolvedFromEmail {
+		auditMsg = fmt.Sprintf("granted %s to %s (resolved from %s) at %s %s",
+			req.RoleDefinition, principalID, req.UserEmail, scope.Type, scope.ID)
+	}
 	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
 		ResourceID: ra.ID,
 		ActorID:    callerID,
 		Action:     "ROLE_ASSIGNMENT_CREATE",
-		Message: fmt.Sprintf("granted %s to %s at %s %s",
-			req.RoleDefinition, req.UserSub, scope.Type, scope.ID),
+		Message:    auditMsg,
 	})
 
 	writeJSON(w, http.StatusCreated, toRoleAssignmentResponse(ra))

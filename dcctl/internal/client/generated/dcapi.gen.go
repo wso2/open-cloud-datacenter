@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,54 +38,6 @@ func (e AttachNSGRequestTargetType) Valid() bool {
 	}
 }
 
-// Defines values for ClusterNodeSize.
-const (
-	ClusterNodeSizeLarge  ClusterNodeSize = "large"
-	ClusterNodeSizeMedium ClusterNodeSize = "medium"
-	ClusterNodeSizeSmall  ClusterNodeSize = "small"
-	ClusterNodeSizeXlarge ClusterNodeSize = "xlarge"
-)
-
-// Valid indicates whether the value is a known member of the ClusterNodeSize enum.
-func (e ClusterNodeSize) Valid() bool {
-	switch e {
-	case ClusterNodeSizeLarge:
-		return true
-	case ClusterNodeSizeMedium:
-		return true
-	case ClusterNodeSizeSmall:
-		return true
-	case ClusterNodeSizeXlarge:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for CreateClusterRequestNodeSize.
-const (
-	CreateClusterRequestNodeSizeLarge  CreateClusterRequestNodeSize = "large"
-	CreateClusterRequestNodeSizeMedium CreateClusterRequestNodeSize = "medium"
-	CreateClusterRequestNodeSizeSmall  CreateClusterRequestNodeSize = "small"
-	CreateClusterRequestNodeSizeXlarge CreateClusterRequestNodeSize = "xlarge"
-)
-
-// Valid indicates whether the value is a known member of the CreateClusterRequestNodeSize enum.
-func (e CreateClusterRequestNodeSize) Valid() bool {
-	switch e {
-	case CreateClusterRequestNodeSizeLarge:
-		return true
-	case CreateClusterRequestNodeSizeMedium:
-		return true
-	case CreateClusterRequestNodeSizeSmall:
-		return true
-	case CreateClusterRequestNodeSizeXlarge:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for CreateDNSRecordRequestType.
 const (
 	CreateDNSRecordRequestTypeA     CreateDNSRecordRequestType = "A"
@@ -109,6 +62,93 @@ func (e CreateDNSRecordRequestType) Valid() bool {
 	case CreateDNSRecordRequestTypeSRV:
 		return true
 	case CreateDNSRecordRequestTypeTXT:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateDatabaseRequestEngine.
+const (
+	CreateDatabaseRequestEnginePostgres CreateDatabaseRequestEngine = "postgres"
+)
+
+// Valid indicates whether the value is a known member of the CreateDatabaseRequestEngine enum.
+func (e CreateDatabaseRequestEngine) Valid() bool {
+	switch e {
+	case CreateDatabaseRequestEnginePostgres:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateDatabaseRequestInstanceClass.
+const (
+	DbM52xlarge CreateDatabaseRequestInstanceClass = "db.m5.2xlarge"
+	DbM5Large   CreateDatabaseRequestInstanceClass = "db.m5.large"
+	DbM5Xlarge  CreateDatabaseRequestInstanceClass = "db.m5.xlarge"
+	DbR52xlarge CreateDatabaseRequestInstanceClass = "db.r5.2xlarge"
+	DbR5Large   CreateDatabaseRequestInstanceClass = "db.r5.large"
+	DbR5Xlarge  CreateDatabaseRequestInstanceClass = "db.r5.xlarge"
+	DbT32xlarge CreateDatabaseRequestInstanceClass = "db.t3.2xlarge"
+	DbT3Large   CreateDatabaseRequestInstanceClass = "db.t3.large"
+	DbT3Medium  CreateDatabaseRequestInstanceClass = "db.t3.medium"
+	DbT3Micro   CreateDatabaseRequestInstanceClass = "db.t3.micro"
+	DbT3Small   CreateDatabaseRequestInstanceClass = "db.t3.small"
+	DbT3Xlarge  CreateDatabaseRequestInstanceClass = "db.t3.xlarge"
+)
+
+// Valid indicates whether the value is a known member of the CreateDatabaseRequestInstanceClass enum.
+func (e CreateDatabaseRequestInstanceClass) Valid() bool {
+	switch e {
+	case DbM52xlarge:
+		return true
+	case DbM5Large:
+		return true
+	case DbM5Xlarge:
+		return true
+	case DbR52xlarge:
+		return true
+	case DbR5Large:
+		return true
+	case DbR5Xlarge:
+		return true
+	case DbT32xlarge:
+		return true
+	case DbT3Large:
+		return true
+	case DbT3Medium:
+		return true
+	case DbT3Micro:
+		return true
+	case DbT3Small:
+		return true
+	case DbT3Xlarge:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateNodePoolRequestSize.
+const (
+	CreateNodePoolRequestSizeLarge  CreateNodePoolRequestSize = "large"
+	CreateNodePoolRequestSizeMedium CreateNodePoolRequestSize = "medium"
+	CreateNodePoolRequestSizeSmall  CreateNodePoolRequestSize = "small"
+	CreateNodePoolRequestSizeXlarge CreateNodePoolRequestSize = "xlarge"
+)
+
+// Valid indicates whether the value is a known member of the CreateNodePoolRequestSize enum.
+func (e CreateNodePoolRequestSize) Valid() bool {
+	switch e {
+	case CreateNodePoolRequestSizeLarge:
+		return true
+	case CreateNodePoolRequestSizeMedium:
+		return true
+	case CreateNodePoolRequestSizeSmall:
+		return true
+	case CreateNodePoolRequestSizeXlarge:
 		return true
 	default:
 		return false
@@ -211,21 +251,87 @@ func (e DNSRecordType) Valid() bool {
 	}
 }
 
-// Defines values for InviteMemberRequestRole.
+// Defines values for DatabaseEngine.
 const (
-	InviteMemberRequestRoleMember InviteMemberRequestRole = "member"
-	InviteMemberRequestRoleOwner  InviteMemberRequestRole = "owner"
-	InviteMemberRequestRoleViewer InviteMemberRequestRole = "viewer"
+	DatabaseEnginePostgres DatabaseEngine = "postgres"
 )
 
-// Valid indicates whether the value is a known member of the InviteMemberRequestRole enum.
-func (e InviteMemberRequestRole) Valid() bool {
+// Valid indicates whether the value is a known member of the DatabaseEngine enum.
+func (e DatabaseEngine) Valid() bool {
 	switch e {
-	case InviteMemberRequestRoleMember:
+	case DatabaseEnginePostgres:
 		return true
-	case InviteMemberRequestRoleOwner:
+	default:
+		return false
+	}
+}
+
+// Defines values for DatabaseNetworkMode.
+const (
+	DatabaseNetworkModeLegacy DatabaseNetworkMode = "legacy"
+	DatabaseNetworkModeVpc    DatabaseNetworkMode = "vpc"
+)
+
+// Valid indicates whether the value is a known member of the DatabaseNetworkMode enum.
+func (e DatabaseNetworkMode) Valid() bool {
+	switch e {
+	case DatabaseNetworkModeLegacy:
 		return true
-	case InviteMemberRequestRoleViewer:
+	case DatabaseNetworkModeVpc:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DatabaseStatus.
+const (
+	DatabaseStatusACTIVE   DatabaseStatus = "ACTIVE"
+	DatabaseStatusDELETING DatabaseStatus = "DELETING"
+	DatabaseStatusFAILED   DatabaseStatus = "FAILED"
+	DatabaseStatusPENDING  DatabaseStatus = "PENDING"
+)
+
+// Valid indicates whether the value is a known member of the DatabaseStatus enum.
+func (e DatabaseStatus) Valid() bool {
+	switch e {
+	case DatabaseStatusACTIVE:
+		return true
+	case DatabaseStatusDELETING:
+		return true
+	case DatabaseStatusFAILED:
+		return true
+	case DatabaseStatusPENDING:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DatabaseNetworkLegacyMode.
+const (
+	DatabaseNetworkLegacyModeLegacy DatabaseNetworkLegacyMode = "legacy"
+)
+
+// Valid indicates whether the value is a known member of the DatabaseNetworkLegacyMode enum.
+func (e DatabaseNetworkLegacyMode) Valid() bool {
+	switch e {
+	case DatabaseNetworkLegacyModeLegacy:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DatabaseNetworkVPCMode.
+const (
+	Vpc DatabaseNetworkVPCMode = "vpc"
+)
+
+// Valid indicates whether the value is a known member of the DatabaseNetworkVPCMode enum.
+func (e DatabaseNetworkVPCMode) Valid() bool {
+	switch e {
+	case Vpc:
 		return true
 	default:
 		return false
@@ -310,6 +416,96 @@ func (e NSGRuleProtocol) Valid() bool {
 	}
 }
 
+// Defines values for NodePoolRole.
+const (
+	System NodePoolRole = "system"
+	Worker NodePoolRole = "worker"
+)
+
+// Valid indicates whether the value is a known member of the NodePoolRole enum.
+func (e NodePoolRole) Valid() bool {
+	switch e {
+	case System:
+		return true
+	case Worker:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NodePoolSize.
+const (
+	NodePoolSizeLarge  NodePoolSize = "large"
+	NodePoolSizeMedium NodePoolSize = "medium"
+	NodePoolSizeSmall  NodePoolSize = "small"
+	NodePoolSizeXlarge NodePoolSize = "xlarge"
+)
+
+// Valid indicates whether the value is a known member of the NodePoolSize enum.
+func (e NodePoolSize) Valid() bool {
+	switch e {
+	case NodePoolSizeLarge:
+		return true
+	case NodePoolSizeMedium:
+		return true
+	case NodePoolSizeSmall:
+		return true
+	case NodePoolSizeXlarge:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NodePoolStatus.
+const (
+	Deleting     NodePoolStatus = "deleting"
+	Failed       NodePoolStatus = "failed"
+	Provisioning NodePoolStatus = "provisioning"
+	Ready        NodePoolStatus = "ready"
+	Scaling      NodePoolStatus = "scaling"
+)
+
+// Valid indicates whether the value is a known member of the NodePoolStatus enum.
+func (e NodePoolStatus) Valid() bool {
+	switch e {
+	case Deleting:
+		return true
+	case Failed:
+		return true
+	case Provisioning:
+		return true
+	case Ready:
+		return true
+	case Scaling:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NodePoolTaintEffect.
+const (
+	NoExecute        NodePoolTaintEffect = "NoExecute"
+	NoSchedule       NodePoolTaintEffect = "NoSchedule"
+	PreferNoSchedule NodePoolTaintEffect = "PreferNoSchedule"
+)
+
+// Valid indicates whether the value is a known member of the NodePoolTaintEffect enum.
+func (e NodePoolTaintEffect) Valid() bool {
+	switch e {
+	case NoExecute:
+		return true
+	case NoSchedule:
+		return true
+	case PreferNoSchedule:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for QuotaExceededErrorError.
 const (
 	QuotaExceededErrorErrorQuotaExceeded QuotaExceededErrorError = "quota_exceeded"
@@ -327,22 +523,22 @@ func (e QuotaExceededErrorError) Valid() bool {
 
 // Defines values for ResourceStatus.
 const (
-	ACTIVE   ResourceStatus = "ACTIVE"
-	DELETING ResourceStatus = "DELETING"
-	FAILED   ResourceStatus = "FAILED"
-	PENDING  ResourceStatus = "PENDING"
+	ResourceStatusACTIVE   ResourceStatus = "ACTIVE"
+	ResourceStatusDELETING ResourceStatus = "DELETING"
+	ResourceStatusFAILED   ResourceStatus = "FAILED"
+	ResourceStatusPENDING  ResourceStatus = "PENDING"
 )
 
 // Valid indicates whether the value is a known member of the ResourceStatus enum.
 func (e ResourceStatus) Valid() bool {
 	switch e {
-	case ACTIVE:
+	case ResourceStatusACTIVE:
 		return true
-	case DELETING:
+	case ResourceStatusDELETING:
 		return true
-	case FAILED:
+	case ResourceStatusFAILED:
 		return true
-	case PENDING:
+	case ResourceStatusPENDING:
 		return true
 	default:
 		return false
@@ -367,35 +563,17 @@ func (e RoleAssignmentPrincipalType) Valid() bool {
 	}
 }
 
-// Defines values for RoleAssignmentRole.
-const (
-	RoleAssignmentRoleMember RoleAssignmentRole = "member"
-	RoleAssignmentRoleOwner  RoleAssignmentRole = "owner"
-	RoleAssignmentRoleViewer RoleAssignmentRole = "viewer"
-)
-
-// Valid indicates whether the value is a known member of the RoleAssignmentRole enum.
-func (e RoleAssignmentRole) Valid() bool {
-	switch e {
-	case RoleAssignmentRoleMember:
-		return true
-	case RoleAssignmentRoleOwner:
-		return true
-	case RoleAssignmentRoleViewer:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for RoleAssignmentScopeType.
 const (
-	RoleAssignmentScopeTypeTenant RoleAssignmentScopeType = "tenant"
+	RoleAssignmentScopeTypeProject RoleAssignmentScopeType = "project"
+	RoleAssignmentScopeTypeTenant  RoleAssignmentScopeType = "tenant"
 )
 
 // Valid indicates whether the value is a known member of the RoleAssignmentScopeType enum.
 func (e RoleAssignmentScopeType) Valid() bool {
 	switch e {
+	case RoleAssignmentScopeTypeProject:
+		return true
 	case RoleAssignmentScopeTypeTenant:
 		return true
 	default:
@@ -448,6 +626,75 @@ func (e ServiceAccountRole) Valid() bool {
 	}
 }
 
+// Defines values for SharedResourceKind.
+const (
+	Clusters        SharedResourceKind = "clusters"
+	Databases       SharedResourceKind = "databases"
+	Keyvaults       SharedResourceKind = "keyvaults"
+	VirtualMachines SharedResourceKind = "virtual-machines"
+)
+
+// Valid indicates whether the value is a known member of the SharedResourceKind enum.
+func (e SharedResourceKind) Valid() bool {
+	switch e {
+	case Clusters:
+		return true
+	case Databases:
+		return true
+	case Keyvaults:
+		return true
+	case VirtualMachines:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemPoolSpecCount.
+const (
+	N1 SystemPoolSpecCount = 1
+	N3 SystemPoolSpecCount = 3
+	N5 SystemPoolSpecCount = 5
+)
+
+// Valid indicates whether the value is a known member of the SystemPoolSpecCount enum.
+func (e SystemPoolSpecCount) Valid() bool {
+	switch e {
+	case N1:
+		return true
+	case N3:
+		return true
+	case N5:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemPoolSpecSize.
+const (
+	SystemPoolSpecSizeLarge  SystemPoolSpecSize = "large"
+	SystemPoolSpecSizeMedium SystemPoolSpecSize = "medium"
+	SystemPoolSpecSizeSmall  SystemPoolSpecSize = "small"
+	SystemPoolSpecSizeXlarge SystemPoolSpecSize = "xlarge"
+)
+
+// Valid indicates whether the value is a known member of the SystemPoolSpecSize enum.
+func (e SystemPoolSpecSize) Valid() bool {
+	switch e {
+	case SystemPoolSpecSizeLarge:
+		return true
+	case SystemPoolSpecSizeMedium:
+		return true
+	case SystemPoolSpecSizeSmall:
+		return true
+	case SystemPoolSpecSizeXlarge:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TenantSummaryRoles.
 const (
 	TenantSummaryRolesMember TenantSummaryRoles = "member"
@@ -471,35 +718,35 @@ func (e TenantSummaryRoles) Valid() bool {
 
 // Defines values for VirtualMachineSize.
 const (
-	VirtualMachineSizeLarge  VirtualMachineSize = "large"
-	VirtualMachineSizeMedium VirtualMachineSize = "medium"
-	VirtualMachineSizeSmall  VirtualMachineSize = "small"
-	VirtualMachineSizeXlarge VirtualMachineSize = "xlarge"
+	Large  VirtualMachineSize = "large"
+	Medium VirtualMachineSize = "medium"
+	Small  VirtualMachineSize = "small"
+	Xlarge VirtualMachineSize = "xlarge"
 )
 
 // Valid indicates whether the value is a known member of the VirtualMachineSize enum.
 func (e VirtualMachineSize) Valid() bool {
 	switch e {
-	case VirtualMachineSizeLarge:
+	case Large:
 		return true
-	case VirtualMachineSizeMedium:
+	case Medium:
 		return true
-	case VirtualMachineSizeSmall:
+	case Small:
 		return true
-	case VirtualMachineSizeXlarge:
+	case Xlarge:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for UpdateProjectQuota400JSONResponseBody1Error.
+// Defines values for UpdateProjectQuota400JSONResponseBody2Error.
 const (
-	QuotaBelowUsage UpdateProjectQuota400JSONResponseBody1Error = "quota_below_usage"
+	QuotaBelowUsage UpdateProjectQuota400JSONResponseBody2Error = "quota_below_usage"
 )
 
-// Valid indicates whether the value is a known member of the UpdateProjectQuota400JSONResponseBody1Error enum.
-func (e UpdateProjectQuota400JSONResponseBody1Error) Valid() bool {
+// Valid indicates whether the value is a known member of the UpdateProjectQuota400JSONResponseBody2Error enum.
+func (e UpdateProjectQuota400JSONResponseBody2Error) Valid() bool {
 	switch e {
 	case QuotaBelowUsage:
 		return true
@@ -621,27 +868,36 @@ type Cluster struct {
 	//   (`provisioning.cattle.io/cluster`). Examples:
 	//   `"waiting for viable init node"`, `"configuring control plane"`.
 	//   The reconciler refreshes this every poll cycle without flipping
-	//   status, so callers polling GET see progress without a state
-	//   change.
+	//   status, so callers polling GET see progress without a state change.
 	// - **FAILED**: terminal failure reason from the upstream Stalled
 	//   condition (e.g. `"control plane never became healthy"`).
 	// - **ACTIVE**: typically empty.
-	Message      *string          `json:"message,omitempty"`
-	Name         string           `json:"name"`
-	NodeSize     *ClusterNodeSize `json:"node_size,omitempty"`
-	ProviderType string           `json:"provider_type"`
+	Message      *string `json:"message,omitempty"`
+	Name         string  `json:"name"`
+	ProviderType string  `json:"provider_type"`
 
 	// Status Lifecycle status of any DC-API resource.
 	// - `PENDING` — accepted, provisioning in progress
 	// - `ACTIVE` — running and healthy
 	// - `FAILED` — provisioning or deletion failed
 	// - `DELETING` — deletion requested, async removal in progress
-	Status   ResourceStatus `json:"status"`
-	TenantId string         `json:"tenant_id"`
-}
+	Status ResourceStatus `json:"status"`
 
-// ClusterNodeSize defines model for Cluster.NodeSize.
-type ClusterNodeSize string
+	// SystemPool Embedded system node pool. Always present. For the list endpoint
+	// this provides a quick at-a-glance view; for full node-pool detail
+	// call `GET .../clusters/{id}/node-pools`.
+	SystemPool NodePool `json:"system_pool"`
+	TenantId   string   `json:"tenant_id"`
+
+	// TotalNodeCount Sum of node counts across all pools (system + all worker pools).
+	// Useful for at-a-glance capacity display.
+	TotalNodeCount int `json:"total_node_count"`
+
+	// WorkerPoolCount Number of worker pools currently attached to this cluster. Does
+	// not include the system pool. Fetch the full list via
+	// `GET .../clusters/{id}/node-pools`.
+	WorkerPoolCount int `json:"worker_pool_count"`
+}
 
 // CreateBastionRequest defines model for CreateBastionRequest.
 type CreateBastionRequest struct {
@@ -683,6 +939,13 @@ type CreateBastionResponse struct {
 // - **VPC path (F32)**:    set `vnet_id` + `subnet_id` only.
 //
 // Providing both or neither returns `400`.
+//
+// Worker node pools are **optional** at create time: supply `worker_pools`
+// to provision one or more worker pools alongside the cluster in a single
+// request. Each entry follows the `CreateNodePoolRequest` shape (the role
+// is always `worker` and must not be included). Pool names must be unique
+// within the cluster and must not be `system` (reserved). Worker pools can
+// also be added after cluster creation via `POST .../clusters/{id}/node-pools`.
 type CreateClusterRequest struct {
 	// ImageName Image ID from `GET /v1/images`
 	ImageName string `json:"image_name"`
@@ -690,33 +953,41 @@ type CreateClusterRequest struct {
 	// K8sVersion RKE2 Kubernetes version string
 	K8sVersion string `json:"k8s_version"`
 
-	// Name Unique cluster name within the tenant
+	// Name Unique cluster name within the project. DNS-label-safe, max 32
+	// chars (leaves room for `<cluster>-<pool>-<suffix>` Rancher CRD
+	// naming).
 	Name string `json:"name"`
 
 	// NetworkName Network ID from `GET /v1/networks`. Legacy bridge path.
 	// Mutually exclusive with `vnet_id` + `subnet_id`.
 	NetworkName *string `json:"network_name,omitempty"`
 
-	// NodeCount Number of worker nodes (1–10)
-	NodeCount int `json:"node_count"`
-
-	// NodeDiskGb Optional root disk override per node. Defaults to size default.
-	NodeDiskGb *int `json:"node_disk_gb,omitempty"`
-
-	// NodeSize Named instance size for each node
-	NodeSize CreateClusterRequestNodeSize `json:"node_size"`
-
 	// SubnetId UUID of an ACTIVE Subnet inside the specified `vnet_id`.
 	// Required when `vnet_id` is set. Mutually exclusive with `network_name`.
 	SubnetId *openapi_types.UUID `json:"subnet_id,omitempty"`
 
-	// VnetId UUID of a ACTIVE VNet in this tenant. F32 VPC path.
+	// SystemPool Specification for the system node pool, supplied at cluster create time.
+	// The system pool hosts the Kubernetes control-plane and etcd quorum.
+	// User workloads do not schedule here by default (RKE2 applies
+	// `node-role.kubernetes.io/control-plane:NoSchedule` and
+	// `node-role.kubernetes.io/etcd:NoExecute` taints automatically).
+	//
+	// The pool name is always `system` — it is set by the server and must
+	// not be provided in the request.
+	SystemPool SystemPoolSpec `json:"system_pool"`
+
+	// VnetId UUID of an ACTIVE VNet in this tenant. VPC path (F32).
 	// Mutually exclusive with `network_name`. Requires `subnet_id`.
 	VnetId *openapi_types.UUID `json:"vnet_id,omitempty"`
-}
 
-// CreateClusterRequestNodeSize Named instance size for each node
-type CreateClusterRequestNodeSize string
+	// WorkerPools Optional list of worker pools to provision alongside the cluster.
+	// Each entry follows the `CreateNodePoolRequest` shape (the role is
+	// always `worker` and must not be included). Pool names must be unique
+	// within the cluster and must not be `system` (reserved). Worker pools
+	// can also be added after cluster creation via
+	// `POST .../clusters/{id}/node-pools`.
+	WorkerPools *[]CreateNodePoolRequest `json:"worker_pools,omitempty"`
+}
 
 // CreateClusterResponse defines model for CreateClusterResponse.
 type CreateClusterResponse struct {
@@ -748,6 +1019,37 @@ type CreateDNSZoneRequest struct {
 	// (e.g. `internal.lk.wso2.com`). Uniqueness enforced per (vnet_id, name).
 	Name string `json:"name"`
 }
+
+// CreateDatabaseRequest Body for `POST .../databases`. Network selection is optional —
+// omit to use the project's default (first ACTIVE subnet).
+type CreateDatabaseRequest struct {
+	// AllocatedStorageGb Data-volume size in GiB.
+	AllocatedStorageGb int `json:"allocated_storage_gb"`
+
+	// Engine Database engine. v1 supports postgres only.
+	Engine *CreateDatabaseRequestEngine `json:"engine,omitempty"`
+
+	// EngineVersion Engine version (e.g. "16"). Informational in v1 — accepted and
+	// stored but not acted on by the controller until Task 2 lands
+	// multi-version support.
+	EngineVersion *string `json:"engine_version,omitempty"`
+
+	// InstanceClass RDS-style instance size class.
+	InstanceClass CreateDatabaseRequestInstanceClass `json:"instance_class"`
+
+	// Name Project-unique name (DNS-label rules; ≤32 chars).
+	Name string `json:"name"`
+
+	// Network Discriminated network selection. Omit to auto-pick the project's
+	// default subnet (VPC mode).
+	Network *DatabaseNetworkSpec `json:"network,omitempty"`
+}
+
+// CreateDatabaseRequestEngine Database engine. v1 supports postgres only.
+type CreateDatabaseRequestEngine string
+
+// CreateDatabaseRequestInstanceClass RDS-style instance size class.
+type CreateDatabaseRequestInstanceClass string
 
 // CreateImageRequest defines model for CreateImageRequest.
 type CreateImageRequest struct {
@@ -782,6 +1084,43 @@ type CreateNSGRequest struct {
 	// Rules Initial rule set. May be empty.
 	Rules *[]NSGRule `json:"rules,omitempty"`
 }
+
+// CreateNodePoolRequest Request body for `POST .../clusters/{id}/node-pools`.
+// Always creates a **worker** pool — the role is set by the server and
+// must not be included in the request.
+//
+// Pool name must be unique within the cluster. The name `system` is
+// reserved and will be rejected with `400`.
+type CreateNodePoolRequest struct {
+	// Count Number of nodes in the pool (1–50)
+	Count int `json:"count"`
+
+	// DiskGb Optional root disk override in GiB. Defaults to the size default.
+	// Minimum 40 GiB.
+	DiskGb *int `json:"disk_gb,omitempty"`
+
+	// ImageName Optional Harvester VM image for nodes in this pool. Format:
+	// `namespace/image-name` (same as `CreateClusterRequest.image_name`).
+	// Omit to reuse the image already set in the cluster's system pool
+	// (the provider falls back to its configured default).
+	ImageName *string `json:"image_name,omitempty"`
+
+	// Labels Optional node labels (max 50 entries)
+	Labels *map[string]string `json:"labels,omitempty"`
+
+	// Name Pool name. DNS-label-safe, max 40 chars. Must be unique within
+	// the cluster. The value `system` is reserved and will be rejected.
+	Name string `json:"name"`
+
+	// Size Instance size for each node in the pool
+	Size CreateNodePoolRequestSize `json:"size"`
+
+	// Taints Optional node taints (max 10)
+	Taints *[]NodePoolTaint `json:"taints,omitempty"`
+}
+
+// CreateNodePoolRequestSize Instance size for each node in the pool
+type CreateNodePoolRequestSize string
 
 // CreatePeeringRequest defines model for CreatePeeringRequest.
 type CreatePeeringRequest struct {
@@ -842,6 +1181,46 @@ type CreateProjectRequest struct {
 
 	// StorageGb Storage quota GiB (default 500 when omitted)
 	StorageGb *int `json:"storage_gb,omitempty"`
+}
+
+// CreateRoleAssignmentRequest Grant request shared by every role-assignment scope (tenant, project,
+// and per-resource). The principal is identified by **exactly one** of
+// `user_sub` or `user_email`; supplying both, or neither, returns 400.
+type CreateRoleAssignmentRequest struct {
+	// DisplayAlias Optional mnemonic the granter sets so cloud-ui can show a
+	// readable name in the role-assignment list instead of the opaque
+	// `user_sub`. Defaults to the invite email when the grant uses
+	// `user_email` and no alias is supplied; otherwise purely what the
+	// inviter typed. Never propagated to the IdP, and no IdP attribute
+	// beyond that invite-time email default is ever stored.
+	// Stored verbatim, max 256 chars by convention.
+	DisplayAlias *string `json:"display_alias,omitempty"`
+
+	// RoleDefinition Role-definition key to grant — any catalog key from
+	// `GET /v1/role-definitions` (e.g. `Owner`, `Contributor`, `Reader`,
+	// `VirtualMachineContributor`). The v1 owner/member/viewer ranks are gone.
+	RoleDefinition string `json:"role_definition"`
+
+	// UserEmail Email address of the user to grant the role to. Mutually
+	// exclusive with `user_sub` — exactly one of the two is required.
+	// dc-api resolves the email to an OIDC `sub` via a live SCIM2
+	// point lookup against the deployment's directory provider at
+	// request time, stores only the resolved `sub`, and uses the email
+	// as the default `display_alias` when none is supplied. The email
+	// itself is not persisted beyond that inviter-visible alias.
+	//
+	// Returns 422 when the email does not resolve to exactly one IdP
+	// user (no match or ambiguous), and 422 when no directory provider
+	// is configured on this deployment (probe
+	// `GET /v1/tenants/{tenant_id}/directory/users` — `501` there
+	// means invite-by-email is unavailable).
+	UserEmail *openapi_types.Email `json:"user_email,omitempty"`
+
+	// UserSub OIDC `sub` of the user to grant the role to. Mutually exclusive
+	// with `user_email` — exactly one of the two is required. Granting
+	// by `user_sub` works on every deployment and never contacts the
+	// IdP.
+	UserSub *string `json:"user_sub,omitempty"`
 }
 
 // CreateRouteTableRequest defines model for CreateRouteTableRequest.
@@ -1037,6 +1416,131 @@ type DNSZone struct {
 	VnetId    openapi_types.UUID `json:"vnet_id"`
 }
 
+// Database A managed Database resource. Spec fields come from create-time
+// input; status fields (`status`, `message`, `endpoint_address`,
+// `endpoint_port`) are populated from the live DBInstance CR status
+// on every GET.
+type Database struct {
+	AllocatedStorageGb int       `json:"allocated_storage_gb"`
+	CreatedAt          time.Time `json:"created_at"`
+
+	// EndpointAddress IP or hostname clients connect to. Empty until ACTIVE.
+	EndpointAddress *string `json:"endpoint_address,omitempty"`
+
+	// EndpointPort TCP port. Empty until ACTIVE.
+	EndpointPort  *int               `json:"endpoint_port,omitempty"`
+	Engine        DatabaseEngine     `json:"engine"`
+	EngineVersion *string            `json:"engine_version,omitempty"`
+	Id            openapi_types.UUID `json:"id"`
+	InstanceClass string             `json:"instance_class"`
+
+	// Message Human-readable status message from the controller.
+	Message *string `json:"message,omitempty"`
+
+	// NadRef Set only when network_mode=legacy.
+	NadRef      *string             `json:"nad_ref,omitempty"`
+	Name        string              `json:"name"`
+	NetworkMode DatabaseNetworkMode `json:"network_mode"`
+	ProjectId   string              `json:"project_id"`
+	Status      DatabaseStatus      `json:"status"`
+
+	// SubnetId Set only when network_mode=vpc.
+	SubnetId  *openapi_types.UUID `json:"subnet_id,omitempty"`
+	TenantId  string              `json:"tenant_id"`
+	UpdatedAt time.Time           `json:"updated_at"`
+
+	// VnetId Set only when network_mode=vpc.
+	VnetId *openapi_types.UUID `json:"vnet_id,omitempty"`
+}
+
+// DatabaseEngine defines model for Database.Engine.
+type DatabaseEngine string
+
+// DatabaseNetworkMode defines model for Database.NetworkMode.
+type DatabaseNetworkMode string
+
+// DatabaseStatus defines model for Database.Status.
+type DatabaseStatus string
+
+// DatabaseCredentials Master user credentials for a Database. Returned exactly once on
+// the first call to `GET .../{id}/credentials`. Save them immediately;
+// dc-api will never return them again.
+type DatabaseCredentials struct {
+	// CaCert PEM-encoded CA certificate for SSL verification. Use with
+	// `sslmode=verify-ca` in psql/JDBC connection strings.
+	CaCert   *string `json:"ca_cert,omitempty"`
+	Password string  `json:"password"`
+	Username string  `json:"username"`
+}
+
+// DatabaseNetworkLegacy Pre-existing Multus NAD on a VLAN bridge. Used for environments
+// not yet migrated to KubeOVN (e.g. lk prod).
+type DatabaseNetworkLegacy struct {
+	Mode DatabaseNetworkLegacyMode `json:"mode"`
+
+	// NadRef Multus NAD as 'namespace/name'.
+	NadRef string `json:"nad_ref"`
+}
+
+// DatabaseNetworkLegacyMode defines model for DatabaseNetworkLegacy.Mode.
+type DatabaseNetworkLegacyMode string
+
+// DatabaseNetworkSpec Discriminated network selection. Omit to auto-pick the project's
+// default subnet (VPC mode).
+type DatabaseNetworkSpec struct {
+	union json.RawMessage
+}
+
+// DatabaseNetworkVPC KubeOVN-managed VPC + subnet (the modern path).
+type DatabaseNetworkVPC struct {
+	Mode     DatabaseNetworkVPCMode `json:"mode"`
+	SubnetId openapi_types.UUID     `json:"subnet_id"`
+	VnetId   openapi_types.UUID     `json:"vnet_id"`
+}
+
+// DatabaseNetworkVPCMode defines model for DatabaseNetworkVPC.Mode.
+type DatabaseNetworkVPCMode string
+
+// DirectoryGroup Minimal group record proxied live from the IdP's SCIM2 Groups
+// resource. These two fields are the entire exposure; membership and
+// all other SCIM attributes stay in the IdP, and dc-api persists
+// nothing.
+type DirectoryGroup struct {
+	// Id SCIM2 group identifier in the IdP.
+	Id   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// DirectoryGroupList defines model for DirectoryGroupList.
+type DirectoryGroupList struct {
+	Groups []DirectoryGroup `json:"groups"`
+
+	// TotalResults Total number of groups across all pages (SCIM2 `totalResults`),
+	// not the size of this page.
+	TotalResults int `json:"total_results"`
+}
+
+// DirectoryUser Minimal user record proxied live from the IdP's SCIM2 Users resource.
+// These three fields are the entire exposure — nothing else from the
+// SCIM response (groups, phone numbers, addresses, raw attributes) is
+// ever surfaced, and dc-api persists none of it.
+type DirectoryUser struct {
+	// DisplayName Human-readable name from the IdP, when one is set.
+	DisplayName *string             `json:"display_name,omitempty"`
+	Email       openapi_types.Email `json:"email"`
+
+	// Sub OIDC `sub` — the value to use as `user_sub` when granting a role.
+	Sub string `json:"sub"`
+}
+
+// DirectoryUserList defines model for DirectoryUserList.
+type DirectoryUserList struct {
+	// TotalResults Total number of users matching the filter across all pages
+	// (SCIM2 `totalResults`), not the size of this page.
+	TotalResults int             `json:"total_results"`
+	Users        []DirectoryUser `json:"users"`
+}
+
 // Error defines model for Error.
 type Error struct {
 	// Error Human-readable description of what went wrong
@@ -1055,23 +1559,6 @@ type Image struct {
 	// Namespace Harvester namespace the image lives in
 	Namespace string `json:"namespace"`
 }
-
-// InviteMemberRequest defines model for InviteMemberRequest.
-type InviteMemberRequest struct {
-	// DisplayAlias Optional mnemonic the inviter sets so cloud-ui can show a
-	// readable name in the members list instead of the opaque
-	// `user_sub`. Not propagated to the IdP and never matched
-	// against any IdP attribute — purely admin bookkeeping.
-	// Stored verbatim, max 256 chars by convention.
-	DisplayAlias *string                 `json:"display_alias,omitempty"`
-	Role         InviteMemberRequestRole `json:"role"`
-
-	// UserSub OIDC `sub` of the user to invite
-	UserSub string `json:"user_sub"`
-}
-
-// InviteMemberRequestRole defines model for InviteMemberRequest.Role.
-type InviteMemberRequestRole string
 
 // KeyVault defines model for KeyVault.
 type KeyVault struct {
@@ -1286,6 +1773,111 @@ type Network struct {
 	Namespace string `json:"namespace"`
 }
 
+// NodePool Represents a node pool within a cluster. Node pools are either
+// `system` (exactly one per cluster, controlplane + etcd) or `worker`
+// (0..N, user workloads).
+//
+// The `role` field is server-set and readOnly — callers cannot change it.
+type NodePool struct {
+	// Count Current desired node count. For the `system` pool this is
+	// constrained to `{1, 3, 5}`; for worker pools the range is 1–50.
+	Count     int        `json:"count"`
+	CreatedAt *time.Time `json:"created_at,omitempty"`
+
+	// DiskGb Root disk size in GiB (set at creation, immutable)
+	DiskGb *int `json:"disk_gb,omitempty"`
+
+	// Labels Arbitrary key/value labels applied to all nodes in the pool as
+	// Kubernetes node labels. Keys and values must follow Kubernetes
+	// label syntax. Maximum 50 entries.
+	// Only user-mutable on `worker` pools; absent on the `system` pool.
+	Labels *map[string]string `json:"labels,omitempty"`
+
+	// Name Pool name. DNS-label-safe, max 40 chars. The system pool is
+	// always named `system`. Worker pool names are user-supplied at
+	// creation and immutable thereafter.
+	Name *string `json:"name,omitempty"`
+
+	// Role Pool category. `system` = controlplane + etcd (exactly one per
+	// cluster). `worker` = user workloads (0..N per cluster). This
+	// field is set by the server and never accepted from the caller.
+	Role *NodePoolRole `json:"role,omitempty"`
+
+	// Size Instance size. Immutable after pool creation. To change size,
+	// add a new pool of the desired size and delete the old one.
+	Size *NodePoolSize `json:"size,omitempty"`
+
+	// Status Lifecycle status of the pool, derived from the Rancher machinePool
+	// condition. `scaling` indicates a PATCH count change is in progress.
+	Status *NodePoolStatus `json:"status,omitempty"`
+
+	// Taints Node taints applied to all nodes in the pool. Maximum 10.
+	// Only present on `worker` pools; always absent on the `system`
+	// pool (controlled exclusively by RKE2 — not user-mutable).
+	Taints *[]NodePoolTaint `json:"taints,omitempty"`
+}
+
+// NodePoolRole Pool category. `system` = controlplane + etcd (exactly one per
+// cluster). `worker` = user workloads (0..N per cluster). This
+// field is set by the server and never accepted from the caller.
+type NodePoolRole string
+
+// NodePoolSize Instance size. Immutable after pool creation. To change size,
+// add a new pool of the desired size and delete the old one.
+type NodePoolSize string
+
+// NodePoolStatus Lifecycle status of the pool, derived from the Rancher machinePool
+// condition. `scaling` indicates a PATCH count change is in progress.
+type NodePoolStatus string
+
+// NodePoolTaint A Kubernetes node taint applied to all nodes in a worker pool.
+// Key must be a DNS subdomain (e.g. `nvidia.com/gpu`).
+// Value is optional. Effect is required.
+type NodePoolTaint struct {
+	// Effect Taint effect
+	Effect NodePoolTaintEffect `json:"effect"`
+
+	// Key Taint key (DNS subdomain, max 253 chars)
+	Key string `json:"key"`
+
+	// Value Optional taint value (max 63 chars)
+	Value *string `json:"value,omitempty"`
+}
+
+// NodePoolTaintEffect Taint effect
+type NodePoolTaintEffect string
+
+// PatchNodePoolRequest Request body for `PATCH .../clusters/{id}/node-pools/{pool_name}`.
+// All fields are optional; omit a field to leave it unchanged.
+//
+// **Mutable fields**:
+//   - `count` — scale the pool. For the `system` pool, only growth in
+//     steps `{1→3, 3→5}` is permitted; shrinks return `400`. Worker
+//     pools accept any value 1–50.
+//   - `taints` — replaces the entire taint array. Send `[]` to clear.
+//     Refused on the `system` pool.
+//   - `labels` — replaces the entire label map. Send `{}` to clear.
+//     Refused on the `system` pool.
+//
+// The fields `name`, `role`, and `size` are immutable and must not be
+// sent. The handler returns `400` with a descriptive error if they are
+// present (even though they are not in this schema, a strict decoder
+// or explicit handler check catches them).
+type PatchNodePoolRequest struct {
+	// Count New desired node count. System pool: must be `3` when current
+	// is `1`, or `5` when current is `3`; no other values accepted.
+	// Worker pools: any value 1–50.
+	Count *int `json:"count,omitempty"`
+
+	// Labels Replacement label map. Replaces the existing map in full.
+	// Send `{}` to remove all labels. Refused on the `system` pool.
+	Labels *map[string]string `json:"labels,omitempty"`
+
+	// Taints Replacement taint list. Replaces the existing list in full.
+	// Send `[]` to remove all taints. Refused on the `system` pool.
+	Taints *[]NodePoolTaint `json:"taints,omitempty"`
+}
+
 // Peering defines model for Peering.
 type Peering struct {
 	AllowForwardedTraffic bool               `json:"allow_forwarded_traffic"`
@@ -1308,6 +1900,20 @@ type Peering struct {
 
 	// Warning Present when `allow_forwarded_traffic` is true (no-op in M2).
 	Warning *string `json:"warning,omitempty"`
+}
+
+// PermissionsCheckRequest defines model for PermissionsCheckRequest.
+type PermissionsCheckRequest struct {
+	// Actions Action keys to evaluate at the scope, e.g. `compute/virtualMachines/write`.
+	Actions []string `json:"actions"`
+}
+
+// PermissionsCheckResponse defines model for PermissionsCheckResponse.
+type PermissionsCheckResponse struct {
+	Results []struct {
+		Action  string `json:"action"`
+		Allowed bool   `json:"allowed"`
+	} `json:"results"`
 }
 
 // PrivateEndpoint defines model for PrivateEndpoint.
@@ -1424,8 +2030,13 @@ type ResourceStatus string
 // RoleAssignment defines model for RoleAssignment.
 type RoleAssignment struct {
 	// DisplayAlias Admin-set mnemonic shown by cloud-ui instead of the opaque
-	// `principal_id`. Optional. No PII is sourced from the IdP —
-	// purely what the inviter typed when they added the principal.
+	// `principal_id`. Optional. No PII is **stored** from the IdP:
+	// email-based invites consult the directory provider live to
+	// resolve `user_email` → `sub`, but the only IdP-derived values
+	// persisted are the `sub` itself and — when the inviter supplies
+	// no alias — the invite email used as this field's default.
+	// Otherwise it is purely what the inviter typed when they added
+	// the principal.
 	DisplayAlias *string   `json:"display_alias,omitempty"`
 	GrantedAt    time.Time `json:"granted_at"`
 
@@ -1434,7 +2045,7 @@ type RoleAssignment struct {
 	// (legacy autoprovision path, default off in Option D),
 	// `member-invite:<inviter-sub>` (when the row was created
 	// implicitly by an admin invite), or a bare sub when
-	// granted explicitly via the members API.
+	// granted explicitly via the role-assignments API.
 	GrantedBy string `json:"granted_by"`
 
 	// Id UUID of the role_assignments row
@@ -1443,23 +2054,51 @@ type RoleAssignment struct {
 	// PrincipalId OIDC `sub` for users; service account UUID for SAs
 	PrincipalId   string                      `json:"principal_id"`
 	PrincipalType RoleAssignmentPrincipalType `json:"principal_type"`
-	Role          RoleAssignmentRole          `json:"role"`
 
-	// ScopeId Identifier of the scope (e.g. tenant slug)
+	// RoleDefinition RBAC v2 role-definition key (e.g. `Contributor`,
+	// `VirtualMachineContributor`). Resolve it to a display name via
+	// `GET /v1/role-definitions`.
+	RoleDefinition string `json:"role_definition"`
+
+	// ScopeId Identifier of the scope (tenant or project slug)
 	ScopeId string `json:"scope_id"`
 
-	// ScopeType Scope hierarchy level. Only `tenant` is active in M1.5.
+	// ScopeType Scope hierarchy level the role is granted at.
 	ScopeType RoleAssignmentScopeType `json:"scope_type"`
 }
 
 // RoleAssignmentPrincipalType defines model for RoleAssignment.PrincipalType.
 type RoleAssignmentPrincipalType string
 
-// RoleAssignmentRole defines model for RoleAssignment.Role.
-type RoleAssignmentRole string
-
-// RoleAssignmentScopeType Scope hierarchy level. Only `tenant` is active in M1.5.
+// RoleAssignmentScopeType Scope hierarchy level the role is granted at.
 type RoleAssignmentScopeType string
+
+// RoleDefinition A role definition: a named set of allow/deny action patterns, split
+// across the control plane (`actions` / `not_actions`) and the data plane
+// (`data_actions` / `not_data_actions`). Patterns may use the `*` wildcard.
+// `key` is the stable identifier a role assignment stores.
+type RoleDefinition struct {
+	// Actions Control-plane action patterns this role grants.
+	Actions []string `json:"actions"`
+
+	// Builtin True for the system catalog; false for tenant-owned custom roles.
+	Builtin bool `json:"builtin"`
+
+	// DataActions Data-plane action patterns (touching resource contents) this role grants.
+	DataActions *[]string `json:"data_actions,omitempty"`
+	Description string    `json:"description"`
+	DisplayName string    `json:"display_name"`
+
+	// Key Stable identifier — a reserved PascalCase name for built-ins
+	// (e.g. `VirtualMachineContributor`), or a UUID for custom roles.
+	Key string `json:"key"`
+
+	// NotActions Control-plane patterns subtracted from `actions` within this role.
+	NotActions *[]string `json:"not_actions,omitempty"`
+
+	// NotDataActions Data-plane patterns subtracted from `data_actions` within this role.
+	NotDataActions *[]string `json:"not_data_actions,omitempty"`
+}
 
 // RouteRule defines model for RouteRule.
 type RouteRule struct {
@@ -1526,6 +2165,26 @@ type ServiceAccount struct {
 // ServiceAccountRole defines model for ServiceAccount.Role.
 type ServiceAccountRole string
 
+// SharedResource A resource the caller can reach through a resource-scope grant, with
+// just enough for the UI to list it and deep-link to its detail page.
+type SharedResource struct {
+	Id openapi_types.UUID `json:"id"`
+
+	// Kind URL path segment for the resource's detail route.
+	Kind SharedResourceKind `json:"kind"`
+	Name string             `json:"name"`
+
+	// ProjectId Slug of the project the resource lives in.
+	ProjectId string `json:"project_id"`
+
+	// Roles Role-definition keys the caller holds on this resource.
+	Roles  []string `json:"roles"`
+	Status string   `json:"status"`
+}
+
+// SharedResourceKind URL path segment for the resource's detail route.
+type SharedResourceKind string
+
 // Subnet defines model for Subnet.
 type Subnet struct {
 	Cidr         string             `json:"cidr"`
@@ -1547,6 +2206,35 @@ type Subnet struct {
 	UpdatedAt time.Time          `json:"updated_at"`
 	VnetId    openapi_types.UUID `json:"vnet_id"`
 }
+
+// SystemPoolSpec Specification for the system node pool, supplied at cluster create time.
+// The system pool hosts the Kubernetes control-plane and etcd quorum.
+// User workloads do not schedule here by default (RKE2 applies
+// `node-role.kubernetes.io/control-plane:NoSchedule` and
+// `node-role.kubernetes.io/etcd:NoExecute` taints automatically).
+//
+// The pool name is always `system` — it is set by the server and must
+// not be provided in the request.
+type SystemPoolSpec struct {
+	// Count Number of system nodes. Must be `1`, `3`, or `5` (etcd quorum
+	// constraints). Use `1` for dev/test clusters; `3` or `5` for HA.
+	Count SystemPoolSpecCount `json:"count"`
+
+	// DiskGb Optional root disk override in GiB. Defaults to the size default
+	// (40 GiB for `small`/`medium`, 80 GiB for `large`, 160 GiB for
+	// `xlarge`). Minimum 40 GiB.
+	DiskGb *int `json:"disk_gb,omitempty"`
+
+	// Size Instance size for each system node
+	Size SystemPoolSpecSize `json:"size"`
+}
+
+// SystemPoolSpecCount Number of system nodes. Must be `1`, `3`, or `5` (etcd quorum
+// constraints). Use `1` for dev/test clusters; `3` or `5` for HA.
+type SystemPoolSpecCount int
+
+// SystemPoolSpecSize Instance size for each system node
+type SystemPoolSpecSize string
 
 // Tenant Full tenant record from the `tenants` registry. Returned by the
 // admin endpoints (`POST /v1/admin/tenants`, `GET /v1/tenants` admin
@@ -1716,11 +2404,20 @@ type BadRequest = Error
 // Conflict defines model for Conflict.
 type Conflict = Error
 
+// DirectoryNotConfigured defines model for DirectoryNotConfigured.
+type DirectoryNotConfigured = Error
+
+// DirectoryUpstreamError defines model for DirectoryUpstreamError.
+type DirectoryUpstreamError = Error
+
 // Forbidden defines model for Forbidden.
 type Forbidden = Error
 
 // InternalError defines model for InternalError.
 type InternalError = Error
+
+// InviteEmailUnprocessable defines model for InviteEmailUnprocessable.
+type InviteEmailUnprocessable = Error
 
 // NotFound defines model for NotFound.
 type NotFound = Error
@@ -1760,9 +2457,32 @@ type AuthLoginParams struct {
 	ReturnTo *string `form:"return_to,omitempty" json:"return_to,omitempty"`
 }
 
-// UpdateProjectQuota400JSONResponseBody1 defines parameters for UpdateProjectQuota.
-type UpdateProjectQuota400JSONResponseBody1 struct {
-	Error UpdateProjectQuota400JSONResponseBody1Error `json:"error"`
+// ListDirectoryGroupsParams defines parameters for ListDirectoryGroups.
+type ListDirectoryGroupsParams struct {
+	// Limit Maximum number of groups to return per page (SCIM2 `count` underneath).
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Number of groups to skip (SCIM2 `startIndex = offset + 1` underneath).
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListDirectoryUsersParams defines parameters for ListDirectoryUsers.
+type ListDirectoryUsersParams struct {
+	// Filter Optional case-insensitive substring matched against the user's
+	// email/username and display name (mapped to SCIM2 `co` filters
+	// underneath). Empty or omitted lists all users (paginated).
+	Filter *string `form:"filter,omitempty" json:"filter,omitempty"`
+
+	// Limit Maximum number of users to return per page (SCIM2 `count` underneath).
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Number of users to skip (SCIM2 `startIndex = offset + 1` underneath).
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// UpdateProjectQuota400JSONResponseBody2 defines parameters for UpdateProjectQuota.
+type UpdateProjectQuota400JSONResponseBody2 struct {
+	Error UpdateProjectQuota400JSONResponseBody2Error `json:"error"`
 
 	// InUse A capacity triplet — used in `QuotaExceededError` bodies for
 	// the `tenant_cap`, `allocated`, `available`, and `requested` fields.
@@ -1774,8 +2494,8 @@ type UpdateProjectQuota400JSONResponseBody1 struct {
 	Requested TenantCap `json:"requested"`
 }
 
-// UpdateProjectQuota400JSONResponseBody1Error defines parameters for UpdateProjectQuota.
-type UpdateProjectQuota400JSONResponseBody1Error string
+// UpdateProjectQuota400JSONResponseBody2Error defines parameters for UpdateProjectQuota.
+type UpdateProjectQuota400JSONResponseBody2Error string
 
 // UpdateProjectQuota400JSONResponseBody defines parameters for UpdateProjectQuota.
 type UpdateProjectQuota400JSONResponseBody struct {
@@ -1834,8 +2554,8 @@ type AdminUpdateTenantCapJSONRequestBody = UpdateTenantCapRequest
 // CreateImageJSONRequestBody defines body for CreateImage for application/json ContentType.
 type CreateImageJSONRequestBody = CreateImageRequest
 
-// InviteMemberJSONRequestBody defines body for InviteMember for application/json ContentType.
-type InviteMemberJSONRequestBody = InviteMemberRequest
+// CheckPermissionsJSONRequestBody defines body for CheckPermissions for application/json ContentType.
+type CheckPermissionsJSONRequestBody = PermissionsCheckRequest
 
 // CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
 type CreateProjectJSONRequestBody = CreateProjectRequest
@@ -1849,14 +2569,47 @@ type CreateBastionJSONRequestBody = CreateBastionRequest
 // CreateClusterJSONRequestBody defines body for CreateCluster for application/json ContentType.
 type CreateClusterJSONRequestBody = CreateClusterRequest
 
+// CreateNodePoolJSONRequestBody defines body for CreateNodePool for application/json ContentType.
+type CreateNodePoolJSONRequestBody = CreateNodePoolRequest
+
+// UpdateNodePoolJSONRequestBody defines body for UpdateNodePool for application/json ContentType.
+type UpdateNodePoolJSONRequestBody = PatchNodePoolRequest
+
+// CheckClusterPermissionsJSONRequestBody defines body for CheckClusterPermissions for application/json ContentType.
+type CheckClusterPermissionsJSONRequestBody = PermissionsCheckRequest
+
+// CreateClusterRoleAssignmentJSONRequestBody defines body for CreateClusterRoleAssignment for application/json ContentType.
+type CreateClusterRoleAssignmentJSONRequestBody = CreateRoleAssignmentRequest
+
+// CreateDatabaseJSONRequestBody defines body for CreateDatabase for application/json ContentType.
+type CreateDatabaseJSONRequestBody = CreateDatabaseRequest
+
+// CheckDatabasePermissionsJSONRequestBody defines body for CheckDatabasePermissions for application/json ContentType.
+type CheckDatabasePermissionsJSONRequestBody = PermissionsCheckRequest
+
+// CreateDatabaseRoleAssignmentJSONRequestBody defines body for CreateDatabaseRoleAssignment for application/json ContentType.
+type CreateDatabaseRoleAssignmentJSONRequestBody = CreateRoleAssignmentRequest
+
 // CreateKeyVaultJSONRequestBody defines body for CreateKeyVault for application/json ContentType.
 type CreateKeyVaultJSONRequestBody = CreateKeyVaultRequest
+
+// CheckKeyVaultPermissionsJSONRequestBody defines body for CheckKeyVaultPermissions for application/json ContentType.
+type CheckKeyVaultPermissionsJSONRequestBody = PermissionsCheckRequest
 
 // CreateKeyVaultPrivateEndpointJSONRequestBody defines body for CreateKeyVaultPrivateEndpoint for application/json ContentType.
 type CreateKeyVaultPrivateEndpointJSONRequestBody = CreatePrivateEndpointRequest
 
+// CreateKeyVaultRoleAssignmentJSONRequestBody defines body for CreateKeyVaultRoleAssignment for application/json ContentType.
+type CreateKeyVaultRoleAssignmentJSONRequestBody = CreateRoleAssignmentRequest
+
 // PutKeyVaultSecretJSONRequestBody defines body for PutKeyVaultSecret for application/json ContentType.
 type PutKeyVaultSecretJSONRequestBody = KeyVaultSecretCreateRequest
+
+// CheckProjectPermissionsJSONRequestBody defines body for CheckProjectPermissions for application/json ContentType.
+type CheckProjectPermissionsJSONRequestBody = PermissionsCheckRequest
+
+// CreateProjectRoleAssignmentJSONRequestBody defines body for CreateProjectRoleAssignment for application/json ContentType.
+type CreateProjectRoleAssignmentJSONRequestBody = CreateRoleAssignmentRequest
 
 // CreateSecurityGroupJSONRequestBody defines body for CreateSecurityGroup for application/json ContentType.
 type CreateSecurityGroupJSONRequestBody = CreateNSGRequest
@@ -1872,6 +2625,12 @@ type CreateServiceAccountJSONRequestBody = CreateServiceAccountRequest
 
 // CreateVirtualMachineJSONRequestBody defines body for CreateVirtualMachine for application/json ContentType.
 type CreateVirtualMachineJSONRequestBody = CreateVirtualMachineRequest
+
+// CheckVMPermissionsJSONRequestBody defines body for CheckVMPermissions for application/json ContentType.
+type CheckVMPermissionsJSONRequestBody = PermissionsCheckRequest
+
+// CreateVMRoleAssignmentJSONRequestBody defines body for CreateVMRoleAssignment for application/json ContentType.
+type CreateVMRoleAssignmentJSONRequestBody = CreateRoleAssignmentRequest
 
 // CreateVNetJSONRequestBody defines body for CreateVNet for application/json ContentType.
 type CreateVNetJSONRequestBody = CreateVNetRequest
@@ -1899,6 +2658,98 @@ type AssociateRouteTableJSONRequestBody AssociateRouteTableJSONBody
 
 // CreateSubnetJSONRequestBody defines body for CreateSubnet for application/json ContentType.
 type CreateSubnetJSONRequestBody = CreateSubnetRequest
+
+// CreateTenantRoleAssignmentJSONRequestBody defines body for CreateTenantRoleAssignment for application/json ContentType.
+type CreateTenantRoleAssignmentJSONRequestBody = CreateRoleAssignmentRequest
+
+// AsDatabaseNetworkVPC returns the union data inside the DatabaseNetworkSpec as a DatabaseNetworkVPC
+func (t DatabaseNetworkSpec) AsDatabaseNetworkVPC() (DatabaseNetworkVPC, error) {
+	var body DatabaseNetworkVPC
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromDatabaseNetworkVPC overwrites any union data inside the DatabaseNetworkSpec as the provided DatabaseNetworkVPC
+func (t *DatabaseNetworkSpec) FromDatabaseNetworkVPC(v DatabaseNetworkVPC) error {
+	v.Mode = "vpc"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeDatabaseNetworkVPC performs a merge with any union data inside the DatabaseNetworkSpec, using the provided DatabaseNetworkVPC
+func (t *DatabaseNetworkSpec) MergeDatabaseNetworkVPC(v DatabaseNetworkVPC) error {
+	v.Mode = "vpc"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsDatabaseNetworkLegacy returns the union data inside the DatabaseNetworkSpec as a DatabaseNetworkLegacy
+func (t DatabaseNetworkSpec) AsDatabaseNetworkLegacy() (DatabaseNetworkLegacy, error) {
+	var body DatabaseNetworkLegacy
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromDatabaseNetworkLegacy overwrites any union data inside the DatabaseNetworkSpec as the provided DatabaseNetworkLegacy
+func (t *DatabaseNetworkSpec) FromDatabaseNetworkLegacy(v DatabaseNetworkLegacy) error {
+	v.Mode = "legacy"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeDatabaseNetworkLegacy performs a merge with any union data inside the DatabaseNetworkSpec, using the provided DatabaseNetworkLegacy
+func (t *DatabaseNetworkSpec) MergeDatabaseNetworkLegacy(v DatabaseNetworkLegacy) error {
+	v.Mode = "legacy"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t DatabaseNetworkSpec) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"mode"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t DatabaseNetworkSpec) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "legacy":
+		return t.AsDatabaseNetworkLegacy()
+	case "vpc":
+		return t.AsDatabaseNetworkVPC()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t DatabaseNetworkSpec) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *DatabaseNetworkSpec) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // AsQuotaExceededError returns the union data inside the AdminUpdateTenantCap400JSONResponseBody as a QuotaExceededError
 func (t AdminUpdateTenantCap400JSONResponseBody) AsQuotaExceededError() (QuotaExceededError, error) {
@@ -1962,6 +2813,32 @@ func (t *AdminUpdateTenantCap400JSONResponseBody) UnmarshalJSON(b []byte) error 
 	return err
 }
 
+// AsError returns the union data inside the UpdateProjectQuota400JSONResponseBody as a Error
+func (t UpdateProjectQuota400JSONResponseBody) AsError() (Error, error) {
+	var body Error
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromError overwrites any union data inside the UpdateProjectQuota400JSONResponseBody as the provided Error
+func (t *UpdateProjectQuota400JSONResponseBody) FromError(v Error) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeError performs a merge with any union data inside the UpdateProjectQuota400JSONResponseBody, using the provided Error
+func (t *UpdateProjectQuota400JSONResponseBody) MergeError(v Error) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 // AsQuotaExceededError returns the union data inside the UpdateProjectQuota400JSONResponseBody as a QuotaExceededError
 func (t UpdateProjectQuota400JSONResponseBody) AsQuotaExceededError() (QuotaExceededError, error) {
 	var body QuotaExceededError
@@ -1988,22 +2865,22 @@ func (t *UpdateProjectQuota400JSONResponseBody) MergeQuotaExceededError(v QuotaE
 	return err
 }
 
-// AsUpdateProjectQuota400JSONResponseBody1 returns the union data inside the UpdateProjectQuota400JSONResponseBody as a UpdateProjectQuota400JSONResponseBody1
-func (t UpdateProjectQuota400JSONResponseBody) AsUpdateProjectQuota400JSONResponseBody1() (UpdateProjectQuota400JSONResponseBody1, error) {
-	var body UpdateProjectQuota400JSONResponseBody1
+// AsUpdateProjectQuota400JSONResponseBody2 returns the union data inside the UpdateProjectQuota400JSONResponseBody as a UpdateProjectQuota400JSONResponseBody2
+func (t UpdateProjectQuota400JSONResponseBody) AsUpdateProjectQuota400JSONResponseBody2() (UpdateProjectQuota400JSONResponseBody2, error) {
+	var body UpdateProjectQuota400JSONResponseBody2
 	err := json.Unmarshal(t.union, &body)
 	return body, err
 }
 
-// FromUpdateProjectQuota400JSONResponseBody1 overwrites any union data inside the UpdateProjectQuota400JSONResponseBody as the provided UpdateProjectQuota400JSONResponseBody1
-func (t *UpdateProjectQuota400JSONResponseBody) FromUpdateProjectQuota400JSONResponseBody1(v UpdateProjectQuota400JSONResponseBody1) error {
+// FromUpdateProjectQuota400JSONResponseBody2 overwrites any union data inside the UpdateProjectQuota400JSONResponseBody as the provided UpdateProjectQuota400JSONResponseBody2
+func (t *UpdateProjectQuota400JSONResponseBody) FromUpdateProjectQuota400JSONResponseBody2(v UpdateProjectQuota400JSONResponseBody2) error {
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
 }
 
-// MergeUpdateProjectQuota400JSONResponseBody1 performs a merge with any union data inside the UpdateProjectQuota400JSONResponseBody, using the provided UpdateProjectQuota400JSONResponseBody1
-func (t *UpdateProjectQuota400JSONResponseBody) MergeUpdateProjectQuota400JSONResponseBody1(v UpdateProjectQuota400JSONResponseBody1) error {
+// MergeUpdateProjectQuota400JSONResponseBody2 performs a merge with any union data inside the UpdateProjectQuota400JSONResponseBody, using the provided UpdateProjectQuota400JSONResponseBody2
+func (t *UpdateProjectQuota400JSONResponseBody) MergeUpdateProjectQuota400JSONResponseBody2(v UpdateProjectQuota400JSONResponseBody2) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -2122,11 +2999,23 @@ type ClientInterface interface {
 	// AuthMe request
 	AuthMe(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListRoleDefinitions request
+	ListRoleDefinitions(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRoleDefinition request
+	GetRoleDefinition(ctx context.Context, key string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListTenants request
 	ListTenants(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetTenantCapUsage request
 	GetTenantCapUsage(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListDirectoryGroups request
+	ListDirectoryGroups(ctx context.Context, tenantId TenantID, params *ListDirectoryGroupsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListDirectoryUsers request
+	ListDirectoryUsers(ctx context.Context, tenantId TenantID, params *ListDirectoryUsersParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListImages request
 	ListImages(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2136,19 +3025,13 @@ type ClientInterface interface {
 
 	CreateImage(ctx context.Context, tenantId TenantID, body CreateImageJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// ListMembers request
-	ListMembers(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// InviteMemberWithBody request with any body
-	InviteMemberWithBody(ctx context.Context, tenantId TenantID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	InviteMember(ctx context.Context, tenantId TenantID, body InviteMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// RemoveMember request
-	RemoveMember(ctx context.Context, tenantId TenantID, principalId string, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// ListNetworks request
 	ListNetworks(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CheckPermissionsWithBody request with any body
+	CheckPermissionsWithBody(ctx context.Context, tenantId TenantID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CheckPermissions(ctx context.Context, tenantId TenantID, body CheckPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListProjects request
 	ListProjects(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2200,6 +3083,74 @@ type ClientInterface interface {
 	// GetClusterKubeconfig request
 	GetClusterKubeconfig(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListNodePools request
+	ListNodePools(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateNodePoolWithBody request with any body
+	CreateNodePoolWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateNodePool(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, body CreateNodePoolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteNodePool request
+	DeleteNodePool(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetNodePool request
+	GetNodePool(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateNodePoolWithBody request with any body
+	UpdateNodePoolWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	UpdateNodePool(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, body UpdateNodePoolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CheckClusterPermissionsWithBody request with any body
+	CheckClusterPermissionsWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CheckClusterPermissions(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckClusterPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListClusterRoleAssignments request
+	ListClusterRoleAssignments(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateClusterRoleAssignmentWithBody request with any body
+	CreateClusterRoleAssignmentWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateClusterRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateClusterRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteClusterRoleAssignment request
+	DeleteClusterRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListDatabases request
+	ListDatabases(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateDatabaseWithBody request with any body
+	CreateDatabaseWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateDatabase(ctx context.Context, tenantId TenantID, projectId ProjectID, body CreateDatabaseJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteDatabase request
+	DeleteDatabase(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetDatabase request
+	GetDatabase(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetDatabaseCredentials request
+	GetDatabaseCredentials(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CheckDatabasePermissionsWithBody request with any body
+	CheckDatabasePermissionsWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CheckDatabasePermissions(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckDatabasePermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListDatabaseRoleAssignments request
+	ListDatabaseRoleAssignments(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateDatabaseRoleAssignmentWithBody request with any body
+	CreateDatabaseRoleAssignmentWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateDatabaseRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateDatabaseRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteDatabaseRoleAssignment request
+	DeleteDatabaseRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListKeyVaults request
 	ListKeyVaults(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -2220,6 +3171,11 @@ type ClientInterface interface {
 	// RotateKeyVaultCredentials request
 	RotateKeyVaultCredentials(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// CheckKeyVaultPermissionsWithBody request with any body
+	CheckKeyVaultPermissionsWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CheckKeyVaultPermissions(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckKeyVaultPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListKeyVaultPrivateEndpoints request
 	ListKeyVaultPrivateEndpoints(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -2233,6 +3189,17 @@ type ClientInterface interface {
 
 	// GetKeyVaultPrivateEndpoint request
 	GetKeyVaultPrivateEndpoint(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, epId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListKeyVaultRoleAssignments request
+	ListKeyVaultRoleAssignments(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateKeyVaultRoleAssignmentWithBody request with any body
+	CreateKeyVaultRoleAssignmentWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateKeyVaultRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateKeyVaultRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteKeyVaultRoleAssignment request
+	DeleteKeyVaultRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListKeyVaultSecrets request
 	ListKeyVaultSecrets(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, params *ListKeyVaultSecretsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2250,6 +3217,22 @@ type ClientInterface interface {
 
 	// RestoreKeyVaultSecret request
 	RestoreKeyVaultSecret(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, key string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CheckProjectPermissionsWithBody request with any body
+	CheckProjectPermissionsWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CheckProjectPermissions(ctx context.Context, tenantId TenantID, projectId ProjectID, body CheckProjectPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListProjectRoleAssignments request
+	ListProjectRoleAssignments(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateProjectRoleAssignmentWithBody request with any body
+	CreateProjectRoleAssignmentWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateProjectRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, body CreateProjectRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteProjectRoleAssignment request
+	DeleteProjectRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, principalId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSecurityGroups request
 	ListSecurityGroups(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2305,6 +3288,22 @@ type ClientInterface interface {
 
 	// GetVirtualMachine request
 	GetVirtualMachine(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CheckVMPermissionsWithBody request with any body
+	CheckVMPermissionsWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CheckVMPermissions(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckVMPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListVMRoleAssignments request
+	ListVMRoleAssignments(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateVMRoleAssignmentWithBody request with any body
+	CreateVMRoleAssignmentWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateVMRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateVMRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteVMRoleAssignment request
+	DeleteVMRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListVNets request
 	ListVNets(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2407,6 +3406,20 @@ type ClientInterface interface {
 
 	// GetSubnet request
 	GetSubnet(ctx context.Context, tenantId TenantID, projectId ProjectID, vnetId VNetID, subnetId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListTenantRoleAssignments request
+	ListTenantRoleAssignments(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateTenantRoleAssignmentWithBody request with any body
+	CreateTenantRoleAssignmentWithBody(ctx context.Context, tenantId TenantID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateTenantRoleAssignment(ctx context.Context, tenantId TenantID, body CreateTenantRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteTenantRoleAssignment request
+	DeleteTenantRoleAssignment(ctx context.Context, tenantId TenantID, principalId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListSharedResources request
+	ListSharedResources(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -2517,6 +3530,30 @@ func (c *Client) AuthMe(ctx context.Context, reqEditors ...RequestEditorFn) (*ht
 	return c.Client.Do(req)
 }
 
+func (c *Client) ListRoleDefinitions(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRoleDefinitionsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetRoleDefinition(ctx context.Context, key string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRoleDefinitionRequest(c.Server, key)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) ListTenants(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListTenantsRequest(c.Server)
 	if err != nil {
@@ -2531,6 +3568,30 @@ func (c *Client) ListTenants(ctx context.Context, reqEditors ...RequestEditorFn)
 
 func (c *Client) GetTenantCapUsage(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetTenantCapUsageRequest(c.Server, tenantId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListDirectoryGroups(ctx context.Context, tenantId TenantID, params *ListDirectoryGroupsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListDirectoryGroupsRequest(c.Server, tenantId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListDirectoryUsers(ctx context.Context, tenantId TenantID, params *ListDirectoryUsersParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListDirectoryUsersRequest(c.Server, tenantId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2577,56 +3638,32 @@ func (c *Client) CreateImage(ctx context.Context, tenantId TenantID, body Create
 	return c.Client.Do(req)
 }
 
-func (c *Client) ListMembers(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListMembersRequest(c.Server, tenantId)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) InviteMemberWithBody(ctx context.Context, tenantId TenantID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewInviteMemberRequestWithBody(c.Server, tenantId, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) InviteMember(ctx context.Context, tenantId TenantID, body InviteMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewInviteMemberRequest(c.Server, tenantId, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) RemoveMember(ctx context.Context, tenantId TenantID, principalId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewRemoveMemberRequest(c.Server, tenantId, principalId)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
 func (c *Client) ListNetworks(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListNetworksRequest(c.Server, tenantId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckPermissionsWithBody(ctx context.Context, tenantId TenantID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckPermissionsRequestWithBody(c.Server, tenantId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckPermissions(ctx context.Context, tenantId TenantID, body CheckPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckPermissionsRequest(c.Server, tenantId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2853,6 +3890,306 @@ func (c *Client) GetClusterKubeconfig(ctx context.Context, tenantId TenantID, pr
 	return c.Client.Do(req)
 }
 
+func (c *Client) ListNodePools(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListNodePoolsRequest(c.Server, tenantId, projectId, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateNodePoolWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateNodePoolRequestWithBody(c.Server, tenantId, projectId, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateNodePool(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, body CreateNodePoolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateNodePoolRequest(c.Server, tenantId, projectId, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteNodePool(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteNodePoolRequest(c.Server, tenantId, projectId, id, poolName)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetNodePool(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetNodePoolRequest(c.Server, tenantId, projectId, id, poolName)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateNodePoolWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateNodePoolRequestWithBody(c.Server, tenantId, projectId, id, poolName, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateNodePool(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, body UpdateNodePoolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateNodePoolRequest(c.Server, tenantId, projectId, id, poolName, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckClusterPermissionsWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckClusterPermissionsRequestWithBody(c.Server, tenantId, projectId, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckClusterPermissions(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckClusterPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckClusterPermissionsRequest(c.Server, tenantId, projectId, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListClusterRoleAssignments(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListClusterRoleAssignmentsRequest(c.Server, tenantId, projectId, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateClusterRoleAssignmentWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateClusterRoleAssignmentRequestWithBody(c.Server, tenantId, projectId, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateClusterRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateClusterRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateClusterRoleAssignmentRequest(c.Server, tenantId, projectId, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteClusterRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteClusterRoleAssignmentRequest(c.Server, tenantId, projectId, id, principalId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListDatabases(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListDatabasesRequest(c.Server, tenantId, projectId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateDatabaseWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateDatabaseRequestWithBody(c.Server, tenantId, projectId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateDatabase(ctx context.Context, tenantId TenantID, projectId ProjectID, body CreateDatabaseJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateDatabaseRequest(c.Server, tenantId, projectId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteDatabase(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteDatabaseRequest(c.Server, tenantId, projectId, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetDatabase(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetDatabaseRequest(c.Server, tenantId, projectId, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetDatabaseCredentials(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetDatabaseCredentialsRequest(c.Server, tenantId, projectId, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckDatabasePermissionsWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckDatabasePermissionsRequestWithBody(c.Server, tenantId, projectId, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckDatabasePermissions(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckDatabasePermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckDatabasePermissionsRequest(c.Server, tenantId, projectId, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListDatabaseRoleAssignments(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListDatabaseRoleAssignmentsRequest(c.Server, tenantId, projectId, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateDatabaseRoleAssignmentWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateDatabaseRoleAssignmentRequestWithBody(c.Server, tenantId, projectId, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateDatabaseRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateDatabaseRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateDatabaseRoleAssignmentRequest(c.Server, tenantId, projectId, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteDatabaseRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteDatabaseRoleAssignmentRequest(c.Server, tenantId, projectId, id, principalId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) ListKeyVaults(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListKeyVaultsRequest(c.Server, tenantId, projectId)
 	if err != nil {
@@ -2937,6 +4274,30 @@ func (c *Client) RotateKeyVaultCredentials(ctx context.Context, tenantId TenantI
 	return c.Client.Do(req)
 }
 
+func (c *Client) CheckKeyVaultPermissionsWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckKeyVaultPermissionsRequestWithBody(c.Server, tenantId, projectId, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckKeyVaultPermissions(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckKeyVaultPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckKeyVaultPermissionsRequest(c.Server, tenantId, projectId, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) ListKeyVaultPrivateEndpoints(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListKeyVaultPrivateEndpointsRequest(c.Server, tenantId, projectId, id)
 	if err != nil {
@@ -2987,6 +4348,54 @@ func (c *Client) DeleteKeyVaultPrivateEndpoint(ctx context.Context, tenantId Ten
 
 func (c *Client) GetKeyVaultPrivateEndpoint(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, epId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetKeyVaultPrivateEndpointRequest(c.Server, tenantId, projectId, id, epId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListKeyVaultRoleAssignments(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListKeyVaultRoleAssignmentsRequest(c.Server, tenantId, projectId, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateKeyVaultRoleAssignmentWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateKeyVaultRoleAssignmentRequestWithBody(c.Server, tenantId, projectId, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateKeyVaultRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateKeyVaultRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateKeyVaultRoleAssignmentRequest(c.Server, tenantId, projectId, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteKeyVaultRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteKeyVaultRoleAssignmentRequest(c.Server, tenantId, projectId, id, principalId)
 	if err != nil {
 		return nil, err
 	}
@@ -3059,6 +4468,78 @@ func (c *Client) PutKeyVaultSecret(ctx context.Context, tenantId TenantID, proje
 
 func (c *Client) RestoreKeyVaultSecret(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, key string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRestoreKeyVaultSecretRequest(c.Server, tenantId, projectId, id, key)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckProjectPermissionsWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckProjectPermissionsRequestWithBody(c.Server, tenantId, projectId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckProjectPermissions(ctx context.Context, tenantId TenantID, projectId ProjectID, body CheckProjectPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckProjectPermissionsRequest(c.Server, tenantId, projectId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListProjectRoleAssignments(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListProjectRoleAssignmentsRequest(c.Server, tenantId, projectId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateProjectRoleAssignmentWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateProjectRoleAssignmentRequestWithBody(c.Server, tenantId, projectId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateProjectRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, body CreateProjectRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateProjectRoleAssignmentRequest(c.Server, tenantId, projectId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteProjectRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, principalId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteProjectRoleAssignmentRequest(c.Server, tenantId, projectId, principalId)
 	if err != nil {
 		return nil, err
 	}
@@ -3299,6 +4780,78 @@ func (c *Client) DeleteVirtualMachine(ctx context.Context, tenantId TenantID, pr
 
 func (c *Client) GetVirtualMachine(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetVirtualMachineRequest(c.Server, tenantId, projectId, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckVMPermissionsWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckVMPermissionsRequestWithBody(c.Server, tenantId, projectId, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckVMPermissions(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckVMPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckVMPermissionsRequest(c.Server, tenantId, projectId, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListVMRoleAssignments(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListVMRoleAssignmentsRequest(c.Server, tenantId, projectId, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateVMRoleAssignmentWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateVMRoleAssignmentRequestWithBody(c.Server, tenantId, projectId, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateVMRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateVMRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateVMRoleAssignmentRequest(c.Server, tenantId, projectId, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteVMRoleAssignment(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteVMRoleAssignmentRequest(c.Server, tenantId, projectId, id, principalId)
 	if err != nil {
 		return nil, err
 	}
@@ -3753,6 +5306,66 @@ func (c *Client) GetSubnet(ctx context.Context, tenantId TenantID, projectId Pro
 	return c.Client.Do(req)
 }
 
+func (c *Client) ListTenantRoleAssignments(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListTenantRoleAssignmentsRequest(c.Server, tenantId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateTenantRoleAssignmentWithBody(ctx context.Context, tenantId TenantID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateTenantRoleAssignmentRequestWithBody(c.Server, tenantId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateTenantRoleAssignment(ctx context.Context, tenantId TenantID, body CreateTenantRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateTenantRoleAssignmentRequest(c.Server, tenantId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteTenantRoleAssignment(ctx context.Context, tenantId TenantID, principalId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteTenantRoleAssignmentRequest(c.Server, tenantId, principalId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListSharedResources(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSharedResourcesRequest(c.Server, tenantId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // NewGetHealthRequest generates requests for GetHealth
 func NewGetHealthRequest(server string) (*http.Request, error) {
 	var err error
@@ -4033,6 +5646,67 @@ func NewAuthMeRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewListRoleDefinitionsRequest generates requests for ListRoleDefinitions
+func NewListRoleDefinitionsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/role-definitions")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetRoleDefinitionRequest generates requests for GetRoleDefinition
+func NewGetRoleDefinitionRequest(server string, key string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "key", key, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/role-definitions/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListTenantsRequest generates requests for ListTenants
 func NewListTenantsRequest(server string) (*http.Request, error) {
 	var err error
@@ -4084,6 +5758,164 @@ func NewGetTenantCapUsageRequest(server string, tenantId TenantID) (*http.Reques
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListDirectoryGroupsRequest generates requests for ListDirectoryGroups
+func NewListDirectoryGroupsRequest(server string, tenantId TenantID, params *ListDirectoryGroupsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/directory/groups", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListDirectoryUsersRequest generates requests for ListDirectoryUsers
+func NewListDirectoryUsersRequest(server string, tenantId TenantID, params *ListDirectoryUsersParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/directory/users", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Filter != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "filter", *params.Filter, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -4175,128 +6007,6 @@ func NewCreateImageRequestWithBody(server string, tenantId TenantID, contentType
 	return req, nil
 }
 
-// NewListMembersRequest generates requests for ListMembers
-func NewListMembersRequest(server string, tenantId TenantID) (*http.Request, error) {
-	var err error
-
-	var pathParam0 string
-
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/v1/tenants/%s/members", pathParam0)
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return req, nil
-}
-
-// NewInviteMemberRequest calls the generic InviteMember builder with application/json body
-func NewInviteMemberRequest(server string, tenantId TenantID, body InviteMemberJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewInviteMemberRequestWithBody(server, tenantId, "application/json", bodyReader)
-}
-
-// NewInviteMemberRequestWithBody generates requests for InviteMember with any type of body
-func NewInviteMemberRequestWithBody(server string, tenantId TenantID, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	var pathParam0 string
-
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/v1/tenants/%s/members", pathParam0)
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	return req, nil
-}
-
-// NewRemoveMemberRequest generates requests for RemoveMember
-func NewRemoveMemberRequest(server string, tenantId TenantID, principalId string) (*http.Request, error) {
-	var err error
-
-	var pathParam0 string
-
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	var pathParam1 string
-
-	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "principal_id", principalId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
-	if err != nil {
-		return nil, err
-	}
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/v1/tenants/%s/members/%s", pathParam0, pathParam1)
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return req, nil
-}
-
 // NewListNetworksRequest generates requests for ListNetworks
 func NewListNetworksRequest(server string, tenantId TenantID) (*http.Request, error) {
 	var err error
@@ -4327,6 +6037,53 @@ func NewListNetworksRequest(server string, tenantId TenantID) (*http.Request, er
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewCheckPermissionsRequest calls the generic CheckPermissions builder with application/json body
+func NewCheckPermissionsRequest(server string, tenantId TenantID, body CheckPermissionsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCheckPermissionsRequestWithBody(server, tenantId, "application/json", bodyReader)
+}
+
+// NewCheckPermissionsRequestWithBody generates requests for CheckPermissions with any type of body
+func NewCheckPermissionsRequestWithBody(server string, tenantId TenantID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/permissions:check", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -4978,6 +6735,982 @@ func NewGetClusterKubeconfigRequest(server string, tenantId TenantID, projectId 
 	return req, nil
 }
 
+// NewListNodePoolsRequest generates requests for ListNodePools
+func NewListNodePoolsRequest(server string, tenantId TenantID, projectId ProjectID, id ResourceID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/node-pools", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateNodePoolRequest calls the generic CreateNodePool builder with application/json body
+func NewCreateNodePoolRequest(server string, tenantId TenantID, projectId ProjectID, id ResourceID, body CreateNodePoolJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateNodePoolRequestWithBody(server, tenantId, projectId, id, "application/json", bodyReader)
+}
+
+// NewCreateNodePoolRequestWithBody generates requests for CreateNodePool with any type of body
+func NewCreateNodePoolRequestWithBody(server string, tenantId TenantID, projectId ProjectID, id ResourceID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/node-pools", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteNodePoolRequest generates requests for DeleteNodePool
+func NewDeleteNodePoolRequest(server string, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "pool_name", poolName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/node-pools/%s", pathParam0, pathParam1, pathParam2, pathParam3)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetNodePoolRequest generates requests for GetNodePool
+func NewGetNodePoolRequest(server string, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "pool_name", poolName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/node-pools/%s", pathParam0, pathParam1, pathParam2, pathParam3)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpdateNodePoolRequest calls the generic UpdateNodePool builder with application/json body
+func NewUpdateNodePoolRequest(server string, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, body UpdateNodePoolJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateNodePoolRequestWithBody(server, tenantId, projectId, id, poolName, "application/json", bodyReader)
+}
+
+// NewUpdateNodePoolRequestWithBody generates requests for UpdateNodePool with any type of body
+func NewUpdateNodePoolRequestWithBody(server string, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "pool_name", poolName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/node-pools/%s", pathParam0, pathParam1, pathParam2, pathParam3)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewCheckClusterPermissionsRequest calls the generic CheckClusterPermissions builder with application/json body
+func NewCheckClusterPermissionsRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckClusterPermissionsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCheckClusterPermissionsRequestWithBody(server, tenantId, projectId, id, "application/json", bodyReader)
+}
+
+// NewCheckClusterPermissionsRequestWithBody generates requests for CheckClusterPermissions with any type of body
+func NewCheckClusterPermissionsRequestWithBody(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/permissions:check", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListClusterRoleAssignmentsRequest generates requests for ListClusterRoleAssignments
+func NewListClusterRoleAssignmentsRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/role-assignments", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateClusterRoleAssignmentRequest calls the generic CreateClusterRoleAssignment builder with application/json body
+func NewCreateClusterRoleAssignmentRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateClusterRoleAssignmentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateClusterRoleAssignmentRequestWithBody(server, tenantId, projectId, id, "application/json", bodyReader)
+}
+
+// NewCreateClusterRoleAssignmentRequestWithBody generates requests for CreateClusterRoleAssignment with any type of body
+func NewCreateClusterRoleAssignmentRequestWithBody(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/role-assignments", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteClusterRoleAssignmentRequest generates requests for DeleteClusterRoleAssignment
+func NewDeleteClusterRoleAssignmentRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "principal_id", principalId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/role-assignments/%s", pathParam0, pathParam1, pathParam2, pathParam3)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListDatabasesRequest generates requests for ListDatabases
+func NewListDatabasesRequest(server string, tenantId TenantID, projectId ProjectID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/databases", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateDatabaseRequest calls the generic CreateDatabase builder with application/json body
+func NewCreateDatabaseRequest(server string, tenantId TenantID, projectId ProjectID, body CreateDatabaseJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateDatabaseRequestWithBody(server, tenantId, projectId, "application/json", bodyReader)
+}
+
+// NewCreateDatabaseRequestWithBody generates requests for CreateDatabase with any type of body
+func NewCreateDatabaseRequestWithBody(server string, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/databases", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteDatabaseRequest generates requests for DeleteDatabase
+func NewDeleteDatabaseRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/databases/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetDatabaseRequest generates requests for GetDatabase
+func NewGetDatabaseRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/databases/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetDatabaseCredentialsRequest generates requests for GetDatabaseCredentials
+func NewGetDatabaseCredentialsRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/databases/%s/credentials", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCheckDatabasePermissionsRequest calls the generic CheckDatabasePermissions builder with application/json body
+func NewCheckDatabasePermissionsRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckDatabasePermissionsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCheckDatabasePermissionsRequestWithBody(server, tenantId, projectId, id, "application/json", bodyReader)
+}
+
+// NewCheckDatabasePermissionsRequestWithBody generates requests for CheckDatabasePermissions with any type of body
+func NewCheckDatabasePermissionsRequestWithBody(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/databases/%s/permissions:check", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListDatabaseRoleAssignmentsRequest generates requests for ListDatabaseRoleAssignments
+func NewListDatabaseRoleAssignmentsRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/databases/%s/role-assignments", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateDatabaseRoleAssignmentRequest calls the generic CreateDatabaseRoleAssignment builder with application/json body
+func NewCreateDatabaseRoleAssignmentRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateDatabaseRoleAssignmentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateDatabaseRoleAssignmentRequestWithBody(server, tenantId, projectId, id, "application/json", bodyReader)
+}
+
+// NewCreateDatabaseRoleAssignmentRequestWithBody generates requests for CreateDatabaseRoleAssignment with any type of body
+func NewCreateDatabaseRoleAssignmentRequestWithBody(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/databases/%s/role-assignments", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteDatabaseRoleAssignmentRequest generates requests for DeleteDatabaseRoleAssignment
+func NewDeleteDatabaseRoleAssignmentRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "principal_id", principalId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/databases/%s/role-assignments/%s", pathParam0, pathParam1, pathParam2, pathParam3)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListKeyVaultsRequest generates requests for ListKeyVaults
 func NewListKeyVaultsRequest(server string, tenantId TenantID, projectId ProjectID) (*http.Request, error) {
 	var err error
@@ -5265,6 +7998,67 @@ func NewRotateKeyVaultCredentialsRequest(server string, tenantId TenantID, proje
 	return req, nil
 }
 
+// NewCheckKeyVaultPermissionsRequest calls the generic CheckKeyVaultPermissions builder with application/json body
+func NewCheckKeyVaultPermissionsRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckKeyVaultPermissionsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCheckKeyVaultPermissionsRequestWithBody(server, tenantId, projectId, id, "application/json", bodyReader)
+}
+
+// NewCheckKeyVaultPermissionsRequestWithBody generates requests for CheckKeyVaultPermissions with any type of body
+func NewCheckKeyVaultPermissionsRequestWithBody(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/keyvaults/%s/permissions:check", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListKeyVaultPrivateEndpointsRequest generates requests for ListKeyVaultPrivateEndpoints
 func NewListKeyVaultPrivateEndpointsRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -5477,6 +8271,170 @@ func NewGetKeyVaultPrivateEndpointRequest(server string, tenantId TenantID, proj
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListKeyVaultRoleAssignmentsRequest generates requests for ListKeyVaultRoleAssignments
+func NewListKeyVaultRoleAssignmentsRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/keyvaults/%s/role-assignments", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateKeyVaultRoleAssignmentRequest calls the generic CreateKeyVaultRoleAssignment builder with application/json body
+func NewCreateKeyVaultRoleAssignmentRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateKeyVaultRoleAssignmentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateKeyVaultRoleAssignmentRequestWithBody(server, tenantId, projectId, id, "application/json", bodyReader)
+}
+
+// NewCreateKeyVaultRoleAssignmentRequestWithBody generates requests for CreateKeyVaultRoleAssignment with any type of body
+func NewCreateKeyVaultRoleAssignmentRequestWithBody(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/keyvaults/%s/role-assignments", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteKeyVaultRoleAssignmentRequest generates requests for DeleteKeyVaultRoleAssignment
+func NewDeleteKeyVaultRoleAssignmentRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "principal_id", principalId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/keyvaults/%s/role-assignments/%s", pathParam0, pathParam1, pathParam2, pathParam3)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -5824,6 +8782,203 @@ func NewRestoreKeyVaultSecretRequest(server string, tenantId TenantID, projectId
 	}
 
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCheckProjectPermissionsRequest calls the generic CheckProjectPermissions builder with application/json body
+func NewCheckProjectPermissionsRequest(server string, tenantId TenantID, projectId ProjectID, body CheckProjectPermissionsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCheckProjectPermissionsRequestWithBody(server, tenantId, projectId, "application/json", bodyReader)
+}
+
+// NewCheckProjectPermissionsRequestWithBody generates requests for CheckProjectPermissions with any type of body
+func NewCheckProjectPermissionsRequestWithBody(server string, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/permissions:check", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListProjectRoleAssignmentsRequest generates requests for ListProjectRoleAssignments
+func NewListProjectRoleAssignmentsRequest(server string, tenantId TenantID, projectId ProjectID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/role-assignments", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateProjectRoleAssignmentRequest calls the generic CreateProjectRoleAssignment builder with application/json body
+func NewCreateProjectRoleAssignmentRequest(server string, tenantId TenantID, projectId ProjectID, body CreateProjectRoleAssignmentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateProjectRoleAssignmentRequestWithBody(server, tenantId, projectId, "application/json", bodyReader)
+}
+
+// NewCreateProjectRoleAssignmentRequestWithBody generates requests for CreateProjectRoleAssignment with any type of body
+func NewCreateProjectRoleAssignmentRequestWithBody(server string, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/role-assignments", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteProjectRoleAssignmentRequest generates requests for DeleteProjectRoleAssignment
+func NewDeleteProjectRoleAssignmentRequest(server string, tenantId TenantID, projectId ProjectID, principalId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "principal_id", principalId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/role-assignments/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -6574,6 +9729,231 @@ func NewGetVirtualMachineRequest(server string, tenantId TenantID, projectId Pro
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCheckVMPermissionsRequest calls the generic CheckVMPermissions builder with application/json body
+func NewCheckVMPermissionsRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckVMPermissionsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCheckVMPermissionsRequestWithBody(server, tenantId, projectId, id, "application/json", bodyReader)
+}
+
+// NewCheckVMPermissionsRequestWithBody generates requests for CheckVMPermissions with any type of body
+func NewCheckVMPermissionsRequestWithBody(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/virtual-machines/%s/permissions:check", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListVMRoleAssignmentsRequest generates requests for ListVMRoleAssignments
+func NewListVMRoleAssignmentsRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/virtual-machines/%s/role-assignments", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateVMRoleAssignmentRequest calls the generic CreateVMRoleAssignment builder with application/json body
+func NewCreateVMRoleAssignmentRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateVMRoleAssignmentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateVMRoleAssignmentRequestWithBody(server, tenantId, projectId, id, "application/json", bodyReader)
+}
+
+// NewCreateVMRoleAssignmentRequestWithBody generates requests for CreateVMRoleAssignment with any type of body
+func NewCreateVMRoleAssignmentRequestWithBody(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/virtual-machines/%s/role-assignments", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteVMRoleAssignmentRequest generates requests for DeleteVMRoleAssignment
+func NewDeleteVMRoleAssignmentRequest(server string, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "principal_id", principalId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/virtual-machines/%s/role-assignments/%s", pathParam0, pathParam1, pathParam2, pathParam3)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -8168,6 +11548,162 @@ func NewGetSubnetRequest(server string, tenantId TenantID, projectId ProjectID, 
 	return req, nil
 }
 
+// NewListTenantRoleAssignmentsRequest generates requests for ListTenantRoleAssignments
+func NewListTenantRoleAssignmentsRequest(server string, tenantId TenantID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/role-assignments", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateTenantRoleAssignmentRequest calls the generic CreateTenantRoleAssignment builder with application/json body
+func NewCreateTenantRoleAssignmentRequest(server string, tenantId TenantID, body CreateTenantRoleAssignmentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateTenantRoleAssignmentRequestWithBody(server, tenantId, "application/json", bodyReader)
+}
+
+// NewCreateTenantRoleAssignmentRequestWithBody generates requests for CreateTenantRoleAssignment with any type of body
+func NewCreateTenantRoleAssignmentRequestWithBody(server string, tenantId TenantID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/role-assignments", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteTenantRoleAssignmentRequest generates requests for DeleteTenantRoleAssignment
+func NewDeleteTenantRoleAssignmentRequest(server string, tenantId TenantID, principalId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "principal_id", principalId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/role-assignments/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListSharedResourcesRequest generates requests for ListSharedResources
+func NewListSharedResourcesRequest(server string, tenantId TenantID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/shared-resources", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -8236,11 +11772,23 @@ type ClientWithResponsesInterface interface {
 	// AuthMeWithResponse request
 	AuthMeWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*AuthMeResp, error)
 
+	// ListRoleDefinitionsWithResponse request
+	ListRoleDefinitionsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListRoleDefinitionsResp, error)
+
+	// GetRoleDefinitionWithResponse request
+	GetRoleDefinitionWithResponse(ctx context.Context, key string, reqEditors ...RequestEditorFn) (*GetRoleDefinitionResp, error)
+
 	// ListTenantsWithResponse request
 	ListTenantsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListTenantsResp, error)
 
 	// GetTenantCapUsageWithResponse request
 	GetTenantCapUsageWithResponse(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*GetTenantCapUsageResp, error)
+
+	// ListDirectoryGroupsWithResponse request
+	ListDirectoryGroupsWithResponse(ctx context.Context, tenantId TenantID, params *ListDirectoryGroupsParams, reqEditors ...RequestEditorFn) (*ListDirectoryGroupsResp, error)
+
+	// ListDirectoryUsersWithResponse request
+	ListDirectoryUsersWithResponse(ctx context.Context, tenantId TenantID, params *ListDirectoryUsersParams, reqEditors ...RequestEditorFn) (*ListDirectoryUsersResp, error)
 
 	// ListImagesWithResponse request
 	ListImagesWithResponse(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*ListImagesResp, error)
@@ -8250,19 +11798,13 @@ type ClientWithResponsesInterface interface {
 
 	CreateImageWithResponse(ctx context.Context, tenantId TenantID, body CreateImageJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateImageResp, error)
 
-	// ListMembersWithResponse request
-	ListMembersWithResponse(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*ListMembersResp, error)
-
-	// InviteMemberWithBodyWithResponse request with any body
-	InviteMemberWithBodyWithResponse(ctx context.Context, tenantId TenantID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InviteMemberResp, error)
-
-	InviteMemberWithResponse(ctx context.Context, tenantId TenantID, body InviteMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*InviteMemberResp, error)
-
-	// RemoveMemberWithResponse request
-	RemoveMemberWithResponse(ctx context.Context, tenantId TenantID, principalId string, reqEditors ...RequestEditorFn) (*RemoveMemberResp, error)
-
 	// ListNetworksWithResponse request
 	ListNetworksWithResponse(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*ListNetworksResp, error)
+
+	// CheckPermissionsWithBodyWithResponse request with any body
+	CheckPermissionsWithBodyWithResponse(ctx context.Context, tenantId TenantID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckPermissionsResp, error)
+
+	CheckPermissionsWithResponse(ctx context.Context, tenantId TenantID, body CheckPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckPermissionsResp, error)
 
 	// ListProjectsWithResponse request
 	ListProjectsWithResponse(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*ListProjectsResp, error)
@@ -8314,6 +11856,74 @@ type ClientWithResponsesInterface interface {
 	// GetClusterKubeconfigWithResponse request
 	GetClusterKubeconfigWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, reqEditors ...RequestEditorFn) (*GetClusterKubeconfigResp, error)
 
+	// ListNodePoolsWithResponse request
+	ListNodePoolsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, reqEditors ...RequestEditorFn) (*ListNodePoolsResp, error)
+
+	// CreateNodePoolWithBodyWithResponse request with any body
+	CreateNodePoolWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateNodePoolResp, error)
+
+	CreateNodePoolWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, body CreateNodePoolJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateNodePoolResp, error)
+
+	// DeleteNodePoolWithResponse request
+	DeleteNodePoolWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, reqEditors ...RequestEditorFn) (*DeleteNodePoolResp, error)
+
+	// GetNodePoolWithResponse request
+	GetNodePoolWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, reqEditors ...RequestEditorFn) (*GetNodePoolResp, error)
+
+	// UpdateNodePoolWithBodyWithResponse request with any body
+	UpdateNodePoolWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateNodePoolResp, error)
+
+	UpdateNodePoolWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, body UpdateNodePoolJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateNodePoolResp, error)
+
+	// CheckClusterPermissionsWithBodyWithResponse request with any body
+	CheckClusterPermissionsWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckClusterPermissionsResp, error)
+
+	CheckClusterPermissionsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckClusterPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckClusterPermissionsResp, error)
+
+	// ListClusterRoleAssignmentsWithResponse request
+	ListClusterRoleAssignmentsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListClusterRoleAssignmentsResp, error)
+
+	// CreateClusterRoleAssignmentWithBodyWithResponse request with any body
+	CreateClusterRoleAssignmentWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateClusterRoleAssignmentResp, error)
+
+	CreateClusterRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateClusterRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateClusterRoleAssignmentResp, error)
+
+	// DeleteClusterRoleAssignmentWithResponse request
+	DeleteClusterRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*DeleteClusterRoleAssignmentResp, error)
+
+	// ListDatabasesWithResponse request
+	ListDatabasesWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*ListDatabasesResp, error)
+
+	// CreateDatabaseWithBodyWithResponse request with any body
+	CreateDatabaseWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateDatabaseResp, error)
+
+	CreateDatabaseWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, body CreateDatabaseJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateDatabaseResp, error)
+
+	// DeleteDatabaseWithResponse request
+	DeleteDatabaseWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeleteDatabaseResp, error)
+
+	// GetDatabaseWithResponse request
+	GetDatabaseWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetDatabaseResp, error)
+
+	// GetDatabaseCredentialsWithResponse request
+	GetDatabaseCredentialsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetDatabaseCredentialsResp, error)
+
+	// CheckDatabasePermissionsWithBodyWithResponse request with any body
+	CheckDatabasePermissionsWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckDatabasePermissionsResp, error)
+
+	CheckDatabasePermissionsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckDatabasePermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckDatabasePermissionsResp, error)
+
+	// ListDatabaseRoleAssignmentsWithResponse request
+	ListDatabaseRoleAssignmentsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListDatabaseRoleAssignmentsResp, error)
+
+	// CreateDatabaseRoleAssignmentWithBodyWithResponse request with any body
+	CreateDatabaseRoleAssignmentWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateDatabaseRoleAssignmentResp, error)
+
+	CreateDatabaseRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateDatabaseRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateDatabaseRoleAssignmentResp, error)
+
+	// DeleteDatabaseRoleAssignmentWithResponse request
+	DeleteDatabaseRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*DeleteDatabaseRoleAssignmentResp, error)
+
 	// ListKeyVaultsWithResponse request
 	ListKeyVaultsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*ListKeyVaultsResp, error)
 
@@ -8334,6 +11944,11 @@ type ClientWithResponsesInterface interface {
 	// RotateKeyVaultCredentialsWithResponse request
 	RotateKeyVaultCredentialsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*RotateKeyVaultCredentialsResp, error)
 
+	// CheckKeyVaultPermissionsWithBodyWithResponse request with any body
+	CheckKeyVaultPermissionsWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckKeyVaultPermissionsResp, error)
+
+	CheckKeyVaultPermissionsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckKeyVaultPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckKeyVaultPermissionsResp, error)
+
 	// ListKeyVaultPrivateEndpointsWithResponse request
 	ListKeyVaultPrivateEndpointsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListKeyVaultPrivateEndpointsResp, error)
 
@@ -8347,6 +11962,17 @@ type ClientWithResponsesInterface interface {
 
 	// GetKeyVaultPrivateEndpointWithResponse request
 	GetKeyVaultPrivateEndpointWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, epId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetKeyVaultPrivateEndpointResp, error)
+
+	// ListKeyVaultRoleAssignmentsWithResponse request
+	ListKeyVaultRoleAssignmentsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListKeyVaultRoleAssignmentsResp, error)
+
+	// CreateKeyVaultRoleAssignmentWithBodyWithResponse request with any body
+	CreateKeyVaultRoleAssignmentWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateKeyVaultRoleAssignmentResp, error)
+
+	CreateKeyVaultRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateKeyVaultRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateKeyVaultRoleAssignmentResp, error)
+
+	// DeleteKeyVaultRoleAssignmentWithResponse request
+	DeleteKeyVaultRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*DeleteKeyVaultRoleAssignmentResp, error)
 
 	// ListKeyVaultSecretsWithResponse request
 	ListKeyVaultSecretsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, params *ListKeyVaultSecretsParams, reqEditors ...RequestEditorFn) (*ListKeyVaultSecretsResp, error)
@@ -8364,6 +11990,22 @@ type ClientWithResponsesInterface interface {
 
 	// RestoreKeyVaultSecretWithResponse request
 	RestoreKeyVaultSecretWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, key string, reqEditors ...RequestEditorFn) (*RestoreKeyVaultSecretResp, error)
+
+	// CheckProjectPermissionsWithBodyWithResponse request with any body
+	CheckProjectPermissionsWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckProjectPermissionsResp, error)
+
+	CheckProjectPermissionsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, body CheckProjectPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckProjectPermissionsResp, error)
+
+	// ListProjectRoleAssignmentsWithResponse request
+	ListProjectRoleAssignmentsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*ListProjectRoleAssignmentsResp, error)
+
+	// CreateProjectRoleAssignmentWithBodyWithResponse request with any body
+	CreateProjectRoleAssignmentWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateProjectRoleAssignmentResp, error)
+
+	CreateProjectRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, body CreateProjectRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateProjectRoleAssignmentResp, error)
+
+	// DeleteProjectRoleAssignmentWithResponse request
+	DeleteProjectRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, principalId string, reqEditors ...RequestEditorFn) (*DeleteProjectRoleAssignmentResp, error)
 
 	// ListSecurityGroupsWithResponse request
 	ListSecurityGroupsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*ListSecurityGroupsResp, error)
@@ -8419,6 +12061,22 @@ type ClientWithResponsesInterface interface {
 
 	// GetVirtualMachineWithResponse request
 	GetVirtualMachineWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, reqEditors ...RequestEditorFn) (*GetVirtualMachineResp, error)
+
+	// CheckVMPermissionsWithBodyWithResponse request with any body
+	CheckVMPermissionsWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckVMPermissionsResp, error)
+
+	CheckVMPermissionsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckVMPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckVMPermissionsResp, error)
+
+	// ListVMRoleAssignmentsWithResponse request
+	ListVMRoleAssignmentsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListVMRoleAssignmentsResp, error)
+
+	// CreateVMRoleAssignmentWithBodyWithResponse request with any body
+	CreateVMRoleAssignmentWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateVMRoleAssignmentResp, error)
+
+	CreateVMRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateVMRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateVMRoleAssignmentResp, error)
+
+	// DeleteVMRoleAssignmentWithResponse request
+	DeleteVMRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*DeleteVMRoleAssignmentResp, error)
 
 	// ListVNetsWithResponse request
 	ListVNetsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*ListVNetsResp, error)
@@ -8521,6 +12179,20 @@ type ClientWithResponsesInterface interface {
 
 	// GetSubnetWithResponse request
 	GetSubnetWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, vnetId VNetID, subnetId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetSubnetResp, error)
+
+	// ListTenantRoleAssignmentsWithResponse request
+	ListTenantRoleAssignmentsWithResponse(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*ListTenantRoleAssignmentsResp, error)
+
+	// CreateTenantRoleAssignmentWithBodyWithResponse request with any body
+	CreateTenantRoleAssignmentWithBodyWithResponse(ctx context.Context, tenantId TenantID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateTenantRoleAssignmentResp, error)
+
+	CreateTenantRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, body CreateTenantRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateTenantRoleAssignmentResp, error)
+
+	// DeleteTenantRoleAssignmentWithResponse request
+	DeleteTenantRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, principalId string, reqEditors ...RequestEditorFn) (*DeleteTenantRoleAssignmentResp, error)
+
+	// ListSharedResourcesWithResponse request
+	ListSharedResourcesWithResponse(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*ListSharedResourcesResp, error)
 }
 
 type GetHealthResp struct {
@@ -8744,6 +12416,73 @@ func (r AuthMeResp) ContentType() string {
 	return ""
 }
 
+type ListRoleDefinitionsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		RoleDefinitions []RoleDefinition `json:"role_definitions"`
+	}
+	JSON401 *Unauthorized
+	JSON500 *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRoleDefinitionsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRoleDefinitionsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListRoleDefinitionsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetRoleDefinitionResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *RoleDefinition
+	JSON401      *Unauthorized
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRoleDefinitionResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRoleDefinitionResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetRoleDefinitionResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListTenantsResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -8792,6 +12531,7 @@ type GetTenantCapUsageResp struct {
 		// the `tenant_cap`, `allocated`, `available`, and `requested` fields.
 		Cap TenantCap `json:"cap"`
 	}
+	JSON400 *BadRequest
 	JSON401 *Unauthorized
 	JSON404 *NotFound
 	JSON500 *InternalError
@@ -8815,6 +12555,80 @@ func (r GetTenantCapUsageResp) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetTenantCapUsageResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListDirectoryGroupsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *DirectoryGroupList
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON500      *InternalError
+	JSON501      *DirectoryNotConfigured
+	JSON502      *DirectoryUpstreamError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListDirectoryGroupsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListDirectoryGroupsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListDirectoryGroupsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListDirectoryUsersResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *DirectoryUserList
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON500      *InternalError
+	JSON501      *DirectoryNotConfigured
+	JSON502      *DirectoryUpstreamError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListDirectoryUsersResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListDirectoryUsersResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListDirectoryUsersResp) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -8886,116 +12700,11 @@ func (r CreateImageResp) ContentType() string {
 	return ""
 }
 
-type ListMembersResp struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *struct {
-		Members *[]RoleAssignment `json:"members,omitempty"`
-	}
-	JSON401 *Unauthorized
-	JSON404 *NotFound
-	JSON500 *InternalError
-}
-
-// Status returns HTTPResponse.Status
-func (r ListMembersResp) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r ListMembersResp) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r ListMembersResp) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
-type InviteMemberResp struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON201      *RoleAssignment
-	JSON400      *BadRequest
-	JSON401      *Unauthorized
-	JSON403      *Forbidden
-	JSON404      *NotFound
-	JSON409      *Conflict
-	JSON500      *InternalError
-}
-
-// Status returns HTTPResponse.Status
-func (r InviteMemberResp) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r InviteMemberResp) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r InviteMemberResp) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
-type RemoveMemberResp struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON400      *BadRequest
-	JSON401      *Unauthorized
-	JSON403      *Forbidden
-	JSON404      *NotFound
-	JSON409      *Error
-	JSON500      *InternalError
-}
-
-// Status returns HTTPResponse.Status
-func (r RemoveMemberResp) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r RemoveMemberResp) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r RemoveMemberResp) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
 type ListNetworksResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *[]Network
+	JSON400      *BadRequest
 	JSON401      *Unauthorized
 	JSON500      *InternalError
 }
@@ -9024,10 +12733,45 @@ func (r ListNetworksResp) ContentType() string {
 	return ""
 }
 
+type CheckPermissionsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PermissionsCheckResponse
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r CheckPermissionsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CheckPermissionsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CheckPermissionsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListProjectsResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *[]Project
+	JSON400      *BadRequest
 	JSON401      *Unauthorized
 	JSON404      *NotFound
 	JSON500      *InternalError
@@ -9064,6 +12808,7 @@ type CreateProjectResp struct {
 	JSON400      *BadRequest
 	JSON401      *Unauthorized
 	JSON403      *Forbidden
+	JSON404      *NotFound
 	JSON409      *Conflict
 	JSON500      *InternalError
 }
@@ -9095,6 +12840,7 @@ func (r CreateProjectResp) ContentType() string {
 type DeleteProjectResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
+	JSON400      *BadRequest
 	JSON401      *Unauthorized
 	JSON403      *Forbidden
 	JSON404      *NotFound
@@ -9130,6 +12876,7 @@ type GetProjectResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *Project
+	JSON400      *BadRequest
 	JSON401      *Unauthorized
 	JSON404      *NotFound
 	JSON500      *InternalError
@@ -9492,11 +13239,635 @@ func (r GetClusterKubeconfigResp) ContentType() string {
 	return ""
 }
 
+type ListNodePoolsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]NodePool
+	JSON401      *Unauthorized
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListNodePoolsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListNodePoolsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListNodePoolsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateNodePoolResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *NodePool
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON404      *NotFound
+	JSON409      *Error
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateNodePoolResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateNodePoolResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateNodePoolResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteNodePoolResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *Error
+	JSON401      *Unauthorized
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteNodePoolResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteNodePoolResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteNodePoolResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetNodePoolResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *NodePool
+	JSON401      *Unauthorized
+	JSON404      *NotFound
+}
+
+// Status returns HTTPResponse.Status
+func (r GetNodePoolResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetNodePoolResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetNodePoolResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UpdateNodePoolResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *NodePool
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON404      *NotFound
+	JSON409      *Error
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateNodePoolResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateNodePoolResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpdateNodePoolResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CheckClusterPermissionsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PermissionsCheckResponse
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r CheckClusterPermissionsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CheckClusterPermissionsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CheckClusterPermissionsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListClusterRoleAssignmentsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		RoleAssignments *[]RoleAssignment `json:"role_assignments,omitempty"`
+	}
+	JSON400 *BadRequest
+	JSON401 *Unauthorized
+	JSON404 *NotFound
+	JSON500 *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListClusterRoleAssignmentsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListClusterRoleAssignmentsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListClusterRoleAssignmentsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateClusterRoleAssignmentResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *RoleAssignment
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON409      *Conflict
+	JSON422      *InviteEmailUnprocessable
+	JSON500      *InternalError
+	JSON502      *DirectoryUpstreamError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateClusterRoleAssignmentResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateClusterRoleAssignmentResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateClusterRoleAssignmentResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteClusterRoleAssignmentResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteClusterRoleAssignmentResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteClusterRoleAssignmentResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteClusterRoleAssignmentResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListDatabasesResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]Database
+	JSON401      *Unauthorized
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListDatabasesResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListDatabasesResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListDatabasesResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateDatabaseResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *Database
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON409      *Conflict
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateDatabaseResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateDatabaseResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateDatabaseResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteDatabaseResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteDatabaseResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteDatabaseResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteDatabaseResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetDatabaseResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *Database
+	JSON401      *Unauthorized
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetDatabaseResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetDatabaseResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetDatabaseResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetDatabaseCredentialsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *DatabaseCredentials
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON409      *Error
+	JSON410      *Error
+	JSON500      *InternalError
+	JSON501      *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r GetDatabaseCredentialsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetDatabaseCredentialsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetDatabaseCredentialsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CheckDatabasePermissionsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PermissionsCheckResponse
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r CheckDatabasePermissionsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CheckDatabasePermissionsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CheckDatabasePermissionsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListDatabaseRoleAssignmentsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		RoleAssignments *[]RoleAssignment `json:"role_assignments,omitempty"`
+	}
+	JSON400 *BadRequest
+	JSON401 *Unauthorized
+	JSON404 *NotFound
+	JSON500 *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListDatabaseRoleAssignmentsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListDatabaseRoleAssignmentsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListDatabaseRoleAssignmentsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateDatabaseRoleAssignmentResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *RoleAssignment
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON409      *Conflict
+	JSON422      *InviteEmailUnprocessable
+	JSON500      *InternalError
+	JSON502      *DirectoryUpstreamError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateDatabaseRoleAssignmentResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateDatabaseRoleAssignmentResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateDatabaseRoleAssignmentResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteDatabaseRoleAssignmentResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteDatabaseRoleAssignmentResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteDatabaseRoleAssignmentResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteDatabaseRoleAssignmentResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListKeyVaultsResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *[]KeyVault
+	JSON400      *BadRequest
 	JSON401      *Unauthorized
+	JSON404      *NotFound
 	JSON500      *InternalError
 }
 
@@ -9531,6 +13902,7 @@ type CreateKeyVaultResp struct {
 	JSON400      *BadRequest
 	JSON401      *Unauthorized
 	JSON403      *Forbidden
+	JSON404      *NotFound
 	JSON409      *Conflict
 	JSON500      *InternalError
 }
@@ -9562,6 +13934,7 @@ func (r CreateKeyVaultResp) ContentType() string {
 type DeleteKeyVaultResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
+	JSON400      *BadRequest
 	JSON401      *Unauthorized
 	JSON403      *Forbidden
 	JSON404      *NotFound
@@ -9596,6 +13969,7 @@ type GetKeyVaultResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *KeyVault
+	JSON400      *BadRequest
 	JSON401      *Unauthorized
 	JSON404      *NotFound
 	JSON500      *InternalError
@@ -9629,6 +14003,7 @@ type GetKeyVaultCredentialsResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *KeyVaultCredentials
+	JSON400      *BadRequest
 	JSON401      *Unauthorized
 	JSON403      *Forbidden
 	JSON404      *NotFound
@@ -9666,6 +14041,7 @@ type RotateKeyVaultCredentialsResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *KeyVaultCredentials
+	JSON400      *BadRequest
 	JSON401      *Unauthorized
 	JSON403      *Forbidden
 	JSON404      *NotFound
@@ -9699,10 +14075,45 @@ func (r RotateKeyVaultCredentialsResp) ContentType() string {
 	return ""
 }
 
+type CheckKeyVaultPermissionsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PermissionsCheckResponse
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r CheckKeyVaultPermissionsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CheckKeyVaultPermissionsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CheckKeyVaultPermissionsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListKeyVaultPrivateEndpointsResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *[]PrivateEndpoint
+	JSON400      *BadRequest
 	JSON401      *Unauthorized
 	JSON404      *NotFound
 	JSON500      *InternalError
@@ -9771,6 +14182,7 @@ func (r CreateKeyVaultPrivateEndpointResp) ContentType() string {
 type DeleteKeyVaultPrivateEndpointResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
+	JSON400      *BadRequest
 	JSON401      *Unauthorized
 	JSON403      *Forbidden
 	JSON404      *NotFound
@@ -9805,6 +14217,7 @@ type GetKeyVaultPrivateEndpointResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *PrivateEndpoint
+	JSON400      *BadRequest
 	JSON401      *Unauthorized
 	JSON404      *NotFound
 	JSON500      *InternalError
@@ -9828,6 +14241,114 @@ func (r GetKeyVaultPrivateEndpointResp) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetKeyVaultPrivateEndpointResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListKeyVaultRoleAssignmentsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		RoleAssignments *[]RoleAssignment `json:"role_assignments,omitempty"`
+	}
+	JSON400 *BadRequest
+	JSON401 *Unauthorized
+	JSON404 *NotFound
+	JSON500 *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListKeyVaultRoleAssignmentsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListKeyVaultRoleAssignmentsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListKeyVaultRoleAssignmentsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateKeyVaultRoleAssignmentResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *RoleAssignment
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON409      *Conflict
+	JSON422      *InviteEmailUnprocessable
+	JSON500      *InternalError
+	JSON502      *DirectoryUpstreamError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateKeyVaultRoleAssignmentResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateKeyVaultRoleAssignmentResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateKeyVaultRoleAssignmentResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteKeyVaultRoleAssignmentResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteKeyVaultRoleAssignmentResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteKeyVaultRoleAssignmentResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteKeyVaultRoleAssignmentResp) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -10011,6 +14532,148 @@ func (r RestoreKeyVaultSecretResp) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r RestoreKeyVaultSecretResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CheckProjectPermissionsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PermissionsCheckResponse
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r CheckProjectPermissionsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CheckProjectPermissionsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CheckProjectPermissionsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListProjectRoleAssignmentsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		RoleAssignments *[]RoleAssignment `json:"role_assignments,omitempty"`
+	}
+	JSON400 *BadRequest
+	JSON401 *Unauthorized
+	JSON404 *NotFound
+	JSON500 *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListProjectRoleAssignmentsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListProjectRoleAssignmentsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListProjectRoleAssignmentsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateProjectRoleAssignmentResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *RoleAssignment
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON409      *Conflict
+	JSON422      *InviteEmailUnprocessable
+	JSON500      *InternalError
+	JSON502      *DirectoryUpstreamError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateProjectRoleAssignmentResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateProjectRoleAssignmentResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateProjectRoleAssignmentResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteProjectRoleAssignmentResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteProjectRoleAssignmentResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteProjectRoleAssignmentResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteProjectRoleAssignmentResp) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -10265,6 +14928,7 @@ type ListServiceAccountsResp struct {
 	JSON200      *struct {
 		ServiceAccounts *[]ServiceAccount `json:"service_accounts,omitempty"`
 	}
+	JSON400 *BadRequest
 	JSON401 *Unauthorized
 	JSON404 *NotFound
 	JSON500 *InternalError
@@ -10526,6 +15190,148 @@ func (r GetVirtualMachineResp) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetVirtualMachineResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CheckVMPermissionsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PermissionsCheckResponse
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r CheckVMPermissionsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CheckVMPermissionsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CheckVMPermissionsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListVMRoleAssignmentsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		RoleAssignments *[]RoleAssignment `json:"role_assignments,omitempty"`
+	}
+	JSON400 *BadRequest
+	JSON401 *Unauthorized
+	JSON404 *NotFound
+	JSON500 *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListVMRoleAssignmentsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListVMRoleAssignmentsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListVMRoleAssignmentsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateVMRoleAssignmentResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *RoleAssignment
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON409      *Conflict
+	JSON422      *InviteEmailUnprocessable
+	JSON500      *InternalError
+	JSON502      *DirectoryUpstreamError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateVMRoleAssignmentResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateVMRoleAssignmentResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateVMRoleAssignmentResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteVMRoleAssignmentResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteVMRoleAssignmentResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteVMRoleAssignmentResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteVMRoleAssignmentResp) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -11493,6 +16299,149 @@ func (r GetSubnetResp) ContentType() string {
 	return ""
 }
 
+type ListTenantRoleAssignmentsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		RoleAssignments *[]RoleAssignment `json:"role_assignments,omitempty"`
+	}
+	JSON400 *BadRequest
+	JSON401 *Unauthorized
+	JSON404 *NotFound
+	JSON500 *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListTenantRoleAssignmentsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListTenantRoleAssignmentsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListTenantRoleAssignmentsResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateTenantRoleAssignmentResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *RoleAssignment
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON409      *Conflict
+	JSON422      *InviteEmailUnprocessable
+	JSON500      *InternalError
+	JSON502      *DirectoryUpstreamError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateTenantRoleAssignmentResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateTenantRoleAssignmentResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateTenantRoleAssignmentResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteTenantRoleAssignmentResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON409      *Error
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteTenantRoleAssignmentResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteTenantRoleAssignmentResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteTenantRoleAssignmentResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListSharedResourcesResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]SharedResource
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListSharedResourcesResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListSharedResourcesResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListSharedResourcesResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // GetHealthWithResponse request returning *GetHealthResp
 func (c *ClientWithResponses) GetHealthWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHealthResp, error) {
 	rsp, err := c.GetHealth(ctx, reqEditors...)
@@ -11572,6 +16521,24 @@ func (c *ClientWithResponses) AuthMeWithResponse(ctx context.Context, reqEditors
 	return ParseAuthMeResp(rsp)
 }
 
+// ListRoleDefinitionsWithResponse request returning *ListRoleDefinitionsResp
+func (c *ClientWithResponses) ListRoleDefinitionsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListRoleDefinitionsResp, error) {
+	rsp, err := c.ListRoleDefinitions(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRoleDefinitionsResp(rsp)
+}
+
+// GetRoleDefinitionWithResponse request returning *GetRoleDefinitionResp
+func (c *ClientWithResponses) GetRoleDefinitionWithResponse(ctx context.Context, key string, reqEditors ...RequestEditorFn) (*GetRoleDefinitionResp, error) {
+	rsp, err := c.GetRoleDefinition(ctx, key, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRoleDefinitionResp(rsp)
+}
+
 // ListTenantsWithResponse request returning *ListTenantsResp
 func (c *ClientWithResponses) ListTenantsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListTenantsResp, error) {
 	rsp, err := c.ListTenants(ctx, reqEditors...)
@@ -11588,6 +16555,24 @@ func (c *ClientWithResponses) GetTenantCapUsageWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseGetTenantCapUsageResp(rsp)
+}
+
+// ListDirectoryGroupsWithResponse request returning *ListDirectoryGroupsResp
+func (c *ClientWithResponses) ListDirectoryGroupsWithResponse(ctx context.Context, tenantId TenantID, params *ListDirectoryGroupsParams, reqEditors ...RequestEditorFn) (*ListDirectoryGroupsResp, error) {
+	rsp, err := c.ListDirectoryGroups(ctx, tenantId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListDirectoryGroupsResp(rsp)
+}
+
+// ListDirectoryUsersWithResponse request returning *ListDirectoryUsersResp
+func (c *ClientWithResponses) ListDirectoryUsersWithResponse(ctx context.Context, tenantId TenantID, params *ListDirectoryUsersParams, reqEditors ...RequestEditorFn) (*ListDirectoryUsersResp, error) {
+	rsp, err := c.ListDirectoryUsers(ctx, tenantId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListDirectoryUsersResp(rsp)
 }
 
 // ListImagesWithResponse request returning *ListImagesResp
@@ -11616,41 +16601,6 @@ func (c *ClientWithResponses) CreateImageWithResponse(ctx context.Context, tenan
 	return ParseCreateImageResp(rsp)
 }
 
-// ListMembersWithResponse request returning *ListMembersResp
-func (c *ClientWithResponses) ListMembersWithResponse(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*ListMembersResp, error) {
-	rsp, err := c.ListMembers(ctx, tenantId, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseListMembersResp(rsp)
-}
-
-// InviteMemberWithBodyWithResponse request with arbitrary body returning *InviteMemberResp
-func (c *ClientWithResponses) InviteMemberWithBodyWithResponse(ctx context.Context, tenantId TenantID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InviteMemberResp, error) {
-	rsp, err := c.InviteMemberWithBody(ctx, tenantId, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseInviteMemberResp(rsp)
-}
-
-func (c *ClientWithResponses) InviteMemberWithResponse(ctx context.Context, tenantId TenantID, body InviteMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*InviteMemberResp, error) {
-	rsp, err := c.InviteMember(ctx, tenantId, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseInviteMemberResp(rsp)
-}
-
-// RemoveMemberWithResponse request returning *RemoveMemberResp
-func (c *ClientWithResponses) RemoveMemberWithResponse(ctx context.Context, tenantId TenantID, principalId string, reqEditors ...RequestEditorFn) (*RemoveMemberResp, error) {
-	rsp, err := c.RemoveMember(ctx, tenantId, principalId, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseRemoveMemberResp(rsp)
-}
-
 // ListNetworksWithResponse request returning *ListNetworksResp
 func (c *ClientWithResponses) ListNetworksWithResponse(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*ListNetworksResp, error) {
 	rsp, err := c.ListNetworks(ctx, tenantId, reqEditors...)
@@ -11658,6 +16608,23 @@ func (c *ClientWithResponses) ListNetworksWithResponse(ctx context.Context, tena
 		return nil, err
 	}
 	return ParseListNetworksResp(rsp)
+}
+
+// CheckPermissionsWithBodyWithResponse request with arbitrary body returning *CheckPermissionsResp
+func (c *ClientWithResponses) CheckPermissionsWithBodyWithResponse(ctx context.Context, tenantId TenantID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckPermissionsResp, error) {
+	rsp, err := c.CheckPermissionsWithBody(ctx, tenantId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckPermissionsResp(rsp)
+}
+
+func (c *ClientWithResponses) CheckPermissionsWithResponse(ctx context.Context, tenantId TenantID, body CheckPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckPermissionsResp, error) {
+	rsp, err := c.CheckPermissions(ctx, tenantId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckPermissionsResp(rsp)
 }
 
 // ListProjectsWithResponse request returning *ListProjectsResp
@@ -11818,6 +16785,224 @@ func (c *ClientWithResponses) GetClusterKubeconfigWithResponse(ctx context.Conte
 	return ParseGetClusterKubeconfigResp(rsp)
 }
 
+// ListNodePoolsWithResponse request returning *ListNodePoolsResp
+func (c *ClientWithResponses) ListNodePoolsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, reqEditors ...RequestEditorFn) (*ListNodePoolsResp, error) {
+	rsp, err := c.ListNodePools(ctx, tenantId, projectId, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListNodePoolsResp(rsp)
+}
+
+// CreateNodePoolWithBodyWithResponse request with arbitrary body returning *CreateNodePoolResp
+func (c *ClientWithResponses) CreateNodePoolWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateNodePoolResp, error) {
+	rsp, err := c.CreateNodePoolWithBody(ctx, tenantId, projectId, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateNodePoolResp(rsp)
+}
+
+func (c *ClientWithResponses) CreateNodePoolWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, body CreateNodePoolJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateNodePoolResp, error) {
+	rsp, err := c.CreateNodePool(ctx, tenantId, projectId, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateNodePoolResp(rsp)
+}
+
+// DeleteNodePoolWithResponse request returning *DeleteNodePoolResp
+func (c *ClientWithResponses) DeleteNodePoolWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, reqEditors ...RequestEditorFn) (*DeleteNodePoolResp, error) {
+	rsp, err := c.DeleteNodePool(ctx, tenantId, projectId, id, poolName, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteNodePoolResp(rsp)
+}
+
+// GetNodePoolWithResponse request returning *GetNodePoolResp
+func (c *ClientWithResponses) GetNodePoolWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, reqEditors ...RequestEditorFn) (*GetNodePoolResp, error) {
+	rsp, err := c.GetNodePool(ctx, tenantId, projectId, id, poolName, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetNodePoolResp(rsp)
+}
+
+// UpdateNodePoolWithBodyWithResponse request with arbitrary body returning *UpdateNodePoolResp
+func (c *ClientWithResponses) UpdateNodePoolWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateNodePoolResp, error) {
+	rsp, err := c.UpdateNodePoolWithBody(ctx, tenantId, projectId, id, poolName, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateNodePoolResp(rsp)
+}
+
+func (c *ClientWithResponses) UpdateNodePoolWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id ResourceID, poolName string, body UpdateNodePoolJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateNodePoolResp, error) {
+	rsp, err := c.UpdateNodePool(ctx, tenantId, projectId, id, poolName, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateNodePoolResp(rsp)
+}
+
+// CheckClusterPermissionsWithBodyWithResponse request with arbitrary body returning *CheckClusterPermissionsResp
+func (c *ClientWithResponses) CheckClusterPermissionsWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckClusterPermissionsResp, error) {
+	rsp, err := c.CheckClusterPermissionsWithBody(ctx, tenantId, projectId, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckClusterPermissionsResp(rsp)
+}
+
+func (c *ClientWithResponses) CheckClusterPermissionsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckClusterPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckClusterPermissionsResp, error) {
+	rsp, err := c.CheckClusterPermissions(ctx, tenantId, projectId, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckClusterPermissionsResp(rsp)
+}
+
+// ListClusterRoleAssignmentsWithResponse request returning *ListClusterRoleAssignmentsResp
+func (c *ClientWithResponses) ListClusterRoleAssignmentsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListClusterRoleAssignmentsResp, error) {
+	rsp, err := c.ListClusterRoleAssignments(ctx, tenantId, projectId, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListClusterRoleAssignmentsResp(rsp)
+}
+
+// CreateClusterRoleAssignmentWithBodyWithResponse request with arbitrary body returning *CreateClusterRoleAssignmentResp
+func (c *ClientWithResponses) CreateClusterRoleAssignmentWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateClusterRoleAssignmentResp, error) {
+	rsp, err := c.CreateClusterRoleAssignmentWithBody(ctx, tenantId, projectId, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateClusterRoleAssignmentResp(rsp)
+}
+
+func (c *ClientWithResponses) CreateClusterRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateClusterRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateClusterRoleAssignmentResp, error) {
+	rsp, err := c.CreateClusterRoleAssignment(ctx, tenantId, projectId, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateClusterRoleAssignmentResp(rsp)
+}
+
+// DeleteClusterRoleAssignmentWithResponse request returning *DeleteClusterRoleAssignmentResp
+func (c *ClientWithResponses) DeleteClusterRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*DeleteClusterRoleAssignmentResp, error) {
+	rsp, err := c.DeleteClusterRoleAssignment(ctx, tenantId, projectId, id, principalId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteClusterRoleAssignmentResp(rsp)
+}
+
+// ListDatabasesWithResponse request returning *ListDatabasesResp
+func (c *ClientWithResponses) ListDatabasesWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*ListDatabasesResp, error) {
+	rsp, err := c.ListDatabases(ctx, tenantId, projectId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListDatabasesResp(rsp)
+}
+
+// CreateDatabaseWithBodyWithResponse request with arbitrary body returning *CreateDatabaseResp
+func (c *ClientWithResponses) CreateDatabaseWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateDatabaseResp, error) {
+	rsp, err := c.CreateDatabaseWithBody(ctx, tenantId, projectId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateDatabaseResp(rsp)
+}
+
+func (c *ClientWithResponses) CreateDatabaseWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, body CreateDatabaseJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateDatabaseResp, error) {
+	rsp, err := c.CreateDatabase(ctx, tenantId, projectId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateDatabaseResp(rsp)
+}
+
+// DeleteDatabaseWithResponse request returning *DeleteDatabaseResp
+func (c *ClientWithResponses) DeleteDatabaseWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeleteDatabaseResp, error) {
+	rsp, err := c.DeleteDatabase(ctx, tenantId, projectId, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteDatabaseResp(rsp)
+}
+
+// GetDatabaseWithResponse request returning *GetDatabaseResp
+func (c *ClientWithResponses) GetDatabaseWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetDatabaseResp, error) {
+	rsp, err := c.GetDatabase(ctx, tenantId, projectId, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetDatabaseResp(rsp)
+}
+
+// GetDatabaseCredentialsWithResponse request returning *GetDatabaseCredentialsResp
+func (c *ClientWithResponses) GetDatabaseCredentialsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetDatabaseCredentialsResp, error) {
+	rsp, err := c.GetDatabaseCredentials(ctx, tenantId, projectId, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetDatabaseCredentialsResp(rsp)
+}
+
+// CheckDatabasePermissionsWithBodyWithResponse request with arbitrary body returning *CheckDatabasePermissionsResp
+func (c *ClientWithResponses) CheckDatabasePermissionsWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckDatabasePermissionsResp, error) {
+	rsp, err := c.CheckDatabasePermissionsWithBody(ctx, tenantId, projectId, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckDatabasePermissionsResp(rsp)
+}
+
+func (c *ClientWithResponses) CheckDatabasePermissionsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckDatabasePermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckDatabasePermissionsResp, error) {
+	rsp, err := c.CheckDatabasePermissions(ctx, tenantId, projectId, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckDatabasePermissionsResp(rsp)
+}
+
+// ListDatabaseRoleAssignmentsWithResponse request returning *ListDatabaseRoleAssignmentsResp
+func (c *ClientWithResponses) ListDatabaseRoleAssignmentsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListDatabaseRoleAssignmentsResp, error) {
+	rsp, err := c.ListDatabaseRoleAssignments(ctx, tenantId, projectId, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListDatabaseRoleAssignmentsResp(rsp)
+}
+
+// CreateDatabaseRoleAssignmentWithBodyWithResponse request with arbitrary body returning *CreateDatabaseRoleAssignmentResp
+func (c *ClientWithResponses) CreateDatabaseRoleAssignmentWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateDatabaseRoleAssignmentResp, error) {
+	rsp, err := c.CreateDatabaseRoleAssignmentWithBody(ctx, tenantId, projectId, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateDatabaseRoleAssignmentResp(rsp)
+}
+
+func (c *ClientWithResponses) CreateDatabaseRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateDatabaseRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateDatabaseRoleAssignmentResp, error) {
+	rsp, err := c.CreateDatabaseRoleAssignment(ctx, tenantId, projectId, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateDatabaseRoleAssignmentResp(rsp)
+}
+
+// DeleteDatabaseRoleAssignmentWithResponse request returning *DeleteDatabaseRoleAssignmentResp
+func (c *ClientWithResponses) DeleteDatabaseRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*DeleteDatabaseRoleAssignmentResp, error) {
+	rsp, err := c.DeleteDatabaseRoleAssignment(ctx, tenantId, projectId, id, principalId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteDatabaseRoleAssignmentResp(rsp)
+}
+
 // ListKeyVaultsWithResponse request returning *ListKeyVaultsResp
 func (c *ClientWithResponses) ListKeyVaultsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*ListKeyVaultsResp, error) {
 	rsp, err := c.ListKeyVaults(ctx, tenantId, projectId, reqEditors...)
@@ -11880,6 +17065,23 @@ func (c *ClientWithResponses) RotateKeyVaultCredentialsWithResponse(ctx context.
 	return ParseRotateKeyVaultCredentialsResp(rsp)
 }
 
+// CheckKeyVaultPermissionsWithBodyWithResponse request with arbitrary body returning *CheckKeyVaultPermissionsResp
+func (c *ClientWithResponses) CheckKeyVaultPermissionsWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckKeyVaultPermissionsResp, error) {
+	rsp, err := c.CheckKeyVaultPermissionsWithBody(ctx, tenantId, projectId, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckKeyVaultPermissionsResp(rsp)
+}
+
+func (c *ClientWithResponses) CheckKeyVaultPermissionsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckKeyVaultPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckKeyVaultPermissionsResp, error) {
+	rsp, err := c.CheckKeyVaultPermissions(ctx, tenantId, projectId, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckKeyVaultPermissionsResp(rsp)
+}
+
 // ListKeyVaultPrivateEndpointsWithResponse request returning *ListKeyVaultPrivateEndpointsResp
 func (c *ClientWithResponses) ListKeyVaultPrivateEndpointsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListKeyVaultPrivateEndpointsResp, error) {
 	rsp, err := c.ListKeyVaultPrivateEndpoints(ctx, tenantId, projectId, id, reqEditors...)
@@ -11922,6 +17124,41 @@ func (c *ClientWithResponses) GetKeyVaultPrivateEndpointWithResponse(ctx context
 		return nil, err
 	}
 	return ParseGetKeyVaultPrivateEndpointResp(rsp)
+}
+
+// ListKeyVaultRoleAssignmentsWithResponse request returning *ListKeyVaultRoleAssignmentsResp
+func (c *ClientWithResponses) ListKeyVaultRoleAssignmentsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListKeyVaultRoleAssignmentsResp, error) {
+	rsp, err := c.ListKeyVaultRoleAssignments(ctx, tenantId, projectId, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListKeyVaultRoleAssignmentsResp(rsp)
+}
+
+// CreateKeyVaultRoleAssignmentWithBodyWithResponse request with arbitrary body returning *CreateKeyVaultRoleAssignmentResp
+func (c *ClientWithResponses) CreateKeyVaultRoleAssignmentWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateKeyVaultRoleAssignmentResp, error) {
+	rsp, err := c.CreateKeyVaultRoleAssignmentWithBody(ctx, tenantId, projectId, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateKeyVaultRoleAssignmentResp(rsp)
+}
+
+func (c *ClientWithResponses) CreateKeyVaultRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateKeyVaultRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateKeyVaultRoleAssignmentResp, error) {
+	rsp, err := c.CreateKeyVaultRoleAssignment(ctx, tenantId, projectId, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateKeyVaultRoleAssignmentResp(rsp)
+}
+
+// DeleteKeyVaultRoleAssignmentWithResponse request returning *DeleteKeyVaultRoleAssignmentResp
+func (c *ClientWithResponses) DeleteKeyVaultRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*DeleteKeyVaultRoleAssignmentResp, error) {
+	rsp, err := c.DeleteKeyVaultRoleAssignment(ctx, tenantId, projectId, id, principalId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteKeyVaultRoleAssignmentResp(rsp)
 }
 
 // ListKeyVaultSecretsWithResponse request returning *ListKeyVaultSecretsResp
@@ -11975,6 +17212,58 @@ func (c *ClientWithResponses) RestoreKeyVaultSecretWithResponse(ctx context.Cont
 		return nil, err
 	}
 	return ParseRestoreKeyVaultSecretResp(rsp)
+}
+
+// CheckProjectPermissionsWithBodyWithResponse request with arbitrary body returning *CheckProjectPermissionsResp
+func (c *ClientWithResponses) CheckProjectPermissionsWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckProjectPermissionsResp, error) {
+	rsp, err := c.CheckProjectPermissionsWithBody(ctx, tenantId, projectId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckProjectPermissionsResp(rsp)
+}
+
+func (c *ClientWithResponses) CheckProjectPermissionsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, body CheckProjectPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckProjectPermissionsResp, error) {
+	rsp, err := c.CheckProjectPermissions(ctx, tenantId, projectId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckProjectPermissionsResp(rsp)
+}
+
+// ListProjectRoleAssignmentsWithResponse request returning *ListProjectRoleAssignmentsResp
+func (c *ClientWithResponses) ListProjectRoleAssignmentsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*ListProjectRoleAssignmentsResp, error) {
+	rsp, err := c.ListProjectRoleAssignments(ctx, tenantId, projectId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListProjectRoleAssignmentsResp(rsp)
+}
+
+// CreateProjectRoleAssignmentWithBodyWithResponse request with arbitrary body returning *CreateProjectRoleAssignmentResp
+func (c *ClientWithResponses) CreateProjectRoleAssignmentWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateProjectRoleAssignmentResp, error) {
+	rsp, err := c.CreateProjectRoleAssignmentWithBody(ctx, tenantId, projectId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateProjectRoleAssignmentResp(rsp)
+}
+
+func (c *ClientWithResponses) CreateProjectRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, body CreateProjectRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateProjectRoleAssignmentResp, error) {
+	rsp, err := c.CreateProjectRoleAssignment(ctx, tenantId, projectId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateProjectRoleAssignmentResp(rsp)
+}
+
+// DeleteProjectRoleAssignmentWithResponse request returning *DeleteProjectRoleAssignmentResp
+func (c *ClientWithResponses) DeleteProjectRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, principalId string, reqEditors ...RequestEditorFn) (*DeleteProjectRoleAssignmentResp, error) {
+	rsp, err := c.DeleteProjectRoleAssignment(ctx, tenantId, projectId, principalId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteProjectRoleAssignmentResp(rsp)
 }
 
 // ListSecurityGroupsWithResponse request returning *ListSecurityGroupsResp
@@ -12150,6 +17439,58 @@ func (c *ClientWithResponses) GetVirtualMachineWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseGetVirtualMachineResp(rsp)
+}
+
+// CheckVMPermissionsWithBodyWithResponse request with arbitrary body returning *CheckVMPermissionsResp
+func (c *ClientWithResponses) CheckVMPermissionsWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckVMPermissionsResp, error) {
+	rsp, err := c.CheckVMPermissionsWithBody(ctx, tenantId, projectId, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckVMPermissionsResp(rsp)
+}
+
+func (c *ClientWithResponses) CheckVMPermissionsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CheckVMPermissionsJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckVMPermissionsResp, error) {
+	rsp, err := c.CheckVMPermissions(ctx, tenantId, projectId, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckVMPermissionsResp(rsp)
+}
+
+// ListVMRoleAssignmentsWithResponse request returning *ListVMRoleAssignmentsResp
+func (c *ClientWithResponses) ListVMRoleAssignmentsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListVMRoleAssignmentsResp, error) {
+	rsp, err := c.ListVMRoleAssignments(ctx, tenantId, projectId, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListVMRoleAssignmentsResp(rsp)
+}
+
+// CreateVMRoleAssignmentWithBodyWithResponse request with arbitrary body returning *CreateVMRoleAssignmentResp
+func (c *ClientWithResponses) CreateVMRoleAssignmentWithBodyWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateVMRoleAssignmentResp, error) {
+	rsp, err := c.CreateVMRoleAssignmentWithBody(ctx, tenantId, projectId, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateVMRoleAssignmentResp(rsp)
+}
+
+func (c *ClientWithResponses) CreateVMRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, body CreateVMRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateVMRoleAssignmentResp, error) {
+	rsp, err := c.CreateVMRoleAssignment(ctx, tenantId, projectId, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateVMRoleAssignmentResp(rsp)
+}
+
+// DeleteVMRoleAssignmentWithResponse request returning *DeleteVMRoleAssignmentResp
+func (c *ClientWithResponses) DeleteVMRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, id openapi_types.UUID, principalId string, reqEditors ...RequestEditorFn) (*DeleteVMRoleAssignmentResp, error) {
+	rsp, err := c.DeleteVMRoleAssignment(ctx, tenantId, projectId, id, principalId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteVMRoleAssignmentResp(rsp)
 }
 
 // ListVNetsWithResponse request returning *ListVNetsResp
@@ -12476,6 +17817,50 @@ func (c *ClientWithResponses) GetSubnetWithResponse(ctx context.Context, tenantI
 	return ParseGetSubnetResp(rsp)
 }
 
+// ListTenantRoleAssignmentsWithResponse request returning *ListTenantRoleAssignmentsResp
+func (c *ClientWithResponses) ListTenantRoleAssignmentsWithResponse(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*ListTenantRoleAssignmentsResp, error) {
+	rsp, err := c.ListTenantRoleAssignments(ctx, tenantId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListTenantRoleAssignmentsResp(rsp)
+}
+
+// CreateTenantRoleAssignmentWithBodyWithResponse request with arbitrary body returning *CreateTenantRoleAssignmentResp
+func (c *ClientWithResponses) CreateTenantRoleAssignmentWithBodyWithResponse(ctx context.Context, tenantId TenantID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateTenantRoleAssignmentResp, error) {
+	rsp, err := c.CreateTenantRoleAssignmentWithBody(ctx, tenantId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateTenantRoleAssignmentResp(rsp)
+}
+
+func (c *ClientWithResponses) CreateTenantRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, body CreateTenantRoleAssignmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateTenantRoleAssignmentResp, error) {
+	rsp, err := c.CreateTenantRoleAssignment(ctx, tenantId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateTenantRoleAssignmentResp(rsp)
+}
+
+// DeleteTenantRoleAssignmentWithResponse request returning *DeleteTenantRoleAssignmentResp
+func (c *ClientWithResponses) DeleteTenantRoleAssignmentWithResponse(ctx context.Context, tenantId TenantID, principalId string, reqEditors ...RequestEditorFn) (*DeleteTenantRoleAssignmentResp, error) {
+	rsp, err := c.DeleteTenantRoleAssignment(ctx, tenantId, principalId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteTenantRoleAssignmentResp(rsp)
+}
+
+// ListSharedResourcesWithResponse request returning *ListSharedResourcesResp
+func (c *ClientWithResponses) ListSharedResourcesWithResponse(ctx context.Context, tenantId TenantID, reqEditors ...RequestEditorFn) (*ListSharedResourcesResp, error) {
+	rsp, err := c.ListSharedResources(ctx, tenantId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListSharedResourcesResp(rsp)
+}
+
 // ParseGetHealthResp parses an HTTP response from a GetHealthWithResponse call
 func ParseGetHealthResp(rsp *http.Response) (*GetHealthResp, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -12720,6 +18105,95 @@ func ParseAuthMeResp(rsp *http.Response) (*AuthMeResp, error) {
 	return response, nil
 }
 
+// ParseListRoleDefinitionsResp parses an HTTP response from a ListRoleDefinitionsWithResponse call
+func ParseListRoleDefinitionsResp(rsp *http.Response) (*ListRoleDefinitionsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRoleDefinitionsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			RoleDefinitions []RoleDefinition `json:"role_definitions"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRoleDefinitionResp parses an HTTP response from a GetRoleDefinitionWithResponse call
+func ParseGetRoleDefinitionResp(rsp *http.Response) (*GetRoleDefinitionResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRoleDefinitionResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RoleDefinition
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListTenantsResp parses an HTTP response from a ListTenantsWithResponse call
 func ParseListTenantsResp(rsp *http.Response) (*ListTenantsResp, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -12793,6 +18267,13 @@ func ParseGetTenantCapUsageResp(rsp *http.Response) (*GetTenantCapUsageResp, err
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -12813,6 +18294,156 @@ func ParseGetTenantCapUsageResp(rsp *http.Response) (*GetTenantCapUsageResp, err
 			return nil, err
 		}
 		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListDirectoryGroupsResp parses an HTTP response from a ListDirectoryGroupsWithResponse call
+func ParseListDirectoryGroupsResp(rsp *http.Response) (*ListDirectoryGroupsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListDirectoryGroupsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DirectoryGroupList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 501:
+		var dest DirectoryNotConfigured
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON501 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest DirectoryUpstreamError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListDirectoryUsersResp parses an HTTP response from a ListDirectoryUsersWithResponse call
+func ParseListDirectoryUsersResp(rsp *http.Response) (*ListDirectoryUsersResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListDirectoryUsersResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DirectoryUserList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 501:
+		var dest DirectoryNotConfigured
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON501 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest DirectoryUpstreamError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
 
 	}
 
@@ -12906,184 +18537,6 @@ func ParseCreateImageResp(rsp *http.Response) (*CreateImageResp, error) {
 	return response, nil
 }
 
-// ParseListMembersResp parses an HTTP response from a ListMembersWithResponse call
-func ParseListMembersResp(rsp *http.Response) (*ListMembersResp, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &ListMembersResp{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest struct {
-			Members *[]RoleAssignment `json:"members,omitempty"`
-		}
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
-		var dest Unauthorized
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON401 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest NotFound
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON404 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
-		var dest InternalError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON500 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseInviteMemberResp parses an HTTP response from a InviteMemberWithResponse call
-func ParseInviteMemberResp(rsp *http.Response) (*InviteMemberResp, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &InviteMemberResp{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
-		var dest RoleAssignment
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON201 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
-		var dest BadRequest
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON400 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
-		var dest Unauthorized
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON401 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
-		var dest Forbidden
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON403 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest NotFound
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON404 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
-		var dest Conflict
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON409 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
-		var dest InternalError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON500 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseRemoveMemberResp parses an HTTP response from a RemoveMemberWithResponse call
-func ParseRemoveMemberResp(rsp *http.Response) (*RemoveMemberResp, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &RemoveMemberResp{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
-		var dest BadRequest
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON400 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
-		var dest Unauthorized
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON401 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
-		var dest Forbidden
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON403 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest NotFound
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON404 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON409 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
-		var dest InternalError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON500 = &dest
-
-	}
-
-	return response, nil
-}
-
 // ParseListNetworksResp parses an HTTP response from a ListNetworksWithResponse call
 func ParseListNetworksResp(rsp *http.Response) (*ListNetworksResp, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -13105,12 +18558,73 @@ func ParseListNetworksResp(rsp *http.Response) (*ListNetworksResp, error) {
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCheckPermissionsResp parses an HTTP response from a CheckPermissionsWithResponse call
+func ParseCheckPermissionsResp(rsp *http.Response) (*CheckPermissionsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CheckPermissionsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PermissionsCheckResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError
@@ -13144,6 +18658,13 @@ func ParseListProjectsResp(rsp *http.Response) (*ListProjectsResp, error) {
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
@@ -13213,6 +18734,13 @@ func ParseCreateProjectResp(rsp *http.Response) (*CreateProjectResp, error) {
 		}
 		response.JSON403 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
 		var dest Conflict
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -13246,6 +18774,13 @@ func ParseDeleteProjectResp(rsp *http.Response) (*DeleteProjectResp, error) {
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -13306,6 +18841,13 @@ func ParseGetProjectResp(rsp *http.Response) (*GetProjectResp, error) {
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
@@ -13824,6 +19366,1024 @@ func ParseGetClusterKubeconfigResp(rsp *http.Response) (*GetClusterKubeconfigRes
 	return response, nil
 }
 
+// ParseListNodePoolsResp parses an HTTP response from a ListNodePoolsWithResponse call
+func ParseListNodePoolsResp(rsp *http.Response) (*ListNodePoolsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListNodePoolsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []NodePool
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateNodePoolResp parses an HTTP response from a CreateNodePoolWithResponse call
+func ParseCreateNodePoolResp(rsp *http.Response) (*CreateNodePoolResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateNodePoolResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest NodePool
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteNodePoolResp parses an HTTP response from a DeleteNodePoolWithResponse call
+func ParseDeleteNodePoolResp(rsp *http.Response) (*DeleteNodePoolResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteNodePoolResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetNodePoolResp parses an HTTP response from a GetNodePoolWithResponse call
+func ParseGetNodePoolResp(rsp *http.Response) (*GetNodePoolResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetNodePoolResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest NodePool
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateNodePoolResp parses an HTTP response from a UpdateNodePoolWithResponse call
+func ParseUpdateNodePoolResp(rsp *http.Response) (*UpdateNodePoolResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateNodePoolResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest NodePool
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCheckClusterPermissionsResp parses an HTTP response from a CheckClusterPermissionsWithResponse call
+func ParseCheckClusterPermissionsResp(rsp *http.Response) (*CheckClusterPermissionsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CheckClusterPermissionsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PermissionsCheckResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListClusterRoleAssignmentsResp parses an HTTP response from a ListClusterRoleAssignmentsWithResponse call
+func ParseListClusterRoleAssignmentsResp(rsp *http.Response) (*ListClusterRoleAssignmentsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListClusterRoleAssignmentsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			RoleAssignments *[]RoleAssignment `json:"role_assignments,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateClusterRoleAssignmentResp parses an HTTP response from a CreateClusterRoleAssignmentWithResponse call
+func ParseCreateClusterRoleAssignmentResp(rsp *http.Response) (*CreateClusterRoleAssignmentResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateClusterRoleAssignmentResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest RoleAssignment
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest InviteEmailUnprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest DirectoryUpstreamError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteClusterRoleAssignmentResp parses an HTTP response from a DeleteClusterRoleAssignmentWithResponse call
+func ParseDeleteClusterRoleAssignmentResp(rsp *http.Response) (*DeleteClusterRoleAssignmentResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteClusterRoleAssignmentResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListDatabasesResp parses an HTTP response from a ListDatabasesWithResponse call
+func ParseListDatabasesResp(rsp *http.Response) (*ListDatabasesResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListDatabasesResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []Database
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateDatabaseResp parses an HTTP response from a CreateDatabaseWithResponse call
+func ParseCreateDatabaseResp(rsp *http.Response) (*CreateDatabaseResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateDatabaseResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Database
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteDatabaseResp parses an HTTP response from a DeleteDatabaseWithResponse call
+func ParseDeleteDatabaseResp(rsp *http.Response) (*DeleteDatabaseResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteDatabaseResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetDatabaseResp parses an HTTP response from a GetDatabaseWithResponse call
+func ParseGetDatabaseResp(rsp *http.Response) (*GetDatabaseResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetDatabaseResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Database
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetDatabaseCredentialsResp parses an HTTP response from a GetDatabaseCredentialsWithResponse call
+func ParseGetDatabaseCredentialsResp(rsp *http.Response) (*GetDatabaseCredentialsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetDatabaseCredentialsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DatabaseCredentials
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 410:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON410 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 501:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON501 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCheckDatabasePermissionsResp parses an HTTP response from a CheckDatabasePermissionsWithResponse call
+func ParseCheckDatabasePermissionsResp(rsp *http.Response) (*CheckDatabasePermissionsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CheckDatabasePermissionsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PermissionsCheckResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListDatabaseRoleAssignmentsResp parses an HTTP response from a ListDatabaseRoleAssignmentsWithResponse call
+func ParseListDatabaseRoleAssignmentsResp(rsp *http.Response) (*ListDatabaseRoleAssignmentsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListDatabaseRoleAssignmentsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			RoleAssignments *[]RoleAssignment `json:"role_assignments,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateDatabaseRoleAssignmentResp parses an HTTP response from a CreateDatabaseRoleAssignmentWithResponse call
+func ParseCreateDatabaseRoleAssignmentResp(rsp *http.Response) (*CreateDatabaseRoleAssignmentResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateDatabaseRoleAssignmentResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest RoleAssignment
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest InviteEmailUnprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest DirectoryUpstreamError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteDatabaseRoleAssignmentResp parses an HTTP response from a DeleteDatabaseRoleAssignmentWithResponse call
+func ParseDeleteDatabaseRoleAssignmentResp(rsp *http.Response) (*DeleteDatabaseRoleAssignmentResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteDatabaseRoleAssignmentResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListKeyVaultsResp parses an HTTP response from a ListKeyVaultsWithResponse call
 func ParseListKeyVaultsResp(rsp *http.Response) (*ListKeyVaultsResp, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -13845,12 +20405,26 @@ func ParseListKeyVaultsResp(rsp *http.Response) (*ListKeyVaultsResp, error) {
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError
@@ -13906,6 +20480,13 @@ func ParseCreateKeyVaultResp(rsp *http.Response) (*CreateKeyVaultResp, error) {
 		}
 		response.JSON403 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
 		var dest Conflict
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -13939,6 +20520,13 @@ func ParseDeleteKeyVaultResp(rsp *http.Response) (*DeleteKeyVaultResp, error) {
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -13993,6 +20581,13 @@ func ParseGetKeyVaultResp(rsp *http.Response) (*GetKeyVaultResp, error) {
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -14039,6 +20634,13 @@ func ParseGetKeyVaultCredentialsResp(rsp *http.Response) (*GetKeyVaultCredential
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
@@ -14115,6 +20717,13 @@ func ParseRotateKeyVaultCredentialsResp(rsp *http.Response) (*RotateKeyVaultCred
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -14169,6 +20778,60 @@ func ParseRotateKeyVaultCredentialsResp(rsp *http.Response) (*RotateKeyVaultCred
 	return response, nil
 }
 
+// ParseCheckKeyVaultPermissionsResp parses an HTTP response from a CheckKeyVaultPermissionsWithResponse call
+func ParseCheckKeyVaultPermissionsResp(rsp *http.Response) (*CheckKeyVaultPermissionsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CheckKeyVaultPermissionsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PermissionsCheckResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListKeyVaultPrivateEndpointsResp parses an HTTP response from a ListKeyVaultPrivateEndpointsWithResponse call
 func ParseListKeyVaultPrivateEndpointsResp(rsp *http.Response) (*ListKeyVaultPrivateEndpointsResp, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -14189,6 +20852,13 @@ func ParseListKeyVaultPrivateEndpointsResp(rsp *http.Response) (*ListKeyVaultPri
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
@@ -14298,6 +20968,13 @@ func ParseDeleteKeyVaultPrivateEndpointResp(rsp *http.Response) (*DeleteKeyVault
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -14352,12 +21029,211 @@ func ParseGetKeyVaultPrivateEndpointResp(rsp *http.Response) (*GetKeyVaultPrivat
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListKeyVaultRoleAssignmentsResp parses an HTTP response from a ListKeyVaultRoleAssignmentsWithResponse call
+func ParseListKeyVaultRoleAssignmentsResp(rsp *http.Response) (*ListKeyVaultRoleAssignmentsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListKeyVaultRoleAssignmentsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			RoleAssignments *[]RoleAssignment `json:"role_assignments,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateKeyVaultRoleAssignmentResp parses an HTTP response from a CreateKeyVaultRoleAssignmentWithResponse call
+func ParseCreateKeyVaultRoleAssignmentResp(rsp *http.Response) (*CreateKeyVaultRoleAssignmentResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateKeyVaultRoleAssignmentResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest RoleAssignment
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest InviteEmailUnprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest DirectoryUpstreamError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteKeyVaultRoleAssignmentResp parses an HTTP response from a DeleteKeyVaultRoleAssignmentWithResponse call
+func ParseDeleteKeyVaultRoleAssignmentResp(rsp *http.Response) (*DeleteKeyVaultRoleAssignmentResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteKeyVaultRoleAssignmentResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest NotFound
@@ -14733,6 +21609,252 @@ func ParseRestoreKeyVaultSecretResp(rsp *http.Response) (*RestoreKeyVaultSecretR
 			return nil, err
 		}
 		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCheckProjectPermissionsResp parses an HTTP response from a CheckProjectPermissionsWithResponse call
+func ParseCheckProjectPermissionsResp(rsp *http.Response) (*CheckProjectPermissionsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CheckProjectPermissionsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PermissionsCheckResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListProjectRoleAssignmentsResp parses an HTTP response from a ListProjectRoleAssignmentsWithResponse call
+func ParseListProjectRoleAssignmentsResp(rsp *http.Response) (*ListProjectRoleAssignmentsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListProjectRoleAssignmentsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			RoleAssignments *[]RoleAssignment `json:"role_assignments,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateProjectRoleAssignmentResp parses an HTTP response from a CreateProjectRoleAssignmentWithResponse call
+func ParseCreateProjectRoleAssignmentResp(rsp *http.Response) (*CreateProjectRoleAssignmentResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateProjectRoleAssignmentResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest RoleAssignment
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest InviteEmailUnprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest DirectoryUpstreamError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteProjectRoleAssignmentResp parses an HTTP response from a DeleteProjectRoleAssignmentWithResponse call
+func ParseDeleteProjectRoleAssignmentResp(rsp *http.Response) (*DeleteProjectRoleAssignmentResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteProjectRoleAssignmentResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
 
 	}
 
@@ -15168,6 +22290,13 @@ func ParseListServiceAccountsResp(rsp *http.Response) (*ListServiceAccountsResp,
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -15566,6 +22695,252 @@ func ParseGetVirtualMachineResp(rsp *http.Response) (*GetVirtualMachineResp, err
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCheckVMPermissionsResp parses an HTTP response from a CheckVMPermissionsWithResponse call
+func ParseCheckVMPermissionsResp(rsp *http.Response) (*CheckVMPermissionsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CheckVMPermissionsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PermissionsCheckResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListVMRoleAssignmentsResp parses an HTTP response from a ListVMRoleAssignmentsWithResponse call
+func ParseListVMRoleAssignmentsResp(rsp *http.Response) (*ListVMRoleAssignmentsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListVMRoleAssignmentsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			RoleAssignments *[]RoleAssignment `json:"role_assignments,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateVMRoleAssignmentResp parses an HTTP response from a CreateVMRoleAssignmentWithResponse call
+func ParseCreateVMRoleAssignmentResp(rsp *http.Response) (*CreateVMRoleAssignmentResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateVMRoleAssignmentResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest RoleAssignment
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest InviteEmailUnprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest DirectoryUpstreamError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteVMRoleAssignmentResp parses an HTTP response from a DeleteVMRoleAssignmentWithResponse call
+func ParseDeleteVMRoleAssignmentResp(rsp *http.Response) (*DeleteVMRoleAssignmentResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteVMRoleAssignmentResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
 
 	}
 
@@ -17141,6 +24516,259 @@ func ParseGetSubnetResp(rsp *http.Response) (*GetSubnetResp, error) {
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListTenantRoleAssignmentsResp parses an HTTP response from a ListTenantRoleAssignmentsWithResponse call
+func ParseListTenantRoleAssignmentsResp(rsp *http.Response) (*ListTenantRoleAssignmentsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListTenantRoleAssignmentsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			RoleAssignments *[]RoleAssignment `json:"role_assignments,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateTenantRoleAssignmentResp parses an HTTP response from a CreateTenantRoleAssignmentWithResponse call
+func ParseCreateTenantRoleAssignmentResp(rsp *http.Response) (*CreateTenantRoleAssignmentResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateTenantRoleAssignmentResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest RoleAssignment
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest InviteEmailUnprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest DirectoryUpstreamError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteTenantRoleAssignmentResp parses an HTTP response from a DeleteTenantRoleAssignmentWithResponse call
+func ParseDeleteTenantRoleAssignmentResp(rsp *http.Response) (*DeleteTenantRoleAssignmentResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteTenantRoleAssignmentResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListSharedResourcesResp parses an HTTP response from a ListSharedResourcesWithResponse call
+func ParseListSharedResourcesResp(rsp *http.Response) (*ListSharedResourcesResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListSharedResourcesResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []SharedResource
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
 
 	}
 

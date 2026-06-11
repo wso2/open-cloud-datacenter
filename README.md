@@ -270,6 +270,12 @@ make `dc-api` exit at startup if missing or invalid.
 | `DCAPI_ADMIN_GROUP`                   |          | `dc-admin`               | IdP group that maps to platform admin.                                  |
 | `DCAPI_PLATFORM_ADMIN_SUBS`           |          |                          | Comma-separated `sub` values for break-glass platform admins.           |
 | `DCAPI_RBAC_AUTOPROVISION`            |          | `false`                  | Auto-grant `member` on first login with a valid tenant group.           |
+| **IdP Directory (optional)**          |          |                          | Leave all four unset to disable. When set, enable live directory browsing and email-based invites (see [rbac.md](docs/rbac.md#idp-directory-configuration-optional)). |
+| `DCAPI_IDP_SCIM_BASE_URL`             |          |                          | SCIM2 endpoint URL of your IdP. The four required `DCAPI_IDP_*` vars must be set together or all unset. |
+| `DCAPI_IDP_TOKEN_URL`                 |          |                          | OAuth2 token endpoint for m2m credential (read-only user/group VIEW scopes). |
+| `DCAPI_IDP_CLIENT_ID`                 |          |                          | Client ID of machine-to-machine OAuth2 app. |
+| `DCAPI_IDP_CLIENT_SECRET`             |          |                          | Client secret for the m2m app. |
+| `DCAPI_IDP_SCOPES`                    |          |                          | OAuth2 scopes for the client_credentials grant (space/comma-separated). Required for Asgardeo/WSO2 IS (else SCIM 403s); optional elsewhere. LIST/VIEW only. Asgardeo: `internal_user_mgt_list internal_user_mgt_view internal_group_mgt_view`. |
 | **Harvester**                         |          |                          |                                                                         |
 | `DCAPI_HARVESTER_KUBECONFIG`          | ✅       |                          | Base64-encoded Harvester kubeconfig.                                    |
 | `DCAPI_HARVESTER_NAMESPACE`           |          | `default`                | Fallback Harvester namespace.                                           |

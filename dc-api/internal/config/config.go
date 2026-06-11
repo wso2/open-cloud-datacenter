@@ -13,6 +13,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 
 	"github.com/kelseyhightower/envconfig"
@@ -238,6 +239,52 @@ type Config struct {
 	KeyVaultBackendAddr string `envconfig:"KV_BACKEND_ADDR" default:"openbao.dc-api-vault.svc.cluster.local"`
 	KeyVaultBackendPort int    `envconfig:"KV_BACKEND_PORT" default:"8200"`
 
+	// ── IdP SCIM2 directory (optional, read-only) ─────────────────────────────
+	// Optional read-only SCIM2 directory integration: powers the invite picker
+	// (GET /v1/tenants/{tid}/directory/{users,groups}) and invite-by-email
+	// (user_email on POST .../role-assignments). When ALL FOUR are unset the
+	// feature is dark — the directory endpoints answer 501 and invites work by
+	// user_sub only. Setting SOME but not all four fails startup (see
+	// ValidateDirectory) so a half-configured deployment is caught early.
+	//
+	// The OAuth2 client_credentials credential MUST hold user/group VIEW
+	// scopes only — dc-api never writes to the IdP and a leaked read-only
+	// credential cannot modify identities.
+	//
+	// Asgardeo examples:
+	//   IDP_SCIM_BASE_URL = https://api.asgardeo.io/t/{org}/scim2
+	//   IDP_TOKEN_URL     = https://api.asgardeo.io/t/{org}/oauth2/token
+	IDPSCIMBaseURL  string `envconfig:"IDP_SCIM_BASE_URL" default:""`
+	IDPTokenURL     string `envconfig:"IDP_TOKEN_URL"     default:""`
+	IDPClientID     string `envconfig:"IDP_CLIENT_ID"     default:""`
+	IDPClientSecret string `envconfig:"IDP_CLIENT_SECRET" default:""`
+
+	// IDPScopes are the OAuth2 scopes requested with the client_credentials
+	// grant when fetching the SCIM access token. Space- or comma-separated.
+	//
+	// Required by Asgardeo and WSO2 Identity Server: they only attach SCIM
+	// permissions to a client_credentials token when the scopes are explicitly
+	// requested. Without them every SCIM call returns 403 against a real org.
+	// The Asgardeo read-only set is:
+	//
+	//   IDP_SCOPES = "internal_user_mgt_list internal_user_mgt_view internal_group_mgt_view"
+	//
+	// Optional: some IdPs grant SCIM permissions to the M2M app directly and
+	// need no scopes, so this is NOT part of the all-or-nothing
+	// ValidateDirectory check — it only matters when the other four are set.
+	// Grant LIST/VIEW scopes only; dc-api never writes to the IdP.
+	IDPScopes string `envconfig:"IDP_SCOPES" default:""`
+
+	// IDPUserstoreDomain restricts directory reads to one userstore via the
+	// WSO2 SCIM2 `domain` query parameter. Without it the IdP returns every
+	// account in the organization — including console administrators and
+	// collaborators, who are not invite candidates. The default "DEFAULT" is
+	// Asgardeo's consumer-user store; on-prem WSO2 Identity Server typically
+	// wants "PRIMARY". Set explicitly empty to list all stores (non-WSO2
+	// SCIM servers ignore the parameter either way). Not part of the
+	// all-or-nothing ValidateDirectory check.
+	IDPUserstoreDomain string `envconfig:"IDP_USERSTORE_DOMAIN" default:"DEFAULT"`
+
 	// ── Logging ───────────────────────────────────────────────────────────────
 	LogLevel string `envconfig:"LOG_LEVEL" default:"info"`
 
@@ -258,6 +305,47 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 	return &cfg, nil
+}
+
+// DirectoryConfigured reports whether the optional IdP SCIM2 directory is
+// fully configured (all four DCAPI_IDP_* variables set).
+func (c *Config) DirectoryConfigured() bool {
+	return c.IDPSCIMBaseURL != "" && c.IDPTokenURL != "" &&
+		c.IDPClientID != "" && c.IDPClientSecret != ""
+}
+
+// ValidateDirectory fails fast on a half-configured IdP directory: either all
+// four required DCAPI_IDP_* variables (SCIM_BASE_URL, TOKEN_URL, CLIENT_ID,
+// CLIENT_SECRET) are set (feature on) or none are (feature dark). Anything in
+// between is an operator mistake — e.g. the secret didn't make it into the
+// deployment — and silently running with the feature dark would hide it until
+// the first invite-by-email fails.
+//
+// DCAPI_IDP_SCOPES is intentionally excluded from this check: it is optional
+// (some IdPs need no scopes) and only meaningful once the other four are set.
+func (c *Config) ValidateDirectory() error {
+	vars := map[string]string{
+		"DCAPI_IDP_SCIM_BASE_URL": c.IDPSCIMBaseURL,
+		"DCAPI_IDP_TOKEN_URL":     c.IDPTokenURL,
+		"DCAPI_IDP_CLIENT_ID":     c.IDPClientID,
+		"DCAPI_IDP_CLIENT_SECRET": c.IDPClientSecret,
+	}
+	var missing []string
+	set := 0
+	for name, v := range vars {
+		if v == "" {
+			missing = append(missing, name)
+		} else {
+			set++
+		}
+	}
+	if set == 0 || set == len(vars) {
+		return nil
+	}
+	sort.Strings(missing)
+	return fmt.Errorf(
+		"IdP directory config is incomplete: %s not set — set all four required DCAPI_IDP_* variables (SCIM_BASE_URL, TOKEN_URL, CLIENT_ID, CLIENT_SECRET) to enable the directory, or none to disable it (DCAPI_IDP_SCOPES is optional)",
+		strings.Join(missing, ", "))
 }
 
 // ValidateF20 performs fail-fast validation of the F20 per-VPC DNS config.

@@ -149,10 +149,10 @@ func pollVNetUntilDone(ctx context.Context, tenantID, projectID string, apiClien
 		}
 		v := resp.JSON200
 		switch v.Status {
-		case dcapi.ACTIVE:
+		case dcapi.ResourceStatusACTIVE:
 			fmt.Println(" done!")
 			return v, nil
-		case dcapi.FAILED:
+		case dcapi.ResourceStatusFAILED:
 			fmt.Println()
 			return nil, fmt.Errorf("VNet provisioning failed: %s", cliutil.DerefOrDash(v.Message))
 		}

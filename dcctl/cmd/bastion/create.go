@@ -177,12 +177,12 @@ func pollBastionUntilDone(ctx context.Context, tenantID, projectID string, apiCl
 		}
 		b := resp.JSON200
 		switch b.Status {
-		case dcapi.ACTIVE:
+		case dcapi.ResourceStatusACTIVE:
 			if b.MgmtIp != nil && *b.MgmtIp != "" {
 				fmt.Println(" done!")
 				return b, nil
 			}
-		case dcapi.FAILED:
+		case dcapi.ResourceStatusFAILED:
 			fmt.Println()
 			return nil, fmt.Errorf("bastion provisioning failed: %s", cliutil.DerefOrDash(b.Message))
 		}

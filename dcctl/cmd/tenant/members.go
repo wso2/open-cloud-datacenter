@@ -6,9 +6,9 @@
 //	dcctl tenant current           — print the currently active tenant
 //	dcctl tenant list              — list all accessible tenants
 //
-// Member management:
+// Member management (tenant-scope role assignments):
 //
-//	dcctl tenant member create <user_sub> --role <r>
+//	dcctl tenant member create <email-or-sub> --role <role-definition-key>
 //	dcctl tenant member list
 //	dcctl tenant member delete <user_sub>
 //

@@ -97,7 +97,11 @@ func TestSpec_Conformance(t *testing.T) {
 	composite := middleware.NewCompositeAuth(saAuth, testAuth)
 
 	// 3. Router with all providers nopped out — schemathesis only validates
-	// response *shapes*, not real provisioning.
+	// response *shapes*, not real provisioning. DirectoryProvider is
+	// intentionally nil (feature dark): the /directory endpoints then answer
+	// the documented 501 and invite-by-email the documented 422, both
+	// deterministic — exactly what the spec's DirectoryNotConfigured /
+	// InviteEmailUnprocessable responses describe.
 	router := api.NewRouter(api.RouterDeps{
 		Repo:            repo,
 		ComputeProvider: nopCompute{},
@@ -130,11 +134,18 @@ func TestSpec_Conformance(t *testing.T) {
 	// 6. Run schemathesis. We keep the operation set tight on purpose:
 	//   - health: anonymous /healthz
 	//   - keyvaults, projects: pure DB CRUD
-	//   - members, service-accounts, tenants: pure DB + RBAC
+	//   - roleAssignments, service-accounts, tenants: pure DB + RBAC
+	//     (roleAssignments is the RBAC-v2 name of the old `members` tag —
+	//     the regex previously said `members`, which no longer matches any
+	//     operation, so these endpoints had silently dropped out of coverage)
+	//   - directory: works backend-free BY DESIGN — with a nil
+	//     DirectoryProvider the endpoints return the documented 501
+	//     feature-detection response, and the RBAC gate / tenant guard cover
+	//     the 403/404 shapes
 	// Networking, VMs, clusters, bastions, images need real backends and
 	// are out of scope. --include-tag matches a single tag value, so we use
 	// the regex variant to express the allowlist.
-	tagRegex := `^(health|keyvaults|members|projects|service-accounts|tenants)$`
+	tagRegex := `^(health|directory|keyvaults|roleAssignments|projects|service-accounts|tenants)$`
 	checks := strings.Join([]string{
 		"not_a_server_error",
 		"status_code_conformance",

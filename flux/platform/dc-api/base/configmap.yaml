@@ -28,3 +28,9 @@ data:
   DCAPI_VPC_EXTERNAL_GATEWAY: ""
   DCAPI_VPC_EXTERNAL_RESERVED_IPS: ""
   DCAPI_VPC_EXTERNAL_VLAN_ID: "0"
+  # IdP directory (SCIM2) — optional. Left empty (with the
+  # DCAPI_IDP_CLIENT_ID/SECRET secret keys absent) the directory feature
+  # stays dark and invites require a raw OIDC sub.
+  DCAPI_IDP_SCIM_BASE_URL: ""
+  DCAPI_IDP_TOKEN_URL: ""
+  DCAPI_IDP_SCOPES: ""

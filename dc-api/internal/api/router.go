@@ -25,6 +25,7 @@ import (
 	"github.com/wso2/dc-api/internal/api/handlers"
 	"github.com/wso2/dc-api/internal/api/middleware"
 	"github.com/wso2/dc-api/internal/db"
+	"github.com/wso2/dc-api/internal/directory"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
 	"github.com/wso2/dc-api/internal/providers/endpoints"
@@ -87,7 +88,12 @@ type RouterDeps struct {
 	// must be set (sourced from DCAPI_KV_BACKEND_ADDR / DCAPI_KV_BACKEND_PORT).
 	KeyVaultBackendAddr string
 	KeyVaultBackendPort int
-	AuthMiddleware      middleware.AuthValidator
+	// DirectoryProvider is the optional read-only IdP SCIM2 directory (invite
+	// picker + invite-by-email). Nil when the deployment has no DCAPI_IDP_*
+	// config: the /directory endpoints then answer 501 and role-assignment
+	// creates accept user_sub only (user_email → 422).
+	DirectoryProvider directory.Provider
+	AuthMiddleware    middleware.AuthValidator
 	// AuthService (F7 BFF) is optional. When non-nil, dc-api serves
 	// /v1/auth/{login,callback,logout,me} for cloud-ui's session-cookie
 	// auth path. When nil, those routes are not registered and the only
@@ -194,8 +200,14 @@ func NewRouter(deps RouterDeps) http.Handler {
 		bastionHandler := handlers.NewBastionHandler(deps.Repo, deps.ComputeProvider, deps.BastionImage, deps.BastionMgmtNAD, deps.DNSSearchDomain, deps.Log)
 		clusterHandler := handlers.NewClusterHandler(deps.Repo, deps.ClusterProvider, deps.Log)
 
-		// M1.5 member management handler.
-		roleAssignmentHandler := handlers.NewRoleAssignmentsHandler(deps.Repo, deps.Log)
+		// M1.5 member management handler. The directory provider (possibly nil)
+		// powers invite-by-email resolution.
+		roleAssignmentHandler := handlers.NewRoleAssignmentsHandler(deps.Repo, deps.DirectoryProvider, deps.Log)
+
+		// IdP directory proxy (optional SCIM2). The handler itself answers 501
+		// when deps.DirectoryProvider is nil, so the routes always register —
+		// 501 is the documented feature-detection signal, not a 404.
+		directoryHandler := handlers.NewDirectoryHandler(deps.DirectoryProvider, deps.Log)
 
 		// RBAC v2 capability probe — the UI asks "may I do these actions here?"
 		// and gets booleans back, so it never re-implements the matcher.
@@ -524,6 +536,16 @@ func NewRouter(deps RouterDeps) http.Handler {
 				r.Method(http.MethodPost, "/", gate(rbac.ActionRoleAssignmentWrite, roleAssignmentHandler.Create))                  // POST   /v1/tenants/{tenant_id}/role-assignments
 				r.Method(http.MethodGet, "/", gate(rbac.ActionRoleAssignmentRead, roleAssignmentHandler.List))                      // GET    /v1/tenants/{tenant_id}/role-assignments
 				r.Method(http.MethodDelete, "/{principal_id}", gate(rbac.ActionRoleAssignmentDelete, roleAssignmentHandler.Remove)) // DELETE /v1/tenants/{tenant_id}/role-assignments/{principal_id}
+			})
+
+			// IdP directory proxy — invite picker (users) + group listing.
+			// BOTH gated with roleAssignments/write even though they are GETs:
+			// intentional product guardrail — the directory is visible only to
+			// principals who can perform invitations (Owner,
+			// UserAccessAdministrator). Do NOT introduce a read action here.
+			r.Route("/directory", func(r chi.Router) {
+				r.Method(http.MethodGet, "/users", gate(rbac.ActionRoleAssignmentWrite, directoryHandler.ListUsers))   // GET /v1/tenants/{tenant_id}/directory/users
+				r.Method(http.MethodGet, "/groups", gate(rbac.ActionRoleAssignmentWrite, directoryHandler.ListGroups)) // GET /v1/tenants/{tenant_id}/directory/groups
 			})
 
 			// Images and provider networks are tenant-shared catalog (not project

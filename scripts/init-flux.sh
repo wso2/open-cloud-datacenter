@@ -615,6 +615,19 @@ cmd_seal() {
   auto_or_ask        rancher_oidc_client_id "Asgardeo rancher-sso client_id"    "asgardeo-auth"  "client_id"
   auto_or_ask        cloud_ui_client_id     "Asgardeo cloud-ui SPA client_id"   "asgardeo-auth"  "cloud_ui_client_id"
 
+  # IdP directory M2M credential (optional feature) — TF-only, never a
+  # prompt: when the asgardeo-auth layer registers no directory app, the
+  # keys are sealed empty and the feature stays dark. dc-api fails fast on
+  # a HALF-configured DCAPI_IDP_* set, so if the overlay patches the
+  # SCIM/token URLs into dc-api-config these creds must resolve here.
+  idp_client_id="$(tf_get asgardeo-auth directory_client_id)"
+  idp_client_secret="$(tf_get asgardeo-auth directory_client_secret)"
+  if [[ -n "$idp_client_id" && -n "$idp_client_secret" ]]; then
+    echo "  ✓ IdP directory client_id/client_secret  ← from TF (asgardeo-auth.directory_client_id/_secret) [sensitive, not displayed]"
+  else
+    echo "  –  IdP directory credential not in asgardeo-auth TF outputs — sealing empty (directory feature stays dark)"
+  fi
+
   # Cluster-only / operator-only — stay prompts.
 
   echo
@@ -661,8 +674,23 @@ cmd_seal() {
     --fetch-cert > "$cert_pem"
   echo "  ✓ fetched sealed-secrets controller cert"
 
-  postgres_password="$(openssl rand -hex 12)"
-  bff_session_secret="$(openssl rand -base64 32)"
+  # Re-sealing a LIVE env must not rotate the Postgres password: the DB
+  # initialised with the existing one, and a rotated Secret breaks dc-api's
+  # DB auth until an operator ALTERs the role. Reuse the live values when
+  # the cluster has them; only a fresh env generates new ones. (The BFF
+  # session secret is preserved too so a re-seal doesn't log everyone out.)
+  postgres_password="$(kubectl get secret -n dc-system dc-postgres-secret -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)"
+  if [[ -n "$postgres_password" ]]; then
+    echo "  ✓ Postgres password  ← live cluster Secret (preserved, not rotated)"
+  else
+    postgres_password="$(openssl rand -hex 12)"
+  fi
+  bff_session_secret="$(kubectl get secret -n dc-system dc-api-secrets -o jsonpath='{.data.DCAPI_BFF_SESSION_SECRET}' 2>/dev/null | base64 -d || true)"
+  if [[ -n "$bff_session_secret" ]]; then
+    echo "  ✓ BFF session secret ← live cluster Secret (preserved)"
+  else
+    bff_session_secret="$(openssl rand -base64 32)"
+  fi
   oidc_audience="$rancher_oidc_client_id,$bff_client_id,$cloud_ui_client_id"
 
   seal() {
@@ -699,6 +727,8 @@ cmd_seal() {
        --from-literal=DCAPI_BFF_CLIENT_ID="$bff_client_id" \
        --from-literal=DCAPI_BFF_CLIENT_SECRET="$bff_client_secret" \
        --from-literal=DCAPI_BFF_SESSION_SECRET="$bff_session_secret" \
+       --from-literal=DCAPI_IDP_CLIENT_ID="$idp_client_id" \
+       --from-literal=DCAPI_IDP_CLIENT_SECRET="$idp_client_secret" \
        --from-file=DCAPI_HARVESTER_KUBECONFIG="$harvester_kubeconfig_path"
 
   seal_dockerconfig sealed-ghcr-pull-secret.yaml             ghcr-pull-secret dc-system   "$ghcr_org" "$ghcr_pat"

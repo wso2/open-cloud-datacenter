@@ -19,8 +19,10 @@ func newMemberListCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List all human members of the tenant",
-		Long: `List all human members of the active (or specified) tenant.
+		Short: "List user role assignments on the tenant",
+		Long: `List all user role assignments on the active (or specified) tenant.
+
+Service accounts are excluded; use "dcctl tenant service-account list".
 
 Examples:
   dcctl tenant member list
@@ -47,32 +49,38 @@ func runMemberList(ctx context.Context, tenantID string, outputJSON bool) error 
 	}
 
 	apiClient := client.New(creds.AccessToken)
-	resp, err := apiClient.Typed.ListMembersWithResponse(ctx, tenantID)
+	resp, err := apiClient.Typed.ListTenantRoleAssignmentsWithResponse(ctx, tenantID)
 	if err != nil {
-		return fmt.Errorf("GET /v1/tenants/%s/members: %w", tenantID, err)
+		return fmt.Errorf("GET /v1/tenants/%s/role-assignments: %w", tenantID, err)
 	}
-	if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil || resp.JSON200.Members == nil {
+	if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil || resp.JSON200.RoleAssignments == nil {
 		return cliutil.APIErrorf(resp.StatusCode(), resp.Body)
 	}
-	members := *resp.JSON200.Members
+	assignments := *resp.JSON200.RoleAssignments
 
 	if outputJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(members)
+		return enc.Encode(assignments)
 	}
 
-	if len(members) == 0 {
+	if len(assignments) == 0 {
 		fmt.Println("No members found.")
 		return nil
 	}
 
-	fmt.Printf("%-40s  %-8s  %-20s  %s\n", "PRINCIPAL_ID", "ROLE", "GRANTED_AT", "GRANTED_BY")
-	fmt.Printf("%-40s  %-8s  %-20s  %s\n",
-		strings.Repeat("-", 40), "--------", "--------------------", "--------------------")
-	for _, m := range members {
-		fmt.Printf("%-40s  %-8s  %-20s  %s\n",
-			m.PrincipalId, m.Role, m.GrantedAt.Format("2006-01-02 15:04:05"), m.GrantedBy)
+	fmt.Printf("%-40s  %-24s  %-28s  %-20s  %s\n",
+		"PRINCIPAL_ID", "ALIAS", "ROLE", "GRANTED_AT", "GRANTED_BY")
+	fmt.Printf("%-40s  %-24s  %-28s  %-20s  %s\n",
+		strings.Repeat("-", 40), strings.Repeat("-", 24), strings.Repeat("-", 28),
+		"--------------------", "--------------------")
+	for _, ra := range assignments {
+		fmt.Printf("%-40s  %-24s  %-28s  %-20s  %s\n",
+			ra.PrincipalId,
+			cliutil.Truncate(cliutil.DerefOrDash(ra.DisplayAlias), 24),
+			ra.RoleDefinition,
+			ra.GrantedAt.Format("2006-01-02 15:04:05"),
+			ra.GrantedBy)
 	}
 	return nil
 }

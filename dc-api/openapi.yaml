@@ -66,6 +66,18 @@ tags:
     description: RKE2 Kubernetes clusters (async provisioning via Rancher)
   - name: roleAssignments
     description: Role assignments — granting catalog roles to principals at tenant or project scope
+  - name: directory
+    description: |
+      Read-only lookups against the deployment's IdP directory via an optional
+      SCIM2 provider. The directory is organization-global (scoped server-side
+      to the deployment's configured userstore, so console administrator
+      accounts are not listed); the endpoints are
+      tenant-scoped only so RBAC
+      gating can evaluate the caller's actions at a scope. dc-api proxies every
+      read live to the IdP and persists nothing — at most the OIDC `sub` is
+      stored, on the role assignment an invite subsequently creates. When no
+      directory provider is configured the feature is dark and these endpoints
+      return `501`.
   - name: service-accounts
     description: Service account lifecycle and token management
   - name: networking-vnets
@@ -745,8 +757,12 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/InviteEmailUnprocessable"
         "500":
           $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/DirectoryUpstreamError"
 
     get:
       operationId: listVMRoleAssignments
@@ -1218,8 +1234,12 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/InviteEmailUnprocessable"
         "500":
           $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/DirectoryUpstreamError"
 
     get:
       operationId: listClusterRoleAssignments
@@ -1660,10 +1680,12 @@ paths:
       summary: Grant a role to a principal at tenant scope
       description: |
         Creates a `role_assignments` row binding the user (identified by
-        their OIDC `sub`) to the tenant scope. Returns 409 if the user
-        already holds that role. Also UPSERTs a `tenants` registry row
-        for the tenant as a side effect, so the tenant is discoverable
-        by admins via `GET /v1/tenants` without a separate registration.
+        their OIDC `sub`, or by a `user_email` resolved to a `sub` through
+        the optional directory provider) to the tenant scope. Returns 409
+        if the user already holds that role. Also UPSERTs a `tenants`
+        registry row for the tenant as a side effect, so the tenant is
+        discoverable by admins via `GET /v1/tenants` without a separate
+        registration.
 
         The URL `{tenant_id}` must match the caller's own tenant context
         (Option D: derived from a `role_assignments` row, not from any
@@ -1676,10 +1698,18 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CreateRoleAssignmentRequest"
-            example:
-              user_sub: 01abc123-0000-0000-0000-user000000001
-              role_definition: Contributor
-              display_alias: alice-laptop
+            examples:
+              invite_by_sub:
+                summary: Grant by OIDC sub (works on every deployment)
+                value:
+                  user_sub: 01abc123-0000-0000-0000-user000000001
+                  role_definition: Contributor
+                  display_alias: alice-laptop
+              invite_by_email:
+                summary: Grant by email (requires the directory provider; alias defaults to the IdP display name, then the email)
+                value:
+                  user_email: alice@example.com
+                  role_definition: Contributor
       responses:
         "201":
           description: Role assignment created
@@ -1697,8 +1727,12 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/InviteEmailUnprocessable"
         "500":
           $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/DirectoryUpstreamError"
 
     get:
       operationId: listTenantRoleAssignments
@@ -1773,6 +1807,168 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  # ── Directory (optional SCIM2 read-only proxy) ─────────────────────────────
+
+  /v1/tenants/{tenant_id}/directory/users:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+
+    get:
+      operationId: listDirectoryUsers
+      tags: [directory]
+      summary: Search the IdP directory for users
+      description: |
+        Proxies a live, read-only SCIM2 search against the deployment's
+        identity provider and returns minimal user records — `sub`, `email`,
+        and `display_name`, just enough for an invite picker. Nothing else
+        from the SCIM response is exposed and nothing is persisted:
+        dc-api stores only the `sub`, and only on the
+        role assignment an invite subsequently creates.
+
+        The path is tenant-scoped because RBAC gating evaluates actions at a
+        scope, but the directory itself is organization-global: every tenant
+        queries the same directory.
+
+        The URL `{tenant_id}` must match the caller's own tenant context
+        (derived from a `role_assignments` row, not from any IdP
+        group); a mismatch returns 404 so other tenants' identifiers are not
+        enumerable. Platform admins may operate on any tenant.
+
+        Clients may probe this endpoint for feature detection: `501` means
+        no directory provider is configured on this deployment (hide email
+        type-ahead and invite-by-email affordances); `502` means a provider
+        is configured but the live IdP request failed (show an error and
+        offer retry).
+
+        **Required action**: `authorization/roleAssignments/write` — the
+        directory is visible only to principals who can perform invitations
+        (e.g. `Owner`, `UserAccessAdministrator`). `Reader` and `Contributor`
+        get 403.
+      parameters:
+        - name: filter
+          in: query
+          required: false
+          description: |
+            Optional case-insensitive substring matched against the user's
+            email/username and display name (mapped to SCIM2 `co` filters
+            underneath). Empty or omitted lists all users (paginated).
+          schema:
+            type: string
+            maxLength: 256
+            example: alice
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of users to return per page (SCIM2 `count` underneath).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+            example: 50
+        - name: offset
+          in: query
+          required: false
+          description: Number of users to skip (SCIM2 `startIndex = offset + 1` underneath).
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+            example: 0
+      responses:
+        "200":
+          description: One page of matching directory users.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DirectoryUserList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "501":
+          $ref: "#/components/responses/DirectoryNotConfigured"
+        "502":
+          $ref: "#/components/responses/DirectoryUpstreamError"
+
+  /v1/tenants/{tenant_id}/directory/groups:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+
+    get:
+      operationId: listDirectoryGroups
+      tags: [directory]
+      summary: List the IdP directory's groups
+      description: |
+        Proxies a live, read-only SCIM2 listing of the identity provider's
+        groups and returns minimal records — `id` and `name` only. Nothing
+        else from the SCIM response is exposed and nothing is persisted.
+
+        The path is tenant-scoped because RBAC gating evaluates actions at a
+        scope, but the directory itself is organization-global: every tenant
+        queries the same directory.
+
+        The URL `{tenant_id}` must match the caller's own tenant context
+        (derived from a `role_assignments` row, not from any IdP
+        group); a mismatch returns 404 so other tenants' identifiers are not
+        enumerable. Platform admins may operate on any tenant.
+
+        `501` means no directory provider is configured on this deployment
+        (the feature is dark); `502` means a provider is configured but the
+        live IdP request failed.
+
+        **Required action**: `authorization/roleAssignments/write` — the
+        directory is visible only to principals who can perform invitations
+        (e.g. `Owner`, `UserAccessAdministrator`). `Reader` and `Contributor`
+        get 403.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of groups to return per page (SCIM2 `count` underneath).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+            example: 50
+        - name: offset
+          in: query
+          required: false
+          description: Number of groups to skip (SCIM2 `startIndex = offset + 1` underneath).
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+            example: 0
+      responses:
+        "200":
+          description: One page of directory groups.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DirectoryGroupList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "501":
+          $ref: "#/components/responses/DirectoryNotConfigured"
+        "502":
+          $ref: "#/components/responses/DirectoryUpstreamError"
+
   /v1/tenants/{tenant_id}/projects/{project_id}/permissions:check:
     parameters:
       - $ref: "#/components/parameters/TenantID"
@@ -1827,8 +2023,9 @@ paths:
       summary: Grant a role to a principal at project scope
       description: |
         Creates a `role_assignments` row binding the user (identified by
-        their OIDC `sub`) to the project scope. Returns 409 if the user
-        already holds that role at the project.
+        their OIDC `sub`, or by a `user_email` resolved to a `sub` through
+        the optional directory provider) to the project scope. Returns 409
+        if the user already holds that role at the project.
 
         The URL `{tenant_id}` must match the caller's own tenant context
         (Option D: derived from a `role_assignments` row, not from any
@@ -1842,10 +2039,18 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CreateRoleAssignmentRequest"
-            example:
-              user_sub: 01abc123-0000-0000-0000-user000000001
-              role_definition: VirtualMachineContributor
-              display_alias: alice-laptop
+            examples:
+              invite_by_sub:
+                summary: Grant by OIDC sub (works on every deployment)
+                value:
+                  user_sub: 01abc123-0000-0000-0000-user000000001
+                  role_definition: VirtualMachineContributor
+                  display_alias: alice-laptop
+              invite_by_email:
+                summary: Grant by email (requires the directory provider; alias defaults to the IdP display name, then the email)
+                value:
+                  user_email: alice@example.com
+                  role_definition: VirtualMachineContributor
       responses:
         "201":
           description: Role assignment created
@@ -1863,8 +2068,12 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/InviteEmailUnprocessable"
         "500":
           $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/DirectoryUpstreamError"
 
     get:
       operationId: listProjectRoleAssignments
@@ -3839,8 +4048,12 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/InviteEmailUnprocessable"
         "500":
           $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/DirectoryUpstreamError"
 
     get:
       operationId: listKeyVaultRoleAssignments
@@ -5084,8 +5297,12 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/InviteEmailUnprocessable"
         "500":
           $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/DirectoryUpstreamError"
 
     get:
       operationId: listDatabaseRoleAssignments
@@ -5361,6 +5578,55 @@ components:
             $ref: "#/components/schemas/Error"
           example:
             error: "OpenBao backend is sealed; retry in a few seconds"
+
+    DirectoryNotConfigured:
+      description: |
+        No directory provider is configured on this deployment — the optional
+        SCIM2 directory feature is dark. This status is the feature-detection
+        signal: clients that receive it should hide email type-ahead and
+        invite-by-email affordances entirely (it will not change until the
+        operator reconfigures dc-api).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "no directory provider is configured on this deployment"
+
+    DirectoryUpstreamError:
+      description: |
+        A directory provider is configured, but the live SCIM2 request to the
+        IdP failed (connection error, timeout, or a non-2xx upstream
+        response). Unlike `501`, this is transient — the caller may retry.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "directory upstream request failed; try again or invite by user_sub"
+
+    InviteEmailUnprocessable:
+      description: |
+        The `user_email` invite could not be resolved to an OIDC `sub`.
+        Returned when the email matches no IdP user, matches more than one,
+        or when `user_email` was supplied on a deployment with no directory
+        provider configured (probe `GET .../directory/users` — `501` there
+        means invite-by-email is unavailable here). Resubmitting the same
+        grant with `user_sub` always works.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          examples:
+            email_not_found:
+              value:
+                error: "user_email 'alice@example.com' does not match any IdP user"
+            email_ambiguous:
+              value:
+                error: "user_email 'alice@example.com' matches more than one IdP user; invite by user_sub instead"
+            no_directory_provider:
+              value:
+                error: "invite by user_email requires a directory provider, and none is configured on this deployment; invite by user_sub instead"
 
   schemas:
 
@@ -6220,8 +6486,14 @@ components:
           type: string
           description: |
             Admin-set mnemonic shown by cloud-ui instead of the opaque
-            `principal_id`. Optional. No PII is sourced from the IdP —
-            purely what the inviter typed when they added the principal.
+            `principal_id`. Optional. No PII is **stored** from the IdP:
+            email-based invites consult the directory provider live to
+            resolve `user_email` → `sub`, but the only IdP-derived values
+            persisted are the `sub` itself and — when the inviter supplies
+            no alias — the resolved IdP display name (falling back to the
+            invite email when the directory has no display name) copied once
+            into this field as its default. Otherwise it is purely what the
+            inviter typed when they added the principal.
           example: alice-laptop
 
     PermissionsCheckRequest:
@@ -6303,12 +6575,39 @@ components:
 
     CreateRoleAssignmentRequest:
       type: object
-      required: [user_sub, role_definition]
+      required: [role_definition]
+      description: |
+        Grant request shared by every role-assignment scope (tenant, project,
+        and per-resource). The principal is identified by **exactly one** of
+        `user_sub` or `user_email`; supplying both, or neither, returns 400.
       properties:
         user_sub:
           type: string
-          description: OIDC `sub` of the user to grant the role to
+          description: |
+            OIDC `sub` of the user to grant the role to. Mutually exclusive
+            with `user_email` — exactly one of the two is required. Granting
+            by `user_sub` works on every deployment and never contacts the
+            IdP.
           example: 01abc123-0000-0000-0000-user000000001
+        user_email:
+          type: string
+          format: email
+          description: |
+            Email address of the user to grant the role to. Mutually
+            exclusive with `user_sub` — exactly one of the two is required.
+            dc-api resolves the email to an OIDC `sub` via a live SCIM2
+            point lookup against the deployment's directory provider at
+            request time, stores only the resolved `sub`, and uses the
+            resolved IdP display name (falling back to the email when the
+            directory has no display name) as the default `display_alias`
+            when none is supplied. Nothing else from the lookup is persisted.
+
+            Returns 422 when the email does not resolve to exactly one IdP
+            user (no match or ambiguous), and 422 when no directory provider
+            is configured on this deployment (probe
+            `GET /v1/tenants/{tenant_id}/directory/users` — `501` there
+            means invite-by-email is unavailable).
+          example: alice@example.com
         role_definition:
           type: string
           description: |
@@ -6321,10 +6620,84 @@ components:
           description: |
             Optional mnemonic the granter sets so cloud-ui can show a
             readable name in the role-assignment list instead of the opaque
-            `user_sub`. Not propagated to the IdP and never matched
-            against any IdP attribute — purely admin bookkeeping.
-            Stored verbatim, max 256 chars by convention.
+            `user_sub`. Defaults to the resolved IdP display name (falling
+            back to the invite email when the directory has no display name)
+            when the grant uses `user_email` and no alias is supplied;
+            otherwise purely what the inviter typed. Never propagated to the
+            IdP, and nothing beyond that one-time invite-time default is ever
+            stored. Stored verbatim, max 256 chars by convention.
           example: alice-laptop
+
+    # ── Directory (optional SCIM2 read-only proxy) ─────────────────────────────
+
+    DirectoryUser:
+      type: object
+      required: [sub, email]
+      description: |
+        Minimal user record proxied live from the IdP's SCIM2 Users resource.
+        These three fields are the entire exposure — nothing else from the
+        SCIM response (groups, phone numbers, addresses, raw attributes) is
+        ever surfaced, and dc-api persists none of it.
+      properties:
+        sub:
+          type: string
+          description: OIDC `sub` — the value to use as `user_sub` when granting a role.
+          example: 01abc123-0000-0000-0000-user000000001
+        email:
+          type: string
+          format: email
+          example: alice@example.com
+        display_name:
+          type: string
+          description: Human-readable name from the IdP, when one is set.
+          example: Alice Perera
+
+    DirectoryGroup:
+      type: object
+      required: [id, name]
+      description: |
+        Minimal group record proxied live from the IdP's SCIM2 Groups
+        resource. These two fields are the entire exposure; membership and
+        all other SCIM attributes stay in the IdP, and dc-api persists
+        nothing.
+      properties:
+        id:
+          type: string
+          description: SCIM2 group identifier in the IdP.
+          example: 7f3a1c2e-0000-0000-0000-grp000000001
+        name:
+          type: string
+          example: platform-engineering
+
+    DirectoryUserList:
+      type: object
+      required: [users, total_results]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/DirectoryUser"
+        total_results:
+          type: integer
+          description: |
+            Total number of users matching the filter across all pages
+            (SCIM2 `totalResults`), not the size of this page.
+          example: 137
+
+    DirectoryGroupList:
+      type: object
+      required: [groups, total_results]
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/DirectoryGroup"
+        total_results:
+          type: integer
+          description: |
+            Total number of groups across all pages (SCIM2 `totalResults`),
+            not the size of this page.
+          example: 12
 
     # ── Service Accounts ───────────────────────────────────────────────────────
 

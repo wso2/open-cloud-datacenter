@@ -50,6 +50,10 @@ spec:
             - { name: DCAPI_BFF_SESSION_SECRET,           valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_BFF_SESSION_SECRET } } }
             - { name: DCAPI_OPERATOR_SSH_KEY,             valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_OPERATOR_SSH_KEY, optional: true } } }
             - { name: DCAPI_OPERATOR_PASSWORD,            valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_OPERATOR_PASSWORD, optional: true } } }
+            # Optional: read-only IdP directory credential (SCIM2). Absent
+            # keys keep the directory feature dark — see configmap.yaml.
+            - { name: DCAPI_IDP_CLIENT_ID,                valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_IDP_CLIENT_ID, optional: true } } }
+            - { name: DCAPI_IDP_CLIENT_SECRET,            valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_IDP_CLIENT_SECRET, optional: true } } }
           readinessProbe:
             httpGet: { path: /healthz, port: 8080 }
             initialDelaySeconds: 5

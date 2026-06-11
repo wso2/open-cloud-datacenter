@@ -179,10 +179,10 @@ func pollPeeringUntilDone(ctx context.Context, tenantID, projectID string, apiCl
 		}
 		p := resp.JSON200
 		switch p.Status {
-		case dcapi.ACTIVE:
+		case dcapi.ResourceStatusACTIVE:
 			fmt.Println(" done!")
 			return p, nil
-		case dcapi.FAILED:
+		case dcapi.ResourceStatusFAILED:
 			fmt.Println()
 			return nil, fmt.Errorf("Peering provisioning failed: %s", cliutil.DerefOrDash(p.Message))
 		}
