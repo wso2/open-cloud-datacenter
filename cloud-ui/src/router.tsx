@@ -26,6 +26,7 @@ import VNetDetailPage from './pages/VNetDetailPage';
 import VNetsListPage from './pages/VNetsListPage';
 import VmDetailPage from './pages/VmDetailPage';
 import VmsListPage from './pages/VmsListPage';
+import DashboardPage from './pages/DashboardPage';
 
 interface BuildRouterArgs {
   isDark: boolean;
@@ -36,10 +37,7 @@ export function buildRouter({ isDark, onToggleDark }: BuildRouterArgs) {
   // Project-scoped routes — every resource that lives under /projects/:projectId/
   const projectScopedChildren: RouteObject[] = [
     { index: true, element: <Navigate to="dashboard" replace /> },
-    {
-      path: 'dashboard',
-      element: <PlaceholderPage title="Dashboard" subtitle="Project overview" />,
-    },
+    { path: 'dashboard', element: <DashboardPage /> },
     {
       path: 'activity',
       element: <PlaceholderPage title="Activity" subtitle="Audit trail across this project" />,
