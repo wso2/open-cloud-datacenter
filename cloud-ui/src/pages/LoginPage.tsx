@@ -10,6 +10,7 @@ import {
 import { ArrowRight24Regular } from '@fluentui/react-icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
+import wso2LogoBlack from '../assets/wso2-logo-black.webp';
 
 const useStyles = makeStyles({
   root: {
@@ -32,16 +33,9 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalM,
   },
-  brandMark: {
-    width: '36px',
-    height: '36px',
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorBrandBackground,
-    color: tokens.colorNeutralForegroundOnBrand,
-    display: 'grid',
-    placeItems: 'center',
-    fontWeight: 700,
-    fontSize: tokens.fontSizeBase400,
+  brandLogo: {
+    height: '24px',
+    display: 'block',
   },
   brandText: {
     display: 'flex',
@@ -95,9 +89,9 @@ export default function LoginPage() {
     <div className={styles.root}>
       <Card className={styles.card}>
         <div className={styles.brand}>
-          <div className={styles.brandMark}>W</div>
+          <img className={styles.brandLogo} src={wso2LogoBlack} alt="WSO2" />
           <div className={styles.brandText}>
-            <Subtitle2>WSO2 Sovereign Cloud</Subtitle2>
+            <Subtitle2>Infrastructure Platform</Subtitle2>
             <Body1 className={styles.brandSub}>Datacenter control plane (lk-dev)</Body1>
           </div>
         </div>
@@ -126,7 +120,7 @@ export default function LoginPage() {
         </div>
 
         <div className={styles.footer}>
-          <span>WSO2 Sovereign Cloud · lk-dev</span>
+          <span>WSO2 Infrastructure Platform · lk-dev</span>
           <span>v0.1.0</span>
         </div>
       </Card>

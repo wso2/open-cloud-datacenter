@@ -1,6 +1,6 @@
 # cloud-ui
 
-Web UI for the WSO2 Sovereign Cloud Control Plane (`dc-api`).
+Web UI for the WSO2 Infrastructure Platform Control Plane (`dc-api`).
 
 ## Stack
 

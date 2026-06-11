@@ -813,6 +813,12 @@ type AuthMe struct {
 	// (role_assignments-backed).
 	IsAdmin *bool `json:"is_admin,omitempty"`
 
+	// Name Human display name, sourced from the ID token's `name` claim
+	// (falling back to `given_name` + `family_name`). Empty when the
+	// IdP has no name attributes for the user — clients should fall
+	// back to the email.
+	Name *string `json:"name,omitempty"`
+
 	// Sub OIDC subject identifier — the IdP's stable, opaque user ID.
 	// Matches the `sub` claim in the Asgardeo ID token.
 	Sub string `json:"sub"`

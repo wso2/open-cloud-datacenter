@@ -14,7 +14,7 @@ This is not a gap that better module design closes, and it is not a path we want
 
 - **M1 is already built and working.** VM provisioning, RKE2 cluster creation, OIDC auth via Asgardeo, and quota enforcement are end-to-end tested against our LK dev environment today. This is not a greenfield proposal — it is a request for strategic commitment to a working foundation.
 
-- **WSO2 products fit naturally here.** Asgardeo is the authentication layer for the entire platform. This is WSO2 dogfooding its own IAM product in a sovereign cloud offering — a natural alignment and a source of real-world product feedback.
+- **WSO2 products fit naturally here.** Asgardeo is the authentication layer for the entire platform. This is WSO2 dogfooding its own IAM product in a WSO2 Infrastructure Platform offering — a natural alignment and a source of real-world product feedback.
 
 - **The window for managed services is open now.** Once DC-API owns the abstraction layer, we can expose PostgreSQL, Valkey, Harbor, DNS, and TLS as managed services with no additional learning curve for tenants. Waiting means teams build their own fragile self-hosted solutions instead.
 
@@ -24,7 +24,7 @@ Internal WSO2 development teams who need compute, Kubernetes clusters, and event
 
 ## Solution
 
-A **Sovereign Cloud Control Plane**: a REST API (`DC-API`) that exposes our LK Datacenter as a self-service cloud, backed by Harvester and Rancher but hiding both entirely from tenants. The API is the single source of truth — everything else (CLI, Terraform provider, web UI) is a client on top of it.
+A **WSO2 Infrastructure Platform Control Plane**: a REST API (`DC-API`) that exposes our LK Datacenter as a self-service cloud, backed by Harvester and Rancher but hiding both entirely from tenants. The API is the single source of truth — everything else (CLI, Terraform provider, web UI) is a client on top of it.
 
 #### [1. Developer Experience — Three Access Paths]{.mark}
 

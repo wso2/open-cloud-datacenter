@@ -94,7 +94,7 @@ export default function ImagesPage() {
       </div>
 
       <div className={pageStyles.notice}>
-        Images are curated by the WSO2 Sovereign Cloud team. To request a new image, contact
+        Images are curated by the WSO2 Infrastructure Platform team. To request a new image, contact
         the cloud operations team — uploads aren&apos;t self-service.
       </div>
 

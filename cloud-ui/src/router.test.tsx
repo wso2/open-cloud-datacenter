@@ -31,7 +31,7 @@ describe('routing', () => {
         <Route path="/login" element={<LoginPage />} />
       </Routes>
     );
-    expect(screen.getByText('WSO2 Sovereign Cloud')).toBeInTheDocument();
+    expect(screen.getByText('Infrastructure Platform')).toBeInTheDocument();
     expect(screen.getByText('Sign in')).toBeInTheDocument();
   });
 });

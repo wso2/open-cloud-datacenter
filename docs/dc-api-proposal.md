@@ -1,4 +1,4 @@
-# Sovereign Cloud Control Plane
+# WSO2 Infrastructure Platform Control Plane
 ## Strategic Proposal — April 2026
 
 **Prepared by:** IaaS Team &nbsp;|&nbsp; **Audience:** Engineering Leadership, CTO
@@ -105,7 +105,7 @@ No Terraform. No Harvester knowledge. No Rancher login. No infrastructure team i
 
 ### Identity: Asgardeo as the authentication layer
 
-All DC-API authentication is handled by **Asgardeo** — WSO2's own cloud IAM product. This is intentional and worth stating explicitly: we are dogfooding a WSO2 product in a WSO2-operated sovereign cloud offering, which strengthens the internal case for Asgardeo and lets us surface real usage feedback directly to that team.
+All DC-API authentication is handled by **Asgardeo** — WSO2's own cloud IAM product. This is intentional and worth stating explicitly: we are dogfooding a WSO2 product in a WSO2-operated WSO2 Infrastructure Platform offering, which strengthens the internal case for Asgardeo and lets us surface real usage feedback directly to that team.
 
 The design is a **single Asgardeo organisation for all tenants**. This is the right model — not a compromise. AWS doesn't let each customer bring their own identity plane; authentication is standardised at the platform level. Within that single org, tenant isolation is enforced via Asgardeo groups (`dc-tenant-teamalpha`), which DC-API's middleware maps to tenant boundaries and roles entirely in code we control.
 

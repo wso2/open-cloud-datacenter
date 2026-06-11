@@ -24,6 +24,10 @@ type Session struct {
 	// happens inside the auth middleware on every API call anyway).
 	Subject string `json:"s"`
 	Email   string `json:"m,omitempty"`
+	// Name is the human display name from the ID token's `name` claim
+	// (falling back to given_name + family_name at callback time). Cached
+	// for /v1/auth/me; empty when the IdP holds no name attributes.
+	Name string `json:"n,omitempty"`
 	// IsAdmin is derived from the `groups` claim in the ID token at
 	// callback time so /v1/auth/me can answer "am I admin?" without
 	// re-parsing the JWT. The same derivation runs again inside the auth

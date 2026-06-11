@@ -31,6 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return res.json().then((raw: {
             sub: string;
             email?: string;
+            name?: string;
             expires_at: string;
             is_admin: boolean;
           }) => {
@@ -38,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setUser({
                 sub: raw.sub,
                 email: raw.email,
+                name: raw.name,
                 expiresAt: raw.expires_at,
                 isAdmin: raw.is_admin ?? false,
               });

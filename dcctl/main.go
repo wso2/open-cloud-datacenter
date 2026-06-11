@@ -1,4 +1,4 @@
-// Command dcctl is the developer-facing CLI for the WSO2 Sovereign Cloud platform.
+// Command dcctl is the developer-facing CLI for the WSO2 Infrastructure Platform platform.
 //
 // Usage:
 //   dcctl login                      -- authenticate with Asgardeo

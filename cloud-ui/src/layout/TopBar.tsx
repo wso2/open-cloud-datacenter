@@ -1,11 +1,5 @@
 import {
-  Avatar,
   Button,
-  Menu,
-  MenuItem,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
   Tooltip,
   makeStyles,
   shorthands,
@@ -17,9 +11,11 @@ import {
   WeatherMoon20Regular,
   WeatherSunny20Regular,
 } from '@fluentui/react-icons';
-import { useAuth } from '../auth/useAuth';
 import TenantSwitcher from './TenantSwitcher';
 import ProjectSwitcher from './ProjectSwitcher';
+import UserMenu from '../components/UserMenu';
+import wso2LogoBlack from '../assets/wso2-logo-black.webp';
+import wso2LogoWhite from '../assets/wso2-logo-white.webp';
 
 const useStyles = makeStyles({
   bar: {
@@ -44,16 +40,9 @@ const useStyles = makeStyles({
     ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke2),
     height: '100%',
   },
-  brandMark: {
-    width: '28px',
-    height: '28px',
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorBrandBackground,
-    color: tokens.colorNeutralForegroundOnBrand,
-    display: 'grid',
-    placeItems: 'center',
-    fontWeight: 700,
-    fontSize: tokens.fontSizeBase300,
+  brandLogo: {
+    height: '20px',
+    display: 'block',
   },
   brandText: {
     display: 'flex',
@@ -67,19 +56,6 @@ const useStyles = makeStyles({
   rightGroup: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS },
 });
 
-/** Derive a display name and two-letter initials from an email or sub. */
-function deriveDisplayName(email?: string, sub?: string): { name: string; initials: string } {
-  const source = email?.trim() || sub?.trim() || '';
-  const name = email ? email.split('@')[0] : (sub ?? 'User');
-  const parts = name.split(/[\s._-]+/).filter(Boolean);
-  const initials = (
-    (parts[0]?.[0] ?? '') + (parts.length > 1 ? (parts.at(-1)?.[0] ?? '') : (parts[0]?.[1] ?? ''))
-  )
-    .toUpperCase()
-    .slice(0, 2) || 'U';
-  return { name: source || 'User', initials };
-}
-
 interface TopBarProps {
   isDark: boolean;
   onToggleDark: (next: boolean) => void;
@@ -87,15 +63,17 @@ interface TopBarProps {
 
 export default function TopBar({ isDark, onToggleDark }: TopBarProps) {
   const styles = useStyles();
-  const { user, logout } = useAuth();
-  const { name, initials } = deriveDisplayName(user?.email, user?.sub);
 
   return (
     <header className={styles.bar}>
       <div className={styles.brand}>
-        <div className={styles.brandMark}>W</div>
+        <img
+          className={styles.brandLogo}
+          src={isDark ? wso2LogoWhite : wso2LogoBlack}
+          alt="WSO2"
+        />
         <div className={styles.brandText}>
-          <div className={styles.brandTitle}>Sovereign Cloud</div>
+          <div className={styles.brandTitle}>Infrastructure Platform</div>
           <div className={styles.brandSub}>lk-dev</div>
         </div>
       </div>
@@ -120,19 +98,7 @@ export default function TopBar({ isDark, onToggleDark }: TopBarProps) {
           <Button appearance="subtle" icon={<Alert20Regular />} />
         </Tooltip>
 
-        <Menu>
-          <MenuTrigger disableButtonEnhancement>
-            <Button appearance="subtle" aria-label={name}>
-              <Avatar size={28} name={name} initials={initials} color="brand" />
-            </Button>
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              <MenuItem disabled>{user?.email ?? user?.sub ?? 'not signed in'}</MenuItem>
-              <MenuItem onClick={() => void logout()}>Sign out</MenuItem>
-            </MenuList>
-          </MenuPopover>
-        </Menu>
+        <UserMenu />
       </div>
     </header>
   );

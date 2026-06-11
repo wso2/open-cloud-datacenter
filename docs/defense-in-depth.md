@@ -1,11 +1,11 @@
-# Defense-in-depth for Sovereign Cloud Tenancy
+# Defense-in-depth for WSO2 Infrastructure Platform Tenancy
 
 **Status**: design / proposal. None of the phases below are deployed yet
 (except where marked "today").
 **Last updated**: 2026-05-20
 
 This document captures the tenancy isolation + quota threat model for the
-Sovereign Cloud Control Plane and lays out a phased hardening plan. Every
+WSO2 Infrastructure Platform Control Plane and lays out a phased hardening plan. Every
 phase below is **additive and non-breaking** — you can ship them
 independently and stop whenever the residual risk is acceptable. The
 ordering is by leverage (cheap + high value first), not by dependency.

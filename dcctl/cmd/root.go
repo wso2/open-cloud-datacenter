@@ -57,7 +57,7 @@ import (
 // it prints the help message.
 var rootCmd = &cobra.Command{
 	Use:   "dcctl",
-	Short: "WSO2 Sovereign Cloud CLI",
+	Short: "WSO2 Infrastructure Platform CLI",
 	Long: `dcctl — command-line interface for the WSO2 Datacenter Cloud Control Plane.
 
 Run 'dcctl login' to authenticate, then choose a tenant and project:

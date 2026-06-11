@@ -37,7 +37,7 @@ func newLoginCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Authenticate with Asgardeo (OIDC)",
-		Long: `Log in to the WSO2 Sovereign Cloud using your Asgardeo account.
+		Long: `Log in to the WSO2 Infrastructure Platform using your Asgardeo account.
 
 This command opens your default web browser to the Asgardeo login page.
 After you authenticate, dcctl receives a token and stores it in:

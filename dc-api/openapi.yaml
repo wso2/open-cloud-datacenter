@@ -4,7 +4,7 @@ info:
   title: DC-API
   version: 0.1.0
   description: |
-    WSO2 Sovereign Cloud Control Plane API.
+    WSO2 Infrastructure Platform Control Plane API.
 
     DC-API sits in front of a Rancher + Harvester infrastructure layer and
     exposes a clean, tenant-isolated REST API for managing VMs, RKE2 clusters,
@@ -7048,6 +7048,14 @@ components:
             May be an empty string if Asgardeo did not include the claim
             (depends on the application's requested scopes).
           example: "alice@example.com"
+        name:
+          type: string
+          description: |
+            Human display name, sourced from the ID token's `name` claim
+            (falling back to `given_name` + `family_name`). Empty when the
+            IdP has no name attributes for the user — clients should fall
+            back to the email.
+          example: "Alice Perera"
         expires_at:
           type: string
           format: date-time

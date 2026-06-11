@@ -12,6 +12,9 @@ import { createContext } from 'react';
 export interface AuthUser {
   sub: string;
   email?: string;
+  /** Human display name from the IdP's `name` claim; absent when the IdP
+   *  holds no name attributes — fall back to the email. */
+  name?: string;
   /** ISO-8601 timestamp when the session cookie expires. */
   expiresAt: string;
   /**

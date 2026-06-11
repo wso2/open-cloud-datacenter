@@ -67,7 +67,7 @@ Asgardeo organization: "<org>"
    This template defaults to public client, PKCE-required, no client secret —
    exactly what we want.
 3. Fill in:
-   - **Name**: `cloud-ui` (or `WSO2 Sovereign Cloud Web` if you prefer
+   - **Name**: `cloud-ui` (or `WSO2 Infrastructure Platform Web` if you prefer
      human-readable; the technical name in `cloud-ui/.env` will reference
      the resulting `client_id`, not this name).
    - **Authorized redirect URLs** — add both:

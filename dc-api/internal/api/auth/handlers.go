@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -122,11 +123,18 @@ func (s *Service) HandleCallback(log zerolog.Logger) http.HandlerFunc {
 		// membership comes from the role_assignments table (GET /v1/tenants),
 		// never from IdP groups.
 		var claims struct {
-			Sub    string   `json:"sub"`
-			Email  string   `json:"email"`
-			Groups []string `json:"groups"`
+			Sub        string   `json:"sub"`
+			Email      string   `json:"email"`
+			Name       string   `json:"name"`
+			GivenName  string   `json:"given_name"`
+			FamilyName string   `json:"family_name"`
+			Groups     []string `json:"groups"`
 		}
 		_ = idToken.Claims(&claims)
+		displayName := claims.Name
+		if displayName == "" {
+			displayName = strings.TrimSpace(claims.GivenName + " " + claims.FamilyName)
+		}
 
 		// Env-var sub list and AdminGroup both promote.
 		var sessionIsAdmin bool
@@ -157,6 +165,7 @@ func (s *Service) HandleCallback(log zerolog.Logger) http.HandlerFunc {
 			ExpiresAt:    token.Expiry,
 			Subject:      claims.Sub,
 			Email:        claims.Email,
+			Name:         displayName,
 			IsAdmin:      sessionIsAdmin,
 		}
 		sessionValue, err := s.codec.EncodeSession(sess)
@@ -255,6 +264,7 @@ func (s *Service) HandleMe(log zerolog.Logger) http.HandlerFunc {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"sub":        sess.Subject,
 			"email":      sess.Email,
+			"name":       sess.Name,
 			"expires_at": sess.ExpiresAt,
 			"is_admin":   sess.IsAdmin,
 		})

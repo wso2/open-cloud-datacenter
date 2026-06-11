@@ -3,14 +3,14 @@
 **Version:** 0.1 (draft — pre-implementation)
 **Status:** Binding design; implementations MUST conform before dc-api wires them in.
 **Audience:** Teams building Kubernetes operators for managed services that plug into
-the WSO2 Sovereign Cloud Control Plane (dc-api). Database, cache, registry, keyvault,
+the WSO2 Infrastructure Platform Control Plane (dc-api). Database, cache, registry, keyvault,
 and any future service type.
 
 ---
 
 ## 1. Why a contract exists
 
-The sovereign cloud platform hosts multiple managed-service operators built by
+The WSO2 Infrastructure Platform platform hosts multiple managed-service operators built by
 independent teams on different schedules. Without a shared contract, each operator
 invents its own CRD shape, status conventions, networking assumptions, and secret
 format — dc-api would need bespoke integration code for every service, and changes
