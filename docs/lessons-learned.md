@@ -220,3 +220,95 @@ Fix:
 Push-triggered queued runs never recover on their own — cancel + redispatch is the
 only path. `workflow_dispatch` checks out HEAD of `--ref`, so the latest commit's
 behaviour still lands.
+
+## CoreDNS `reload` plugin does not detect Kubernetes ConfigMap volume changes
+
+**Hit during DNS private endpoint work (2026-06-11).**
+
+When a Kubernetes ConfigMap is updated, the kubelet propagates the change to
+mounted volumes using an **atomic symlink swap** — it writes a new directory and
+swaps the symlink that the volume mount points at. The file content changes but the
+**mtime of the symlink target does not change**. CoreDNS's `reload` plugin detects
+changes by polling the Corefile's mtime; because mtime is unchanged it never
+reloads, and the pod continues serving the stale Corefile indefinitely.
+
+Symptom: `kubectl get configmap vpc-dns-corefile-<vpcUID>` shows the new hosts
+entry, but `nslookup` returns NXDOMAIN. CoreDNS pod log shows no reload message.
+
+Fix: `kubectl rollout restart deployment/<vpc-dns-deployment> -n kube-system` after
+each ConfigMap write. The pod recreates and reads the current ConfigMap on startup.
+
+Planned fix: switch the ConfigMap write path to also restart the per-VPC CoreDNS
+Deployment as part of `SyncCorefile`. See
+`dc-api/internal/providers/endpoints/kubeovn_provisioner.go`.
+
+## CoreDNS 1.11.3 rejects inline health-block syntax
+
+**Hit during DNS private endpoint work (2026-06-11).**
+
+CoreDNS 1.11.3 parses the Corefile with a strict block parser. The inline form:
+
+```
+health { lameduck 5s }
+```
+
+fails at startup with:
+```
+plugin/health: /etc/coredns/Corefile:3 - Error during parsing: Wrong argument count or unexpected line ending after '}'
+```
+
+The multiline form is required:
+
+```
+health {
+    lameduck 5s
+}
+```
+
+This affects any Go code that uses `fmt.Sprintf` to build a Corefile string. The
+`renderCorefile` function in `dc-api/internal/providers/endpoints/kubeovn_provisioner.go`
+was the affected site; fixed to use multiline format matching
+`ensureVpcCorefileConfigMap` in `dc-api/internal/providers/kubeovn/dns.go`.
+
+## Live-status overlay handlers must persist CR state back to Postgres
+
+**Hit during DNS private endpoint work (2026-06-11).**
+
+Pattern: a GET handler reads a Postgres row, overlays live state from a Kubernetes
+CR (status, IP, port), and returns the merged response. The Postgres row stays
+stale. Any background worker that reads from Postgres (reconciler, audit job,
+anything not in the hot GET path) never sees the live state.
+
+In the database handler, `overlayLiveStatus` read the live `DatabaseInstance` CR
+phase and endpoint address into the HTTP response struct but never wrote them back
+to the `databases` row. The DNS reconciler queries:
+
+```sql
+SELECT ... FROM databases WHERE status = 'ACTIVE' AND endpoint_address IS NOT NULL
+```
+
+Because the row was never updated, the condition was never true and DNS registration
+never fired — even though the database was running and the cloud-ui showed it
+correctly.
+
+Rule: **any handler that overlays live Kubernetes CR state must also call a repo
+`UpdateXxxStatus` whenever the live state differs from the row.** The overlay should
+be a side-effect-carrying write-through, not a pure read-through.
+
+See `dc-api/internal/api/handlers/database.go::overlayLiveStatus` and
+`dc-api/internal/db/database.go::UpdateDatabaseStatus` for the implemented pattern.
+
+## SyncCorefile rewrites the entire hosts block — pass all records every call
+
+**Architecture invariant for per-VPC CoreDNS (2026-06-11).**
+
+`SyncCorefile` (and the underlying `regenerateVpcCorefile`) rewrites the **entire**
+`hosts` plugin block from scratch on every call. It does not append or merge
+incrementally. This is intentional — it keeps the ConfigMap as the single source of
+truth and avoids orphaned entries from crashed delete paths.
+
+Consequence: the caller must pass ALL records that should be present, not just the
+new one. `SyncCorefile` queries all existing `private_endpoints` rows for the VPC
+and merges the incoming record before calling `renderCorefile`. If you bypass this
+and call `renderCorefile` with only the new record, all existing DNS entries for
+that VPC are silently wiped.
