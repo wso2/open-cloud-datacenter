@@ -1,11 +1,26 @@
 // Package db — activity.go
 //
-// Read side of the audit log: the per-project activity feed. The write side
-// (AppendAuditEvent) lives in db.go and snapshots the owning resource's
-// name/type and tenant/project UUIDs onto every event row, so this query
-// never joins resources and events survive resource deletion. project_uuid
-// on the event is the immutable isolation filter
-// (see docs/dc-api-architecture.md).
+// The activity/audit framework: every resource family's lifecycle lands in
+// the append-only audit_events table through ONE writer, AppendAuditEvent.
+//
+// ── THE CONTRACT FOR NEW RESOURCE FAMILIES ───────────────────────────────────
+//
+// A family is auditable when it has an arm in auditSnapshotArms below. The
+// arm resolves the family's UUID into an identity snapshot (name, kind,
+// tenant_uuid, project_uuid) that is written ONTO the event row, so events
+// render forever — deleting the resource never erases its history. To audit
+// a new resource family:
+//
+//  1. Add one SELECT arm to auditSnapshotArms (join a parent table if the
+//     family doesn't carry tenant_uuid/project_uuid itself — see peerings).
+//  2. Add the kind value to the ActivityEvent.resource_type enum in
+//     openapi.yaml, and (if it has a detail page) to cloud-ui's
+//     ACTIVITY_RESOURCE_ROUTES map.
+//  3. Call AppendAuditEvent from the family's handlers on CREATE / DELETE /
+//     async STATUS_CHANGE, exactly like vnet.go does.
+//
+// Handlers that already call AppendAuditEvent need no changes when a family
+// is registered — the writer resolves the UUID against every arm.
 package db
 
 import (
@@ -88,3 +103,61 @@ func (r *Repository) ListProjectActivity(ctx context.Context, projectUUID uuid.U
 	}
 	return entries, total, nil
 }
+
+// auditSnapshotArms — the audit framework's registry. Each arm yields
+// (name, kind, tenant_uuid, project_uuid) for $1 = the resource UUID; the
+// writer unions them and takes the single match. Kinds are the
+// ActivityEvent.resource_type values published in openapi.yaml.
+var auditSnapshotArms = []string{
+	`SELECT name, type::text AS kind, tenant_uuid, project_uuid FROM resources WHERE id = $1`,
+	`SELECT name, 'VNET', tenant_uuid, project_uuid FROM vnets WHERE id = $1`,
+	`SELECT name, 'SUBNET', tenant_uuid, project_uuid FROM subnets WHERE id = $1`,
+	`SELECT name, 'NSG', tenant_uuid, project_uuid FROM network_security_groups WHERE id = $1`,
+	// Peerings and DNS zones carry no tenant/project UUIDs of their own —
+	// identity flows from the parent VNet.
+	`SELECT p.name, 'PEERING', v.tenant_uuid, v.project_uuid FROM peerings p JOIN vnets v ON v.id = p.vnet_id WHERE p.id = $1`,
+	`SELECT z.zone_name, 'PRIVATE_DNS_ZONE', v.tenant_uuid, v.project_uuid FROM private_dns_zones z JOIN vnets v ON v.id = z.vnet_id WHERE z.id = $1`,
+	`SELECT name, 'KEYVAULT', tenant_uuid, project_uuid FROM key_vaults WHERE id = $1`,
+	`SELECT name, 'DATABASE', tenant_uuid, project_uuid FROM databases WHERE id = $1`,
+	`SELECT name, 'PRIVATE_ENDPOINT', tenant_uuid, project_uuid FROM private_endpoints WHERE id = $1`,
+}
+
+// AppendAuditEvent records a lifecycle event for ANY registered resource
+// family. Append-only — never updated. The owning resource's identity is
+// snapshotted onto the event row atomically (INSERT … SELECT across the
+// registry arms), so the activity feed keeps rendering the event after the
+// resource is deleted. An unregistered or already-deleted UUID makes the
+// insert a silent no-op.
+func (r *Repository) AppendAuditEvent(ctx context.Context, ev *models.AuditEvent) error {
+	q := `
+		INSERT INTO audit_events
+			(resource_id, actor_id, action, from_status, to_status, message,
+			 resource_name, resource_type, tenant_uuid, project_uuid)
+		SELECT $1, $2, $3, $4::resource_status, $5::resource_status, $6, s.name, s.kind, s.tenant_uuid, s.project_uuid
+		FROM (
+			` + auditSnapshotUnion + `
+			LIMIT 1
+		) s`
+
+	_, err := r.pool.Exec(ctx, q,
+		ev.ResourceID, ev.ActorID, ev.Action,
+		nilIfStatusEmpty(ev.FromStatus), nilIfStatusEmpty(ev.ToStatus),
+		nilIfEmpty(ev.Message),
+	)
+	if err != nil {
+		return fmt.Errorf("db append audit event: %w", err)
+	}
+	return nil
+}
+// auditSnapshotUnion is the registry arms joined for the writer's subquery.
+var auditSnapshotUnion = func() string {
+	out := ""
+	for i, arm := range auditSnapshotArms {
+		if i > 0 {
+			out += "\n\t\t\tUNION ALL "
+		}
+		out += arm + " "
+	}
+	return out
+}()
+

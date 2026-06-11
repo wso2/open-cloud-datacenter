@@ -6789,9 +6789,10 @@ components:
           type: string
           format: uuid
           description: |
-            UUID of the resource the event was recorded against. Absent once
-            the resource has been deleted — clients should only build deep
-            links when this field is present.
+            UUID of the resource the event was recorded against. The pointer
+            is point-in-time: it may reference a resource that has since been
+            deleted, in which case deep links resolve to a not-found page.
+            Absent only on legacy events recorded before identity snapshots.
           example: 3a1c2e5d-1234-5678-abcd-000000000001
         resource_name:
           type: string
@@ -6799,8 +6800,12 @@ components:
           example: vm-web-1
         resource_type:
           type: string
-          description: Resource kind, as stored on the resource row.
-          enum: [VIRTUAL_MACHINE, CLUSTER, VOLUME, BASTION]
+          description: |
+            Resource kind, snapshotted when the event was recorded. One value
+            per auditable resource family — kept in lockstep with the audit
+            framework's registry (`internal/db/activity.go`).
+          enum: [VIRTUAL_MACHINE, CLUSTER, VOLUME, BASTION, VNET, SUBNET, NSG,
+                 PEERING, PRIVATE_DNS_ZONE, KEYVAULT, DATABASE, PRIVATE_ENDPOINT]
           example: VIRTUAL_MACHINE
         action:
           type: string

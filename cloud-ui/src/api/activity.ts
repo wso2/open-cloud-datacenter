@@ -43,6 +43,13 @@ export const ACTIVITY_RESOURCE_ROUTES: Record<string, string> = {
   VIRTUAL_MACHINE: 'vms',
   CLUSTER: 'clusters',
   BASTION: 'bastions',
+  VNET: 'vnets',
+  NSG: 'nsgs',
+  KEYVAULT: 'keyvaults',
+  DATABASE: 'databases',
+  // SUBNET / PEERING / PRIVATE_DNS_ZONE / PRIVATE_ENDPOINT have no
+  // standalone detail routes (they live inside the VNet detail page) —
+  // they render as plain text.
 };
 
 export function useActivityQuery(

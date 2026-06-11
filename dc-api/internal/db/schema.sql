@@ -122,7 +122,7 @@ CREATE TRIGGER resources_updated_at
 
 CREATE TABLE IF NOT EXISTS audit_events (
     id          UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-    resource_id UUID          NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+    resource_id UUID, -- point-in-time pointer; snapshots below are the rendering truth
     actor_id    TEXT          NOT NULL,
     action      TEXT          NOT NULL,
     from_status resource_status,
@@ -926,20 +926,22 @@ CREATE TRIGGER databases_updated_at
 -- audit_events originally carried only resource_id behind an ON DELETE CASCADE
 -- FK, so deleting a resource erased its entire history — including the DELETE
 -- event itself. Snapshot the resource identity onto each event at write time
--- and soften the FK to SET NULL: the feed reads the snapshot, so history
--- outlives the resource. resource_id stays as a live-resource pointer (NULL
--- once the resource is gone).
+-- and drop the FK: the feed reads the snapshot, so history outlives the
+-- resource.
 ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS resource_name TEXT;
 ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS resource_type TEXT;
 ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS tenant_uuid  UUID;
 ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS project_uuid UUID;
 ALTER TABLE audit_events ALTER COLUMN resource_id DROP NOT NULL;
 
--- Idempotent FK swap without a DO block: drop both possible names, re-add.
 ALTER TABLE audit_events DROP CONSTRAINT IF EXISTS audit_events_resource_id_fkey;
 ALTER TABLE audit_events DROP CONSTRAINT IF EXISTS audit_events_resource_id_setnull_fkey;
-ALTER TABLE audit_events ADD CONSTRAINT audit_events_resource_id_setnull_fkey
-    FOREIGN KEY (resource_id) REFERENCES resources(id) ON DELETE SET NULL;
+-- The FK to resources is dropped entirely (both historical names): the
+-- activity framework audits EVERY resource family (vnets, subnets, NSGs,
+-- peerings, DNS zones, key vaults, databases, private endpoints), whose
+-- UUIDs live in their own tables. resource_id is a point-in-time pointer —
+-- it may reference a row that has since been deleted; the snapshot columns
+-- are the rendering truth.
 
 -- Backfill snapshots for pre-migration events whose resource still exists
 -- (events whose resource was already deleted have cascaded away — nothing

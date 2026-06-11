@@ -250,6 +250,11 @@ func (h *PrivateEndpointHandler) Create(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	actorID, _ := middleware.UserFromContext(r.Context())
+	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
+		ResourceID: ep.ID, ActorID: actorID, Action: "CREATE", ToStatus: models.StatusPending,
+	})
+
 	// Gather sibling host records (other endpoints in the same VPC, ACTIVE).
 	siblings, err := h.repo.ListPrivateEndpointsByVNet(r.Context(), vnetUUID)
 	if err != nil {
@@ -290,6 +295,10 @@ func (h *PrivateEndpointHandler) Create(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		h.log.Error().Err(err).Str("endpoint", ep.ID.String()).Msg("private-endpoint: provision failed")
 		_ = h.repo.UpdatePrivateEndpointStatus(r.Context(), ep.ID, models.StatusFailed, err.Error(), "", "", "")
+		_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
+			ResourceID: ep.ID, ActorID: actorID, Action: "STATUS_CHANGE",
+			FromStatus: models.StatusPending, ToStatus: models.StatusFailed, Message: err.Error(),
+		})
 		writeError(w, http.StatusInternalServerError, "provisioning failed: "+err.Error())
 		return
 	}
@@ -300,6 +309,10 @@ func (h *PrivateEndpointHandler) Create(w http.ResponseWriter, r *http.Request) 
 		// Provisioner succeeded but DB update failed — caller will see a stale
 		// PENDING. Don't roll back the proxy; let the reconciler heal it.
 	}
+	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
+		ResourceID: ep.ID, ActorID: actorID, Action: "STATUS_CHANGE",
+		FromStatus: models.StatusPending, ToStatus: models.StatusActive,
+	})
 
 	final, err := h.repo.GetPrivateEndpoint(r.Context(), ep.ID)
 	if err != nil {
@@ -468,6 +481,12 @@ func (h *PrivateEndpointHandler) Delete(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Audit before the hard delete — the snapshot resolves only while the
+	// row exists.
+	delActor, _ := middleware.UserFromContext(r.Context())
+	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
+		ResourceID: ep.ID, ActorID: delActor, Action: "DELETE", FromStatus: ep.Status,
+	})
 	if err := h.repo.DeletePrivateEndpoint(r.Context(), ep.ID); err != nil {
 		h.log.Error().Err(err).Msg("private-endpoint: delete row")
 		writeError(w, http.StatusInternalServerError, "failed to delete endpoint row")

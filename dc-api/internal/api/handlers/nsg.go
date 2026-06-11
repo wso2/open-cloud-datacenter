@@ -220,6 +220,11 @@ func (h *NSGHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	actorID, _ := middleware.UserFromContext(r.Context())
+	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
+		ResourceID: nsg.ID, ActorID: actorID, Action: "CREATE", ToStatus: nsg.Status,
+	})
+
 	// Two-step: CreateNSG driver call.
 	spec := models.NSGSpec{
 		Name:        req.Name,
@@ -419,6 +424,12 @@ func (h *NSGHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Audit before the hard delete — the snapshot resolves only while the
+	// row exists.
+	actorID, _ := middleware.UserFromContext(r.Context())
+	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
+		ResourceID: id, ActorID: actorID, Action: "DELETE", FromStatus: nsg.Status,
+	})
 	if err := h.repo.DeleteNSG(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete NSG")
 		return

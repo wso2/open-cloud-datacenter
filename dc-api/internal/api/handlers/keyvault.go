@@ -182,6 +182,11 @@ func (h *KeyVaultHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actorID, _ := middleware.UserFromContext(r.Context())
+	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
+		ResourceID: kv.ID, ActorID: actorID, Action: "CREATE", ToStatus: kv.Status,
+	})
+
 	// KVI mode: drive the operator's CRDs. Failures here don't roll back
 	// the DB row — they leave the row in PENDING with a diagnostic message
 	// the caller can surface via GET.
@@ -427,6 +432,12 @@ func (h *KeyVaultHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Audit before the hard delete — the snapshot resolves only while the
+	// row exists.
+	actorID, _ := middleware.UserFromContext(r.Context())
+	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
+		ResourceID: kv.ID, ActorID: actorID, Action: "DELETE", FromStatus: kv.Status,
+	})
 	if err := h.repo.DeleteKeyVault(r.Context(), id); err != nil {
 		if errors.Is(err, db.ErrKeyVaultNotFound) {
 			writeError(w, http.StatusNotFound, "key vault not found")

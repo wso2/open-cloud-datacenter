@@ -193,10 +193,52 @@ func TestActivity_FeedPaginationAndIsolation(t *testing.T) {
 		}
 	}
 	require.NotNil(t, survived, "CREATE event must survive resource deletion")
-	assert.Empty(t, survived.ResourceID,
-		"resource_id must be omitted once the resource is gone (no dangling deep links)")
+	assert.Equal(t, vmID, survived.ResourceID,
+		"resource_id is a point-in-time pointer — it remains after deletion")
 	assert.Equal(t, string(models.ResourceTypeVM), survived.ResourceType,
 		"resource_type snapshot must survive deletion")
+}
+
+// TestActivity_FamilyCoverage_VNet proves the audit framework covers resource
+// families outside the legacy resources table: a VNet's CREATE and DELETE
+// land in the feed with the registry-resolved VNET kind, and survive the row
+// being removed.
+func TestActivity_FamilyCoverage_VNet(t *testing.T) {
+	ctx := context.Background()
+	client := clientForTenant(t, "tenant-act-vnet")
+	mustGrantOwnerForClient(t, "tenant-act-vnet")
+
+	vnetName := randomName("act-vnet-fam")
+	created, body, status, err := client.CreateVNet(ctx, CreateVNetRequest{
+		Name: vnetName, AddressSpace: []string{"10.242.0.0/16"}, Region: "lk",
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusAccepted, status, "CreateVNet: %s", ErrorBody(body))
+	vnetID := created.Resource.ID
+
+	// CREATE lands with the registry-resolved kind.
+	var ev *ActivityEventDTO
+	require.Eventually(t, func() bool {
+		p, _, s, e := client.ListActivity(ctx, "?limit=100")
+		if e != nil || s != http.StatusOK {
+			return false
+		}
+		ev = findActivityEvent(p.Items, vnetID, "CREATE")
+		return ev != nil
+	}, 10*time.Second, 250*time.Millisecond, "VNet CREATE event never appeared")
+	assert.Equal(t, vnetName, ev.ResourceName)
+	assert.Equal(t, "VNET", ev.ResourceType, "kind must come from the audit registry")
+
+	// DELETE is recorded before the row goes away and persists afterwards.
+	body, status, err = client.DeleteVNet(ctx, vnetID)
+	require.NoError(t, err)
+	require.Contains(t, []int{http.StatusAccepted, http.StatusNoContent}, status,
+		"DeleteVNet: %s", ErrorBody(body))
+
+	require.Eventually(t, func() bool {
+		p, _, s, e := client.ListActivity(ctx, "?limit=100")
+		return e == nil && s == http.StatusOK && findActivityEvent(p.Items, vnetID, "DELETE") != nil
+	}, 10*time.Second, 250*time.Millisecond, "VNet DELETE event never appeared")
 }
 
 // TestActivity_ViewerCanRead proves the gate is at viewer level: a principal
