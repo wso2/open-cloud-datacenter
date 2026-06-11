@@ -153,6 +153,9 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
     whiteSpace: 'nowrap',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
   },
   empty: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
   cardError: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
@@ -267,8 +270,8 @@ export default function DashboardPage() {
     <div className={styles.root}>
       <div className={styles.headerRow}>
         <div>
-          <Title2>Dashboard</Title2>
-          <Body1>
+          <Title2 block>Dashboard</Title2>
+          <Body1 block>
             Overview of project <b>{projectId}</b>
           </Body1>
         </div>
