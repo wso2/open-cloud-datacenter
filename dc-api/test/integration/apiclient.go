@@ -722,7 +722,7 @@ func (c *APIClient) InviteMember(ctx context.Context, tenantID, userSub, roleDef
 	return c.InviteMemberWithAlias(ctx, tenantID, userSub, roleDefinition, "")
 }
 
-// InviteMemberWithAlias is InviteMember with the Option D display_alias
+// InviteMemberWithAlias is InviteMember with the display_alias
 // field set. Empty alias produces the same body InviteMember sends.
 func (c *APIClient) InviteMemberWithAlias(ctx context.Context, tenantID, userSub, roleDefinition, displayAlias string) (MemberResponse, []byte, int, error) {
 	path := fmt.Sprintf("/v1/tenants/%s/role-assignments", tenantID)

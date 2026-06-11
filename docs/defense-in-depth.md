@@ -33,7 +33,7 @@ ordering is by leverage (cheap + high value first), not by dependency.
 
 What's already protecting tenants:
 
-- **dc-api enforces RBAC** via `role_assignments` (Option D, just shipped):
+- **dc-api enforces RBAC** via `role_assignments`:
   `requireTenantRole(owner|member|viewer)` on every write path.
 - **TenantContext middleware** sets `tenant_id` from the URL path and
   refuses any request whose JWT/SA doesn't have a role row for that

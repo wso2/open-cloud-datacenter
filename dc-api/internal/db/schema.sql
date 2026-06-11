@@ -561,7 +561,7 @@ ALTER TABLE peerings                ADD COLUMN IF NOT EXISTS message TEXT;
 ALTER TABLE private_dns_zones       ADD COLUMN IF NOT EXISTS message TEXT;
 ALTER TABLE network_security_groups ADD COLUMN IF NOT EXISTS message TEXT;
 
--- Option D — admin-set mnemonic for principals (no IdP-sourced PII stored).
+-- Admin-set mnemonic for principals (no IdP-sourced PII stored).
 -- Optional. When set, cloud-ui shows this string instead of the opaque sub
 -- in the members list. Operator's own bookkeeping; nothing in dc-api
 -- derives behaviour from it.

@@ -2,9 +2,10 @@
 
 package integration
 
-// option_d_test.go — Option D verification.
+// identity_decoupling_test.go — IdP-decoupled identity verification.
 //
-// Three behaviours that distinguish Option D from earlier models:
+// Three behaviours that pin dc-api's identity model (the IdP is
+// authentication-only; tenancy and admin status live in dc-api):
 //
 //  1. PlatformAdminSubs env-var-driven admin promotion: a user with no
 //     dc-admin group claim but whose `sub` is listed in the AuthConfig's
@@ -30,10 +31,10 @@ import (
 	"github.com/wso2/dc-api/internal/models"
 )
 
-// optionDSubEnv builds a sub-env with autoprovision off (Option D default)
-// and the supplied platform-admin sub list. AdminGroup is left at its
-// default so the legacy fallback path stays functional.
-func optionDSubEnv(t *testing.T, platformAdminSubs ...string) *TestEnv {
+// identitySubEnv builds a sub-env with the supplied platform-admin sub
+// list. AdminGroup is left at its default so the group path stays
+// functional.
+func identitySubEnv(t *testing.T, platformAdminSubs ...string) *TestEnv {
 	t.Helper()
 	subs := make(map[string]struct{}, len(platformAdminSubs))
 	for _, s := range platformAdminSubs {
@@ -45,18 +46,18 @@ func optionDSubEnv(t *testing.T, platformAdminSubs ...string) *TestEnv {
 	})
 }
 
-// TestOptionD_PlatformAdminSubsPromotesWithoutGroup verifies that a user
+// TestIdentity_PlatformAdminSubsPromotesWithoutGroup verifies that a user
 // with NO dc-admin group claim — but whose sub is in PlatformAdminSubs —
 // is treated as platform admin (sees the full tenants registry).
-func TestOptionD_PlatformAdminSubsPromotesWithoutGroup(t *testing.T) {
+func TestIdentity_PlatformAdminSubsPromotesWithoutGroup(t *testing.T) {
 	t.Parallel()
 
-	suffix := randomName("optd-envadmin")
+	suffix := randomName("ident-envadmin")
 	envAdminSub := "sub-env-admin-" + suffix
-	subEnv := optionDSubEnv(t, envAdminSub)
+	subEnv := identitySubEnv(t, envAdminSub)
 
-	tenantA := randomTenantID("optd-env-a")
-	tenantB := randomTenantID("optd-env-b")
+	tenantA := randomTenantID("ident-env-a")
+	tenantB := randomTenantID("ident-env-b")
 	insertRole(t, subEnv, "seed-a-"+suffix, tenantA, models.RoleOwner)
 	insertRole(t, subEnv, "seed-b-"+suffix, tenantB, models.RoleMember)
 
@@ -84,15 +85,15 @@ func TestOptionD_PlatformAdminSubsPromotesWithoutGroup(t *testing.T) {
 	require.True(t, got[tenantB], "PlatformAdminSubs admin should see tenant B; got=%v", got)
 }
 
-// TestOptionD_DisplayAliasRoundTrip verifies display_alias survives
+// TestIdentity_DisplayAliasRoundTrip verifies display_alias survives
 // POST → GET unchanged.
-func TestOptionD_DisplayAliasRoundTrip(t *testing.T) {
+func TestIdentity_DisplayAliasRoundTrip(t *testing.T) {
 	t.Parallel()
-	subEnv := optionDSubEnv(t)
+	subEnv := identitySubEnv(t)
 
-	tenantID := randomTenantID("optd-alias")
-	ownerSub := "sub-optd-alias-owner-" + randomName("u")
-	inviteeSub := "sub-optd-alias-invitee-" + randomName("u")
+	tenantID := randomTenantID("ident-alias")
+	ownerSub := "sub-ident-alias-owner-" + randomName("u")
+	inviteeSub := "sub-ident-alias-invitee-" + randomName("u")
 	alias := "alice-laptop"
 
 	insertRole(t, subEnv, ownerSub, tenantID, models.RoleOwner)
@@ -121,20 +122,20 @@ func TestOptionD_DisplayAliasRoundTrip(t *testing.T) {
 	require.Equal(t, alias, found.DisplayAlias, "GET response must round-trip display_alias")
 }
 
-// TestOptionD_InviteUpsertsTenantsRegistry verifies that inviting a
+// TestIdentity_InviteUpsertsTenantsRegistry verifies that inviting a
 // member to a previously-unregistered tenant makes the tenant visible to
 // platform admins via GET /v1/tenants, without a separate
 // POST /v1/admin/tenants call.
-func TestOptionD_InviteUpsertsTenantsRegistry(t *testing.T) {
+func TestIdentity_InviteUpsertsTenantsRegistry(t *testing.T) {
 	t.Parallel()
 
-	suffix := randomName("optd-invite-reg")
-	adminSub := "sub-optd-inv-admin-" + suffix
-	subEnv := optionDSubEnv(t, adminSub)
+	suffix := randomName("ident-invite-reg")
+	adminSub := "sub-ident-inv-admin-" + suffix
+	subEnv := identitySubEnv(t, adminSub)
 
-	tenantID := randomTenantID("optd-inv-reg")
-	ownerSub := "sub-optd-inv-owner-" + suffix
-	inviteeSub := "sub-optd-inv-invitee-" + suffix
+	tenantID := randomTenantID("ident-inv-reg")
+	ownerSub := "sub-ident-inv-owner-" + suffix
+	inviteeSub := "sub-ident-inv-invitee-" + suffix
 
 	insertRole(t, subEnv, ownerSub, tenantID, models.RoleOwner)
 

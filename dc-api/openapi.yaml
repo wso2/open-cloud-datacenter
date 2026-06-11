@@ -725,7 +725,7 @@ paths:
         already holds that role at the virtual machine.
 
         The URL `{tenant_id}` must match the caller's own tenant context
-        (Option D: derived from a `role_assignments` row, not from any
+        (derived from a `role_assignments` row, not from any
         IdP group). Platform admins may operate on any tenant.
 
         **Required role**: `owner` at this scope or inherited from the
@@ -1202,7 +1202,7 @@ paths:
         already holds that role at the cluster.
 
         The URL `{tenant_id}` must match the caller's own tenant context
-        (Option D: derived from a `role_assignments` row, not from any
+        (derived from a `role_assignments` row, not from any
         IdP group). Platform admins may operate on any tenant.
 
         **Required role**: `owner` at this scope or inherited from the
@@ -1688,7 +1688,7 @@ paths:
         registration.
 
         The URL `{tenant_id}` must match the caller's own tenant context
-        (Option D: derived from a `role_assignments` row, not from any
+        (derived from a `role_assignments` row, not from any
         IdP group). Platform admins may operate on any tenant.
 
         **Required role**: `owner` (or platform admin).
@@ -2028,7 +2028,7 @@ paths:
         if the user already holds that role at the project.
 
         The URL `{tenant_id}` must match the caller's own tenant context
-        (Option D: derived from a `role_assignments` row, not from any
+        (derived from a `role_assignments` row, not from any
         IdP group). Platform admins may operate on any tenant.
 
         **Required role**: `owner` at this scope or inherited from the
@@ -2423,8 +2423,8 @@ paths:
         Use this endpoint when an admin wants the tenant discoverable
         before inviting anyone.
 
-        Does **not** create any Asgardeo group — Option D treats the
-        IdP as authentication-only. Membership lives in dc-api
+        Does **not** create any IdP group — the IdP is
+        authentication-only. Membership lives in dc-api
         (`role_assignments`).
 
         **Required auth**: platform admin (sub in
@@ -4015,7 +4015,7 @@ paths:
         already holds that role at the key vault.
 
         The URL `{tenant_id}` must match the caller's own tenant context
-        (Option D: derived from a `role_assignments` row, not from any
+        (derived from a `role_assignments` row, not from any
         IdP group). Platform admins may operate on any tenant.
 
         **Required role**: `owner` at this scope or inherited from the
@@ -5264,7 +5264,7 @@ paths:
         already holds that role at the database.
 
         The URL `{tenant_id}` must match the caller's own tenant context
-        (Option D: derived from a `role_assignments` row, not from any
+        (derived from a `role_assignments` row, not from any
         IdP group). Platform admins may operate on any tenant.
 
         **Required role**: `owner` at this scope or inherited from the

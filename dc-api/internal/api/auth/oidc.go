@@ -56,8 +56,8 @@ type Config struct {
 	AdminGroup string
 
 	// PlatformAdminSubs is the same env-driven set the auth middleware
-	// uses (Option D). When the caller's IdP sub is in this set, IsAdmin
-	// is true regardless of group membership.
+	// uses. When the caller's IdP sub is in this set, IsAdmin is true
+	// regardless of group membership.
 	PlatformAdminSubs map[string]struct{}
 }
 

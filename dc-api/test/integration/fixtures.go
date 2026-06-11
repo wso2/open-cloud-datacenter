@@ -65,7 +65,7 @@ func clientForTenant(t *testing.T, tenantID string) *APIClient {
 	// Phase 6a: TenantContext refuses any /v1/tenants/{tid}/... request
 	// whose slug isn't registered in the `tenants` table. Tests that mint a
 	// JWT used to rely on autoprovision in middleware to seed both
-	// `role_assignments` AND the `tenants` registry; Option D removed that
+	// `role_assignments` AND the `tenants` registry; the invite-based model removed that
 	// path for production, so the test helper UPSERTs explicitly here.
 	if _, err := env.DB.UpsertTenant(
 		context.Background(), tenantID, tenantID, "dc-tenant-"+tenantID, "test-fixture",
