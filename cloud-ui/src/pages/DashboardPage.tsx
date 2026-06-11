@@ -6,13 +6,11 @@ import {
   Spinner,
   Subtitle1,
   Title2,
-  Tooltip,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
 import {
   Add20Regular,
-  ArrowRight16Regular,
   CloudArrowUp24Regular,
   Database24Regular,
   Key24Regular,
@@ -24,6 +22,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../api/useApi';
+import { ACTIVITY_RESOURCE_ROUTES, useActivityQuery } from '../api/activity';
 import { useActiveProject } from '../hooks/useActiveProject';
 import { fmtDate } from '../lib/date';
 
@@ -252,16 +251,14 @@ export default function DashboardPage() {
   });
   const project = (projectQuery.data ?? []).find((p) => p.id === projectId);
 
-  // Cross-kind derivations for the attention + recent cards.
+  const activityQuery = useActivityQuery(tenantId, projectId, 5, 0);
+
+  // Cross-kind derivation for the attention card.
   const tagged = KINDS.flatMap((kind, i) =>
     (listQueries[i].data ?? []).map((item) => ({ kind, item })),
   );
   const attention = tagged
     .filter(({ item }) => FAILED.has((item.status ?? '').toUpperCase()))
-    .slice(0, 5);
-  const recent = [...tagged]
-    .filter(({ item }) => item.created_at)
-    .sort((a, b) => (b.item.created_at ?? '').localeCompare(a.item.created_at ?? ''))
     .slice(0, 5);
 
   const cap = capQuery.data;
@@ -394,27 +391,31 @@ export default function DashboardPage() {
         </Card>
 
         <Card className={styles.sectionCard}>
-          <Subtitle1>Recently created</Subtitle1>
-          {recent.length === 0 ? (
-            <span className={styles.empty}>No resources in this project yet — create one to get started.</span>
-          ) : (
-            recent.map(({ kind, item }) => (
-              <div
-                key={`${kind.key}-${item.id}`}
-                className={styles.listRow}
-                onClick={() => navigate(`../${routeFor(kind)}/${item.id}`)}
-              >
-                <span className={styles.listName}>{item.name ?? item.id}</span>
-                <span className={styles.listMeta}>
-                  {kind.label}
-                  {item.created_at ? ` · ${fmtDate(item.created_at)}` : ''}
-                  <Tooltip content="Open" relationship="label">
-                    <ArrowRight16Regular />
-                  </Tooltip>
-                </span>
-              </div>
-            ))
-          )}
+          <Subtitle1>Recent activity</Subtitle1>
+          {activityQuery.isLoading && <Spinner size="tiny" />}
+          {activityQuery.isError && <span className={styles.cardError}>unavailable</span>}
+          {!activityQuery.isLoading &&
+            !activityQuery.isError &&
+            ((activityQuery.data?.items ?? []).length === 0 ? (
+              <span className={styles.empty}>No activity yet.</span>
+            ) : (
+              (activityQuery.data?.items ?? []).map((ev) => {
+                const route = ACTIVITY_RESOURCE_ROUTES[ev.resource_type];
+                return (
+                  <div
+                    key={ev.id}
+                    className={styles.listRow}
+                    onClick={route ? () => navigate(`../${route}/${ev.resource_id}`) : undefined}
+                  >
+                    <span className={styles.listName}>
+                      <span className={styles.empty}>{ev.action} </span>
+                      {ev.resource_name}
+                    </span>
+                    <span className={styles.listMeta}>{fmtDate(ev.created_at)}</span>
+                  </div>
+                );
+              })
+            ))}
         </Card>
       </div>
     </div>

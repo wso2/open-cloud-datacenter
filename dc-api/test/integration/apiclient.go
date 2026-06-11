@@ -565,6 +565,41 @@ func (c *APIClient) DeleteVM(ctx context.Context, vmID string) (int, error) {
 	return status, err
 }
 
+// ── Activity feed ─────────────────────────────────────────────────────────────
+
+// ActivityEventDTO mirrors components/schemas/ActivityEvent.
+type ActivityEventDTO struct {
+	ID           string `json:"id"`
+	ResourceID   string `json:"resource_id"`
+	ResourceName string `json:"resource_name"`
+	ResourceType string `json:"resource_type"`
+	Action       string `json:"action"`
+	ActorID      string `json:"actor_id"`
+	FromStatus   string `json:"from_status,omitempty"`
+	ToStatus     string `json:"to_status,omitempty"`
+	Message      string `json:"message,omitempty"`
+	CreatedAt    string `json:"created_at"`
+}
+
+// ActivityPageDTO mirrors components/schemas/ActivityPage.
+type ActivityPageDTO struct {
+	Items []ActivityEventDTO `json:"items"`
+	Total int                `json:"total"`
+}
+
+// ListActivity calls GET .../projects/{project_id}/activity. query is the raw
+// query string including the leading "?" (e.g. "?limit=2&offset=4"), or ""
+// for the server defaults.
+func (c *APIClient) ListActivity(ctx context.Context, query string) (ActivityPageDTO, []byte, int, error) {
+	b, status, err := c.do(ctx, http.MethodGet, c.projectPath()+"/activity"+query, nil)
+	if err != nil {
+		return ActivityPageDTO{}, b, status, err
+	}
+	var resp ActivityPageDTO
+	_ = json.Unmarshal(b, &resp)
+	return resp, b, status, nil
+}
+
 // ── Projects ──────────────────────────────────────────────────────────────────
 
 // ProjectResponse mirrors handlers.projectResponse.

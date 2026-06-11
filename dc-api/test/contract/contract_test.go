@@ -159,7 +159,8 @@ func TestSpec_Conformance(t *testing.T) {
 	// Networking, VMs, clusters, bastions, images need real backends and
 	// are out of scope. --include-tag matches a single tag value, so we use
 	// the regex variant to express the allowlist.
-	tagRegex := `^(health|directory|keyvaults|roleAssignments|projects|service-accounts|tenants)$`
+	//   - activity: pure DB read (audit_events ⋈ resources) — no provider calls
+	tagRegex := `^(health|directory|keyvaults|roleAssignments|projects|service-accounts|tenants|activity)$`
 	checks := strings.Join([]string{
 		"not_a_server_error",
 		"status_code_conformance",

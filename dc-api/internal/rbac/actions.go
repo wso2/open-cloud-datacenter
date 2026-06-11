@@ -120,6 +120,11 @@ const (
 	ActionQuotaWrite = "resourcemanager/quotas/write"
 
 	ActionCapUsageRead = "resourcemanager/capUsage/read"
+
+	// ActionActivityRead gates the read-only project activity feed (audit
+	// events). A plain control-plane read: Reader's `*/read` covers it, so any
+	// project member can see the feed.
+	ActionActivityRead = "resourcemanager/activity/read"
 )
 
 // dataActions is the set of concrete actions that touch resource *contents*
@@ -172,6 +177,7 @@ var allActions = []string{
 	ActionProjectRead, ActionProjectWrite, ActionProjectDelete,
 	ActionQuotaRead, ActionQuotaWrite,
 	ActionCapUsageRead,
+	ActionActivityRead,
 }
 
 // AllActions returns a copy of the full action registry.

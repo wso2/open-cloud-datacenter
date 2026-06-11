@@ -190,6 +190,24 @@ type AuditEvent struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+// ActivityEntry is one row of a project's activity feed: an AuditEvent joined
+// with the owning resource's name and type so clients can render a readable
+// line ("vm-web-1 CREATE") without a second lookup. Events belong to resources
+// (audit_events.resource_id FK, ON DELETE CASCADE), so entries disappear with
+// their resource — the feed reflects live resources only.
+type ActivityEntry struct {
+	ID           uuid.UUID      `json:"id"`
+	ResourceID   uuid.UUID      `json:"resource_id"`
+	ResourceName string         `json:"resource_name"`
+	ResourceType ResourceType   `json:"resource_type"`
+	Action       string         `json:"action"`   // e.g., "CREATE", "DELETE", "STATUS_CHANGE"
+	ActorID      string         `json:"actor_id"` // OIDC sub, service-account ID, or "system"
+	FromStatus   ResourceStatus `json:"from_status,omitempty"`
+	ToStatus     ResourceStatus `json:"to_status,omitempty"`
+	Message      string         `json:"message,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
+}
+
 // Image represents a bootable VM image available in the compute provider.
 // In Harvester these are VirtualMachineImage CRDs.
 type Image struct {

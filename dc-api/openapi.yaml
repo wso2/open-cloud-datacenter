@@ -95,6 +95,13 @@ tags:
       Project management. Projects sit beneath Tenants as the primary workspace
       boundary. Every compute and network resource belongs to a project. A tenant
       owner is implicitly an owner of all projects in that tenant.
+  - name: activity
+    description: |
+      Read-only, project-scoped activity feed: the audit events recorded
+      against every resource in a project (CREATE, DELETE, STATUS_CHANGE, …),
+      newest first. Events are stored against resources and removed with them
+      (the audit FK cascades on resource deletion), so the feed covers
+      resources that still exist.
   - name: tenants
     description: Tenant discovery for the authenticated principal
   - name: quotas
@@ -2276,6 +2283,72 @@ paths:
       responses:
         "204":
           description: Service account deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Activity feed ─────────────────────────────────────────────────────────────
+
+  /v1/tenants/{tenant_id}/projects/{project_id}/activity:
+    parameters:
+      - $ref: "#/components/parameters/TenantID"
+      - $ref: "#/components/parameters/ProjectID"
+
+    get:
+      operationId: listProjectActivity
+      tags: [activity]
+      summary: List the project's activity feed
+      description: |
+        Returns one page of audit events for every resource in the project,
+        newest first. Each item is the stored audit event joined with the
+        owning resource's `name` and `type`, so clients can render a readable
+        feed line ("vm-web-1 — CREATE") without a second lookup.
+
+        Events are recorded when handlers and the reconciler change a
+        resource's lifecycle (`CREATE`, `DELETE`, `STATUS_CHANGE`, …). The
+        audit log is append-only, but events belong to their resource and are
+        removed with it — the feed covers resources that still exist.
+
+        `from_status`, `to_status`, and `message` are omitted when the stored
+        event has no value for them.
+
+        **Required action**: `resourcemanager/activity/read` — a plain
+        control-plane read covered by `Reader`'s `*/read` pattern, so any
+        project member can read the feed.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of events to return per page.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+            example: 20
+        - name: offset
+          in: query
+          required: false
+          description: Number of events to skip (newest-first ordering).
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+            example: 0
+      responses:
+        "200":
+          description: One page of the project's audit events, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityPage"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -6695,6 +6768,78 @@ components:
             Total number of groups across all pages (SCIM2 `totalResults`),
             not the size of this page.
           example: 12
+
+    # ── Activity feed (project-scoped audit events) ────────────────────────────
+
+    ActivityEvent:
+      type: object
+      required: [id, resource_id, resource_name, resource_type, action, actor_id, created_at]
+      description: |
+        One audit event in a project's activity feed — the append-only
+        `audit_events` row joined with the owning resource's name and type.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Audit event UUID.
+          example: 3a1c2e5d-0000-0000-0000-0000000000aa
+        resource_id:
+          type: string
+          format: uuid
+          description: UUID of the resource the event was recorded against.
+          example: 3a1c2e5d-1234-5678-abcd-000000000001
+        resource_name:
+          type: string
+          description: Name of the resource at read time.
+          example: vm-web-1
+        resource_type:
+          type: string
+          description: Resource kind, as stored on the resource row.
+          enum: [VIRTUAL_MACHINE, CLUSTER, VOLUME, BASTION]
+          example: VIRTUAL_MACHINE
+        action:
+          type: string
+          description: What happened — e.g. `CREATE`, `DELETE`, `STATUS_CHANGE`.
+          example: CREATE
+        actor_id:
+          type: string
+          description: |
+            Who did it — the caller's OIDC `sub` or service-account ID, or
+            `system` for reconciler-driven transitions.
+          example: 01abc123-0000-0000-0000-user000000001
+        from_status:
+          allOf:
+            - $ref: "#/components/schemas/ResourceStatus"
+          description: Lifecycle status before the event. Omitted when the event has none (e.g. CREATE).
+        to_status:
+          allOf:
+            - $ref: "#/components/schemas/ResourceStatus"
+          description: Lifecycle status after the event. Omitted when the event has none.
+        message:
+          type: string
+          description: Optional human-readable detail (e.g. the provisioning error). Omitted when empty.
+          example: provisioning submitted to Harvester
+        created_at:
+          type: string
+          format: date-time
+          description: When the event was recorded (RFC 3339).
+          example: "2026-06-11T08:30:00Z"
+
+    ActivityPage:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          description: One page of audit events, newest first.
+          items:
+            $ref: "#/components/schemas/ActivityEvent"
+        total:
+          type: integer
+          description: |
+            Total number of events for the project across all pages, not the
+            size of this page.
+          example: 137
 
     # ── Service Accounts ───────────────────────────────────────────────────────
 

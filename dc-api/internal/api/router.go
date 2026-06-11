@@ -209,6 +209,9 @@ func NewRouter(deps RouterDeps) http.Handler {
 		// and gets booleans back, so it never re-implements the matcher.
 		permissionsHandler := handlers.NewPermissionsHandler(deps.Repo, deps.Log)
 
+		// Project activity feed — read-only, paginated audit-event listing.
+		activityHandler := handlers.NewActivityHandler(deps.Repo, deps.Log)
+
 		// M1.5 Chunk 7 — service account management handler.
 		serviceAccountHandler := handlers.NewServiceAccountHandler(deps.Repo, deps.Log)
 
@@ -323,6 +326,11 @@ func NewRouter(deps RouterDeps) http.Handler {
 					// ProjectContext makes the active scope the project, so the engine
 					// answers "may I do X in THIS project". Self-check, so ungated.
 					r.Post("/permissions:check", permissionsHandler.Check) // POST .../projects/{project_id}/permissions:check
+
+					// Project activity feed — newest-first audit events for every
+					// resource in the project. Read-only; Reader's */read covers
+					// the action, so any project member can see it.
+					r.Method(http.MethodGet, "/activity", gate(rbac.ActionActivityRead, activityHandler.List)) // GET .../projects/{project_id}/activity
 
 					// ── Virtual Machines ────────────────────────────────────
 					r.Route("/virtual-machines", func(r chi.Router) {
