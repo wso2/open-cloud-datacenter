@@ -61,6 +61,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Generate a sortable timestamp tag (UTC) for Flux ImagePolicy's
+      # numerical sort. See OCD's
+      # flux/platform/keyvault-operator/base/image-automation.yaml for the
+      # matching filter pattern. Bare-SHA tags sort alphabetically, which is
+      # meaningless for hex — picks "ff..." over every "fe...".
+      - name: Generate build timestamp
+        id: ts
+        run: echo "tag=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push keyvault-operator
         uses: docker/build-push-action@v5
         with:
@@ -69,6 +78,7 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:${{ steps.ts.outputs.tag }}-${{ github.sha }}
           cache-from: type=gha,scope=keyvault-operator
           cache-to: type=gha,mode=max,scope=keyvault-operator
 
@@ -79,8 +89,8 @@ jobs:
             echo
             echo "- \`${{ env.IMAGE }}:latest\`"
             echo "- \`${{ env.IMAGE }}:${{ github.sha }}\`"
+            echo "- \`${{ env.IMAGE }}:${{ steps.ts.outputs.tag }}-${{ github.sha }}\`"
             echo
-            echo "Consumer-side: the terraform branch's"
-            echo "\`modules/operators/keyvault/\` module pins this image"
-            echo "tag in its kustomize-managed Deployment."
+            echo "The Harvester Flux ImagePolicy auto-bumps the deployed pin"
+            echo "from the timestamp tag (flux-harvester overlay)."
           } >> "$GITHUB_STEP_SUMMARY"
