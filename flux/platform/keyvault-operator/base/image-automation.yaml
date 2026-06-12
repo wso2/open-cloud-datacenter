@@ -17,8 +17,14 @@ metadata:
   namespace: flux-system
 spec:
   imageRepositoryRef: { name: keyvault-operator }
+  # Filter on the timestamp-prefixed tags the operators-branch CI publishes:
+  # <YYYYMMDD>-<HHMMSS>-<git-sha>. The date + time groups concatenate to 14
+  # decimal digits sorted numerically, picking the most recently built image.
+  # Bare-SHA tags are deliberately NOT matched — alphabetical sort of hex SHAs
+  # is meaningless and previously pinned whatever tag began with "ff".
   filterTags:
-    pattern: '^(?P<sha>[a-f0-9]{7,40})$'
-    extract: '$sha'
+    pattern: '^(?P<ts>\d{8})-(?P<tm>\d{6})-[a-f0-9]+$'
+    extract: '$ts$tm'
   policy:
-    alphabetical: { order: asc }
+    numerical:
+      order: asc
