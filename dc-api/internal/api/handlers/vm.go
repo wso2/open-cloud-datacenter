@@ -363,12 +363,6 @@ func (h *VMHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Record the creation event in the audit log.
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: resource.ID,
-		ActorID:    userID,
-		Action:     "CREATE",
-		ToStatus:   models.StatusPending,
-	})
 
 	// ── Step 5: trigger async provisioning ───────────────────────────────────
 	// We return 202 immediately and provision in the background.
@@ -477,7 +471,6 @@ func (h *VMHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !requireAction(w, r, h.repo, rbac.ActionVMDelete) {
 		return
 	}
-	userID, _ := middleware.UserFromContext(r.Context())
 
 	rawID := chi.URLParam(r, "id")
 	id, err := uuid.Parse(rawID)
@@ -497,13 +490,6 @@ func (h *VMHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update resource status")
 		return
 	}
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: id,
-		ActorID:    userID,
-		Action:     "DELETE",
-		FromStatus: resource.Status,
-		ToStatus:   models.StatusDeleting,
-	})
 
 	// Async: call Harvester delete. The reconciler detects the 404 from Harvester
 	// and removes the DB row — consistent with how cluster deletion works.
@@ -544,14 +530,6 @@ func (h *VMHandler) asyncProvision(resourceID uuid.UUID, tenantID, projectID, us
 		h.log.Error().Err(err).Str("vm", spec.Name).Msg("harvester CreateVM failed")
 		_ = h.repo.UpdateStatus(ctx, resourceID, models.StatusFailed,
 			"provisioning failed: "+err.Error(), "")
-		_ = h.repo.AppendAuditEvent(ctx, &models.AuditEvent{
-			ResourceID: resourceID,
-			ActorID:    userID,
-			Action:     "STATUS_CHANGE",
-			FromStatus: models.StatusPending,
-			ToStatus:   models.StatusFailed,
-			Message:    err.Error(),
-		})
 		return
 	}
 

@@ -61,6 +61,7 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/google/uuid"
+	"github.com/wso2/dc-api/internal/audit"
 	"github.com/wso2/dc-api/internal/api/respond"
 	"github.com/wso2/dc-api/internal/models"
 	"golang.org/x/oauth2"
@@ -395,6 +396,8 @@ func (c *AuthConfig) buildContext(reqCtx context.Context, claims Claims) context
 	ctx = context.WithValue(ctx, ContextKeyPrincipalType, models.PrincipalTypeUser)
 	ctx = context.WithValue(ctx, ContextKeyPrincipalID, claims.Sub)
 	ctx = context.WithValue(ctx, ContextKeyIsAdmin, isAdmin)
+	// Stamp the actor for the repository layer's automatic audit recording.
+	ctx = audit.WithActor(ctx, claims.Sub)
 	return ctx
 }
 

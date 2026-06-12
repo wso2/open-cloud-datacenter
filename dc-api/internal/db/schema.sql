@@ -56,7 +56,8 @@ BEGIN
         'PENDING',
         'ACTIVE',
         'FAILED',
-        'DELETING'
+        'DELETING',
+        'DELETED' -- terminal; appears only on audit events, never on rows
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END;

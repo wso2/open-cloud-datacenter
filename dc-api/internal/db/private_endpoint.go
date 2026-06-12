@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/wso2/dc-api/internal/audit"
 	"github.com/wso2/dc-api/internal/models"
 )
 
@@ -52,6 +53,11 @@ func (r *Repository) CreatePrivateEndpoint(ctx context.Context, ep *models.Priva
 	).Scan(&ep.ID, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create private_endpoint: %w", err)
 	}
+	r.recordAudit(ctx, r.pool, auditInsert{
+		ID: ep.ID, Name: ep.Name, Kind: "PRIVATE_ENDPOINT",
+		TenantUUID: &ep.TenantUUID, ProjectUUID: nilIfNilUUID(ep.ProjectUUID),
+		Action: audit.ActionCreate, To: ep.Status,
+	})
 	return ep, nil
 }
 
@@ -106,34 +112,57 @@ func (r *Repository) UpdatePrivateEndpointStatus(
 ) error {
 	// COALESCE requires both arguments to be the same type. ip_address is
 	// inet, so cast the NULLIF result (text) to inet first before COALESCE.
+	// COALESCE requires both arguments to be the same type. ip_address is
+	// inet, so cast the NULLIF result (text) to inet first before COALESCE.
 	const q = `
-		UPDATE private_endpoints
+		UPDATE private_endpoints t
 		SET    status         = $2,
 		       message        = $3,
-		       ip_address     = COALESCE(NULLIF($4, '')::inet, ip_address),
-		       hostname       = COALESCE(NULLIF($5, ''),       hostname),
-		       proxy_pod_name = COALESCE(NULLIF($6, ''),       proxy_pod_name)
-		WHERE  id = $1`
-	tag, err := r.pool.Exec(ctx, q, id, string(status), message, ip, hostname, proxyPod)
+		       ip_address     = COALESCE(NULLIF($4, '')::inet, t.ip_address),
+		       hostname       = COALESCE(NULLIF($5, ''),       t.hostname),
+		       proxy_pod_name = COALESCE(NULLIF($6, ''),       t.proxy_pod_name)
+		FROM   private_endpoints old
+		WHERE  t.id = $1 AND old.id = t.id
+		RETURNING old.status::text, t.name, t.tenant_uuid, t.project_uuid`
+	var from, name string
+	var tuid, puid *uuid.UUID
+	err := r.pool.QueryRow(ctx, q, id, string(status), message, ip, hostname, proxyPod).
+		Scan(&from, &name, &tuid, &puid)
+	if err == pgx.ErrNoRows {
+		return ErrPrivateEndpointNotFound
+	}
 	if err != nil {
 		return fmt.Errorf("db update private_endpoint status: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrPrivateEndpointNotFound
-	}
+	r.recordAudit(ctx, r.pool, auditInsert{
+		ID: id, Name: name, Kind: "PRIVATE_ENDPOINT", TenantUUID: tuid, ProjectUUID: puid,
+		Action: audit.ActionStatusChange,
+		From:   models.ResourceStatus(from), To: status, Message: message,
+	})
 	return nil
 }
 
 // DeletePrivateEndpoint removes the row. The handler is responsible for
 // having torn down the provisioner-side resources first.
 func (r *Repository) DeletePrivateEndpoint(ctx context.Context, id uuid.UUID) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM private_endpoints WHERE id = $1`, id)
+	const q = `
+		DELETE FROM private_endpoints
+		WHERE  id = $1
+		RETURNING status::text, name, tenant_uuid, project_uuid`
+	var from, name string
+	var tuid, puid *uuid.UUID
+	err := r.pool.QueryRow(ctx, q, id).Scan(&from, &name, &tuid, &puid)
+	if err == pgx.ErrNoRows {
+		return ErrPrivateEndpointNotFound
+	}
 	if err != nil {
 		return fmt.Errorf("db delete private_endpoint: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrPrivateEndpointNotFound
-	}
+	r.recordAudit(ctx, r.pool, auditInsert{
+		ID: id, Name: name, Kind: "PRIVATE_ENDPOINT", TenantUUID: tuid, ProjectUUID: puid,
+		Action: audit.ActionDelete,
+		From:   models.ResourceStatus(from), To: models.StatusDeleted,
+	})
 	return nil
 }
 

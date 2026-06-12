@@ -231,9 +231,6 @@ func (h *SubnetHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: subnet.ID, ActorID: userID, Action: "CREATE", ToStatus: models.StatusPending,
-	})
 
 	// Async: call KubeOVN CreateSubnet.
 	go h.asyncProvisionSubnet(subnet.ID, vnet.ID, tenantID, projectID, userID, vnet.BackendUID, models.SubnetSpec{
@@ -334,7 +331,6 @@ func (h *SubnetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !requireAction(w, r, h.repo, rbac.ActionSubnetDelete) {
 		return
 	}
-	userID, _ := middleware.UserFromContext(r.Context())
 
 	vnetID, err := uuid.Parse(chi.URLParam(r, "vnet_id"))
 	if err != nil {
@@ -394,10 +390,6 @@ func (h *SubnetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update subnet status")
 		return
 	}
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: subnetID, ActorID: userID, Action: "DELETE",
-		FromStatus: subnet.Status, ToStatus: models.StatusDeleting,
-	})
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -484,19 +476,11 @@ func (h *SubnetHandler) asyncProvisionSubnet(subnetID, vnetID uuid.UUID, tenantI
 		h.log.Error().Err(err).Str("subnet", spec.Name).Msg("kubeovn CreateSubnet failed")
 		_ = h.repo.UpdateSubnetStatus(ctx, subnetID, models.StatusFailed,
 			"provisioning failed: "+err.Error(), "")
-		_ = h.repo.AppendAuditEvent(ctx, &models.AuditEvent{
-			ResourceID: subnetID, ActorID: userID, Action: "STATUS_CHANGE",
-			FromStatus: models.StatusPending, ToStatus: models.StatusFailed, Message: err.Error(),
-		})
 		return
 	}
 
 	_ = h.repo.UpdateSubnetStatus(ctx, subnetID, models.StatusActive,
 		"subnet provisioned", providerRes.BackendUID)
-	_ = h.repo.AppendAuditEvent(ctx, &models.AuditEvent{
-		ResourceID: subnetID, ActorID: userID, Action: "STATUS_CHANGE",
-		FromStatus: models.StatusPending, ToStatus: models.StatusActive,
-	})
 
 	// ── F15: provision per-VPC SNAT if this is the first subnet on the VPC ────
 	// SNAT operates at the VPC router boundary — opaque to any cluster CNI a

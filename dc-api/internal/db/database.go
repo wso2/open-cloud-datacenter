@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/wso2/dc-api/internal/audit"
 	"github.com/wso2/dc-api/internal/models"
 )
 
@@ -52,6 +53,11 @@ func (r *Repository) CreateDatabase(ctx context.Context, d *models.Database) (*m
 	).Scan(&d.ID, &d.CreatedAt, &d.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create database: %w", err)
 	}
+	r.recordAudit(ctx, r.pool, auditInsert{
+		ID: d.ID, Name: d.Name, Kind: "DATABASE",
+		TenantUUID: &d.TenantUUID, ProjectUUID: &d.ProjectUUID,
+		Action: audit.ActionCreate, To: d.Status,
+	})
 	return d, nil
 }
 
@@ -174,14 +180,24 @@ func (r *Repository) ListDatabasesByProject(ctx context.Context, tenantUUID, pro
 // the handler/adapter) we can hard-delete the row immediately. Returns
 // ErrDatabaseNotFound if the row was already gone.
 func (r *Repository) DeleteDatabase(ctx context.Context, id uuid.UUID) error {
-	const q = `DELETE FROM databases WHERE id = $1`
-	tag, err := r.pool.Exec(ctx, q, id)
+	const q = `
+		DELETE FROM databases
+		WHERE  id = $1
+		RETURNING status::text, name, tenant_uuid, project_uuid`
+	var from, name string
+	var tuid, puid *uuid.UUID
+	err := r.pool.QueryRow(ctx, q, id).Scan(&from, &name, &tuid, &puid)
+	if err == pgx.ErrNoRows {
+		return ErrDatabaseNotFound
+	}
 	if err != nil {
 		return fmt.Errorf("db delete database: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrDatabaseNotFound
-	}
+	r.recordAudit(ctx, r.pool, auditInsert{
+		ID: id, Name: name, Kind: "DATABASE", TenantUUID: tuid, ProjectUUID: puid,
+		Action: audit.ActionDelete,
+		From:   models.ResourceStatus(from), To: models.StatusDeleted,
+	})
 	return nil
 }
 
@@ -197,21 +213,33 @@ func (r *Repository) UpdateDatabaseStatus(
 	endpointPort int,
 ) error {
 	const q = `
-		UPDATE databases
+		UPDATE databases t
 		SET    status            = $2,
 		       message           = $3,
 		       endpoint_address  = $4,
 		       endpoint_port     = $5
-		WHERE  id = $1`
-	_, err := r.pool.Exec(ctx, q, id,
+		FROM   databases old
+		WHERE  t.id = $1 AND old.id = t.id
+		RETURNING old.status::text, t.name, t.tenant_uuid, t.project_uuid`
+	var from, name string
+	var tuid, puid *uuid.UUID
+	err := r.pool.QueryRow(ctx, q, id,
 		string(status),
 		nilIfEmpty(message),
 		nilIfEmpty(endpointAddress),
 		nilIfZeroInt(endpointPort),
-	)
+	).Scan(&from, &name, &tuid, &puid)
+	if err == pgx.ErrNoRows {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("db update database status: %w", err)
 	}
+	r.recordAudit(ctx, r.pool, auditInsert{
+		ID: id, Name: name, Kind: "DATABASE", TenantUUID: tuid, ProjectUUID: puid,
+		Action: audit.ActionStatusChange,
+		From:   models.ResourceStatus(from), To: status, Message: message,
+	})
 	return nil
 }
 

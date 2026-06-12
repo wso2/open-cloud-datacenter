@@ -33,6 +33,7 @@ import { useConfirmDialog } from '../components/useConfirmDialog';
 import SecretRevealBanner, { type Secret } from '../components/SecretRevealBanner';
 import StatusPill from '../components/StatusPill';
 import { fmtDate } from '../lib/date';
+import { detailErrorMessage } from '../lib/apiError';
 import MembersPage from './MembersPage';
 
 interface Database {
@@ -253,7 +254,7 @@ export default function DatabaseDetailPage() {
         <MessageBar intent="error">
           <MessageBarBody>
             <MessageBarTitle>Failed to load database</MessageBarTitle>
-            {dbQuery.error instanceof Error ? dbQuery.error.message : 'Not found.'}
+            {detailErrorMessage(dbQuery.error, 'database')}
           </MessageBarBody>
         </MessageBar>
       </div>

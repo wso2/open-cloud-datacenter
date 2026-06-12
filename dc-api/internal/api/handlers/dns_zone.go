@@ -221,9 +221,6 @@ func (h *PrivateDnsZoneHandler) CreateZone(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: zone.ID, ActorID: userID, Action: "CREATE", ToStatus: models.StatusPending,
-	})
 
 	go h.asyncProvisionZone(zone.ID, tenantID, userID, vnet.BackendUID, models.DnsZoneSpec{
 		ZoneName:    req.Name,
@@ -317,7 +314,6 @@ func (h *PrivateDnsZoneHandler) DeleteZone(w http.ResponseWriter, r *http.Reques
 	if !requireAction(w, r, h.repo, rbac.ActionDNSZoneDelete) {
 		return
 	}
-	userID, _ := middleware.UserFromContext(r.Context())
 
 	vnet, ok := h.requireActiveVNetForZone(w, r, tenantUUID, projectUUID)
 	if !ok {
@@ -338,10 +334,6 @@ func (h *PrivateDnsZoneHandler) DeleteZone(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "failed to update DNS zone status")
 		return
 	}
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: zoneID, ActorID: userID, Action: "DELETE",
-		FromStatus: zone.Status, ToStatus: models.StatusDeleting,
-	})
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -372,10 +364,6 @@ func (h *PrivateDnsZoneHandler) asyncProvisionZone(zoneID uuid.UUID, tenantID, u
 		h.log.Error().Err(err).Str("zone", spec.ZoneName).Msg("kubeovn CreatePrivateDnsZone failed")
 		_ = h.repo.UpdateDNSZoneStatus(ctx, zoneID, models.StatusFailed,
 			"provisioning failed: "+err.Error(), "")
-		_ = h.repo.AppendAuditEvent(ctx, &models.AuditEvent{
-			ResourceID: zoneID, ActorID: userID, Action: "STATUS_CHANGE",
-			FromStatus: models.StatusPending, ToStatus: models.StatusFailed, Message: err.Error(),
-		})
 		return
 	}
 
@@ -386,10 +374,6 @@ func (h *PrivateDnsZoneHandler) asyncProvisionZone(zoneID uuid.UUID, tenantID, u
 	}
 	h.log.Info().Str("zone_id", zoneID.String()).Str("backend_uid", providerRes.BackendUID).
 		Msg("asyncProvisionZone: zone marked ACTIVE")
-	_ = h.repo.AppendAuditEvent(ctx, &models.AuditEvent{
-		ResourceID: zoneID, ActorID: userID, Action: "STATUS_CHANGE",
-		FromStatus: models.StatusPending, ToStatus: models.StatusActive,
-	})
 }
 
 // ── Record Handlers ───────────────────────────────────────────────────────────

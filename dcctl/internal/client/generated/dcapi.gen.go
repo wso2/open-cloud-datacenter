@@ -23,6 +23,57 @@ const (
 	BearerAuthScopes bearerAuthContextKey = "bearerAuth.Scopes"
 )
 
+// Defines values for ActivityEventResourceType.
+const (
+	ActivityEventResourceTypeBASTION         ActivityEventResourceType = "BASTION"
+	ActivityEventResourceTypeCLUSTER         ActivityEventResourceType = "CLUSTER"
+	ActivityEventResourceTypeDATABASE        ActivityEventResourceType = "DATABASE"
+	ActivityEventResourceTypeKEYVAULT        ActivityEventResourceType = "KEYVAULT"
+	ActivityEventResourceTypeNSG             ActivityEventResourceType = "NSG"
+	ActivityEventResourceTypePEERING         ActivityEventResourceType = "PEERING"
+	ActivityEventResourceTypePRIVATEDNSZONE  ActivityEventResourceType = "PRIVATE_DNS_ZONE"
+	ActivityEventResourceTypePRIVATEENDPOINT ActivityEventResourceType = "PRIVATE_ENDPOINT"
+	ActivityEventResourceTypeROUTETABLE      ActivityEventResourceType = "ROUTE_TABLE"
+	ActivityEventResourceTypeSUBNET          ActivityEventResourceType = "SUBNET"
+	ActivityEventResourceTypeVIRTUALMACHINE  ActivityEventResourceType = "VIRTUAL_MACHINE"
+	ActivityEventResourceTypeVNET            ActivityEventResourceType = "VNET"
+	ActivityEventResourceTypeVOLUME          ActivityEventResourceType = "VOLUME"
+)
+
+// Valid indicates whether the value is a known member of the ActivityEventResourceType enum.
+func (e ActivityEventResourceType) Valid() bool {
+	switch e {
+	case ActivityEventResourceTypeBASTION:
+		return true
+	case ActivityEventResourceTypeCLUSTER:
+		return true
+	case ActivityEventResourceTypeDATABASE:
+		return true
+	case ActivityEventResourceTypeKEYVAULT:
+		return true
+	case ActivityEventResourceTypeNSG:
+		return true
+	case ActivityEventResourceTypePEERING:
+		return true
+	case ActivityEventResourceTypePRIVATEDNSZONE:
+		return true
+	case ActivityEventResourceTypePRIVATEENDPOINT:
+		return true
+	case ActivityEventResourceTypeROUTETABLE:
+		return true
+	case ActivityEventResourceTypeSUBNET:
+		return true
+	case ActivityEventResourceTypeVIRTUALMACHINE:
+		return true
+	case ActivityEventResourceTypeVNET:
+		return true
+	case ActivityEventResourceTypeVOLUME:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AttachNSGRequestTargetType.
 const (
 	AttachNSGRequestTargetTypeSubnet AttachNSGRequestTargetType = "subnet"
@@ -524,6 +575,7 @@ func (e QuotaExceededErrorError) Valid() bool {
 // Defines values for ResourceStatus.
 const (
 	ResourceStatusACTIVE   ResourceStatus = "ACTIVE"
+	ResourceStatusDELETED  ResourceStatus = "DELETED"
 	ResourceStatusDELETING ResourceStatus = "DELETING"
 	ResourceStatusFAILED   ResourceStatus = "FAILED"
 	ResourceStatusPENDING  ResourceStatus = "PENDING"
@@ -533,6 +585,8 @@ const (
 func (e ResourceStatus) Valid() bool {
 	switch e {
 	case ResourceStatusACTIVE:
+		return true
+	case ResourceStatusDELETED:
 		return true
 	case ResourceStatusDELETING:
 		return true
@@ -755,6 +809,63 @@ func (e UpdateProjectQuota400JSONResponseBody2Error) Valid() bool {
 	}
 }
 
+// ActivityEvent One audit event in a project's activity feed. The owning resource's
+// name and type are snapshotted onto the event when it is recorded, so
+// events keep rendering after the resource is deleted — history is not
+// erased by deletion.
+type ActivityEvent struct {
+	// Action What happened — e.g. `CREATE`, `DELETE`, `STATUS_CHANGE`.
+	Action string `json:"action"`
+
+	// ActorId Who did it — the caller's OIDC `sub` or service-account ID, or
+	// `system` for reconciler-driven transitions.
+	ActorId string `json:"actor_id"`
+
+	// CreatedAt When the event was recorded (RFC 3339).
+	CreatedAt time.Time `json:"created_at"`
+
+	// FromStatus Lifecycle status before the event. Omitted when the event has none (e.g. CREATE).
+	FromStatus *ResourceStatus `json:"from_status,omitempty"`
+
+	// Id Audit event UUID.
+	Id openapi_types.UUID `json:"id"`
+
+	// Message Optional human-readable detail (e.g. the provisioning error). Omitted when empty.
+	Message *string `json:"message,omitempty"`
+
+	// ResourceId UUID of the resource the event was recorded against. Present only
+	// while the resource exists — once it is deleted the field is
+	// omitted, so clients never render deep links to gone resources.
+	// The snapshot fields (resource_name/resource_type) always render.
+	ResourceId *openapi_types.UUID `json:"resource_id,omitempty"`
+
+	// ResourceName Name of the resource, snapshotted when the event was recorded.
+	ResourceName string `json:"resource_name"`
+
+	// ResourceType Resource kind, snapshotted when the event was recorded. One value
+	// per auditable resource family — kept in lockstep with the audit
+	// framework's registry (`internal/db/activity.go`).
+	ResourceType ActivityEventResourceType `json:"resource_type"`
+
+	// ToStatus Lifecycle status after the event. Omitted when the event has none.
+	ToStatus *ResourceStatus `json:"to_status,omitempty"`
+}
+
+// ActivityEventResourceType Resource kind, snapshotted when the event was recorded. One value
+// per auditable resource family — kept in lockstep with the audit
+// framework's registry (`internal/db/activity.go`).
+type ActivityEventResourceType string
+
+// ActivityPage defines model for ActivityPage.
+type ActivityPage struct {
+	// Items One page of audit events, newest first.
+	Items []ActivityEvent `json:"items"`
+
+	// Total Total number of events for the project across all pages, not the
+	// size of this page.
+	Total int `json:"total"`
+}
+
 // AsyncNetworkResponse Generic 202 envelope for async network resource operations.
 // `resource` is the newly created object in PENDING status.
 // `note` contains the polling URL.
@@ -853,6 +964,8 @@ type Bastion struct {
 	// - `ACTIVE` — running and healthy
 	// - `FAILED` — provisioning or deletion failed
 	// - `DELETING` — deletion requested, async removal in progress
+	// - `DELETED` — terminal; appears only as an audit event's to_status
+	//   (resource records are removed at deletion, never parked here)
 	Status   ResourceStatus      `json:"status"`
 	SubnetId *openapi_types.UUID `json:"subnet_id,omitempty"`
 	TenantId string              `json:"tenant_id"`
@@ -884,6 +997,8 @@ type Cluster struct {
 	// - `ACTIVE` — running and healthy
 	// - `FAILED` — provisioning or deletion failed
 	// - `DELETING` — deletion requested, async removal in progress
+	// - `DELETED` — terminal; appears only as an audit event's to_status
+	//   (resource records are removed at deletion, never parked here)
 	Status ResourceStatus `json:"status"`
 
 	// SystemPool Embedded system node pool. Always present. For the list endpoint
@@ -1413,6 +1528,8 @@ type DNSZone struct {
 	// - `ACTIVE` — running and healthy
 	// - `FAILED` — provisioning or deletion failed
 	// - `DELETING` — deletion requested, async removal in progress
+	// - `DELETED` — terminal; appears only as an audit event's to_status
+	//   (resource records are removed at deletion, never parked here)
 	Status    ResourceStatus     `json:"status"`
 	TenantId  string             `json:"tenant_id"`
 	UpdatedAt time.Time          `json:"updated_at"`
@@ -1589,6 +1706,8 @@ type KeyVault struct {
 	// - `ACTIVE` — running and healthy
 	// - `FAILED` — provisioning or deletion failed
 	// - `DELETING` — deletion requested, async removal in progress
+	// - `DELETED` — terminal; appears only as an audit event's to_status
+	//   (resource records are removed at deletion, never parked here)
 	Status    ResourceStatus `json:"status"`
 	TenantId  string         `json:"tenant_id"`
 	UpdatedAt time.Time      `json:"updated_at"`
@@ -1708,6 +1827,8 @@ type NSG struct {
 	// - `ACTIVE` — running and healthy
 	// - `FAILED` — provisioning or deletion failed
 	// - `DELETING` — deletion requested, async removal in progress
+	// - `DELETED` — terminal; appears only as an audit event's to_status
+	//   (resource records are removed at deletion, never parked here)
 	Status    ResourceStatus `json:"status"`
 	TenantId  string         `json:"tenant_id"`
 	UpdatedAt time.Time      `json:"updated_at"`
@@ -1896,6 +2017,8 @@ type Peering struct {
 	// - `ACTIVE` — running and healthy
 	// - `FAILED` — provisioning or deletion failed
 	// - `DELETING` — deletion requested, async removal in progress
+	// - `DELETED` — terminal; appears only as an audit event's to_status
+	//   (resource records are removed at deletion, never parked here)
 	Status    ResourceStatus     `json:"status"`
 	TenantId  string             `json:"tenant_id"`
 	UpdatedAt time.Time          `json:"updated_at"`
@@ -1938,6 +2061,8 @@ type PrivateEndpoint struct {
 	// - `ACTIVE` — running and healthy
 	// - `FAILED` — provisioning or deletion failed
 	// - `DELETING` — deletion requested, async removal in progress
+	// - `DELETED` — terminal; appears only as an audit event's to_status
+	//   (resource records are removed at deletion, never parked here)
 	Status   ResourceStatus     `json:"status"`
 	SubnetId openapi_types.UUID `json:"subnet_id"`
 
@@ -2024,10 +2149,12 @@ type QuotaExceededError struct {
 type QuotaExceededErrorError string
 
 // ResourceStatus Lifecycle status of any DC-API resource.
-// - `PENDING` — accepted, provisioning in progress
-// - `ACTIVE` — running and healthy
-// - `FAILED` — provisioning or deletion failed
-// - `DELETING` — deletion requested, async removal in progress
+//   - `PENDING` — accepted, provisioning in progress
+//   - `ACTIVE` — running and healthy
+//   - `FAILED` — provisioning or deletion failed
+//   - `DELETING` — deletion requested, async removal in progress
+//   - `DELETED` — terminal; appears only as an audit event's to_status
+//     (resource records are removed at deletion, never parked here)
 type ResourceStatus string
 
 // RoleAssignment defines model for RoleAssignment.
@@ -2133,6 +2260,8 @@ type RouteTable struct {
 	// - `ACTIVE` — running and healthy
 	// - `FAILED` — provisioning or deletion failed
 	// - `DELETING` — deletion requested, async removal in progress
+	// - `DELETED` — terminal; appears only as an audit event's to_status
+	//   (resource records are removed at deletion, never parked here)
 	Status    ResourceStatus     `json:"status"`
 	TenantId  string             `json:"tenant_id"`
 	UpdatedAt time.Time          `json:"updated_at"`
@@ -2203,6 +2332,8 @@ type Subnet struct {
 	// - `ACTIVE` — running and healthy
 	// - `FAILED` — provisioning or deletion failed
 	// - `DELETING` — deletion requested, async removal in progress
+	// - `DELETED` — terminal; appears only as an audit event's to_status
+	//   (resource records are removed at deletion, never parked here)
 	Status    ResourceStatus     `json:"status"`
 	TenantId  string             `json:"tenant_id"`
 	UpdatedAt time.Time          `json:"updated_at"`
@@ -2349,6 +2480,8 @@ type VNet struct {
 	// - `ACTIVE` — running and healthy
 	// - `FAILED` — provisioning or deletion failed
 	// - `DELETING` — deletion requested, async removal in progress
+	// - `DELETED` — terminal; appears only as an audit event's to_status
+	//   (resource records are removed at deletion, never parked here)
 	Status    ResourceStatus `json:"status"`
 	TenantId  string         `json:"tenant_id"`
 	UpdatedAt time.Time      `json:"updated_at"`
@@ -2377,6 +2510,8 @@ type VirtualMachine struct {
 	// - `ACTIVE` — running and healthy
 	// - `FAILED` — provisioning or deletion failed
 	// - `DELETING` — deletion requested, async removal in progress
+	// - `DELETED` — terminal; appears only as an audit event's to_status
+	//   (resource records are removed at deletion, never parked here)
 	Status   ResourceStatus `json:"status"`
 	TenantId string         `json:"tenant_id"`
 }
@@ -2498,6 +2633,15 @@ type UpdateProjectQuota400JSONResponseBody2Error string
 // UpdateProjectQuota400JSONResponseBody defines parameters for UpdateProjectQuota.
 type UpdateProjectQuota400JSONResponseBody struct {
 	union json.RawMessage
+}
+
+// ListProjectActivityParams defines parameters for ListProjectActivity.
+type ListProjectActivityParams struct {
+	// Limit Maximum number of events to return per page.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Number of events to skip (newest-first ordering).
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListKeyVaultSecretsParams defines parameters for ListKeyVaultSecrets.
@@ -3049,6 +3193,9 @@ type ClientInterface interface {
 	UpdateProjectQuotaWithBody(ctx context.Context, tenantId TenantID, projectId ProjectID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	UpdateProjectQuota(ctx context.Context, tenantId TenantID, projectId ProjectID, body UpdateProjectQuotaJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListProjectActivity request
+	ListProjectActivity(ctx context.Context, tenantId TenantID, projectId ProjectID, params *ListProjectActivityParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListBastions request
 	ListBastions(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3746,6 +3893,18 @@ func (c *Client) UpdateProjectQuotaWithBody(ctx context.Context, tenantId Tenant
 
 func (c *Client) UpdateProjectQuota(ctx context.Context, tenantId TenantID, projectId ProjectID, body UpdateProjectQuotaJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpdateProjectQuotaRequest(c.Server, tenantId, projectId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListProjectActivity(ctx context.Context, tenantId TenantID, projectId ProjectID, params *ListProjectActivityParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListProjectActivityRequest(c.Server, tenantId, projectId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -6299,6 +6458,86 @@ func NewUpdateProjectQuotaRequestWithBody(server string, tenantId TenantID, proj
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListProjectActivityRequest generates requests for ListProjectActivity
+func NewListProjectActivityRequest(server string, tenantId TenantID, projectId ProjectID, params *ListProjectActivityParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenant_id", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "project_id", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/projects/%s/activity", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -11823,6 +12062,9 @@ type ClientWithResponsesInterface interface {
 
 	UpdateProjectQuotaWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, body UpdateProjectQuotaJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateProjectQuotaResp, error)
 
+	// ListProjectActivityWithResponse request
+	ListProjectActivityWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, params *ListProjectActivityParams, reqEditors ...RequestEditorFn) (*ListProjectActivityResp, error)
+
 	// ListBastionsWithResponse request
 	ListBastionsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*ListBastionsResp, error)
 
@@ -12933,6 +13175,41 @@ func (r UpdateProjectQuotaResp) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r UpdateProjectQuotaResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListProjectActivityResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ActivityPage
+	JSON400      *BadRequest
+	JSON401      *Unauthorized
+	JSON403      *Forbidden
+	JSON404      *NotFound
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListProjectActivityResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListProjectActivityResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListProjectActivityResp) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -16686,6 +16963,15 @@ func (c *ClientWithResponses) UpdateProjectQuotaWithResponse(ctx context.Context
 	return ParseUpdateProjectQuotaResp(rsp)
 }
 
+// ListProjectActivityWithResponse request returning *ListProjectActivityResp
+func (c *ClientWithResponses) ListProjectActivityWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, params *ListProjectActivityParams, reqEditors ...RequestEditorFn) (*ListProjectActivityResp, error) {
+	rsp, err := c.ListProjectActivity(ctx, tenantId, projectId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListProjectActivityResp(rsp)
+}
+
 // ListBastionsWithResponse request returning *ListBastionsResp
 func (c *ClientWithResponses) ListBastionsWithResponse(ctx context.Context, tenantId TenantID, projectId ProjectID, reqEditors ...RequestEditorFn) (*ListBastionsResp, error) {
 	rsp, err := c.ListBastions(ctx, tenantId, projectId, reqEditors...)
@@ -18896,6 +19182,67 @@ func ParseUpdateProjectQuotaResp(rsp *http.Response) (*UpdateProjectQuotaResp, e
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
 		var dest UpdateProjectQuota400JSONResponseBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListProjectActivityResp parses an HTTP response from a ListProjectActivityWithResponse call
+func ParseListProjectActivityResp(rsp *http.Response) (*ListProjectActivityResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListProjectActivityResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ActivityPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

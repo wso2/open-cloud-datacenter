@@ -21,6 +21,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/wso2/dc-api/internal/db"
+	"github.com/wso2/dc-api/internal/audit"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
 )
@@ -68,6 +69,9 @@ func (r *Reconciler) WithInterval(d time.Duration) *Reconciler {
 //
 // When the context is cancelled (Ctrl-C / SIGTERM), the loop exits cleanly.
 func (r *Reconciler) Run(ctx context.Context) {
+	// Every repository mutation this loop makes is audited automatically —
+	// stamp the worker identity once so events read "reconciler", not "system".
+	ctx = audit.WithActor(ctx, "reconciler")
 	r.log.Info().Dur("interval", r.interval).Msg("reconciler started")
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
@@ -241,15 +245,8 @@ func (r *Reconciler) reconcileOne(ctx context.Context, res *models.Resource) {
 		return
 	}
 
-	// Append an audit event for the transition.
-	_ = r.repo.AppendAuditEvent(ctx, &models.AuditEvent{
-		ResourceID: res.ID,
-		ActorID:    "reconciler",
-		Action:     "STATUS_CHANGE",
-		FromStatus: res.Status,
-		ToStatus:   providerStatus,
-		Message:    providerMsg,
-	})
+	// The status transition above is audited automatically by the
+	// repository layer (actor stamped at Run).
 }
 
 // isNotFound returns true if the error indicates the resource does not exist

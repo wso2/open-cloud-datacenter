@@ -262,12 +262,6 @@ func (h *BastionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: resource.ID,
-		ActorID:    userID,
-		Action:     "CREATE",
-		ToStatus:   models.StatusPending,
-	})
 
 	// VPC DNS server IP (F20) so the bastion's resolv.conf matches the VPC.
 	dnsSrvIP := ""
@@ -370,7 +364,6 @@ func (h *BastionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !requireAction(w, r, h.repo, rbac.ActionBastionDelete) {
 		return
 	}
-	userID, _ := middleware.UserFromContext(r.Context())
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -387,13 +380,6 @@ func (h *BastionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update bastion status")
 		return
 	}
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: id,
-		ActorID:    userID,
-		Action:     "DELETE",
-		FromStatus: resource.Status,
-		ToStatus:   models.StatusDeleting,
-	})
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -422,14 +408,6 @@ func (h *BastionHandler) asyncProvision(resourceID uuid.UUID, tenantID, projectI
 		h.log.Error().Err(err).Str("bastion", spec.Name).Msg("harvester CreateVM (bastion) failed")
 		_ = h.repo.UpdateStatus(ctx, resourceID, models.StatusFailed,
 			"provisioning failed: "+err.Error(), "")
-		_ = h.repo.AppendAuditEvent(ctx, &models.AuditEvent{
-			ResourceID: resourceID,
-			ActorID:    userID,
-			Action:     "STATUS_CHANGE",
-			FromStatus: models.StatusPending,
-			ToStatus:   models.StatusFailed,
-			Message:    err.Error(),
-		})
 		return
 	}
 

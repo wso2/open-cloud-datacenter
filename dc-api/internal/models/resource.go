@@ -35,6 +35,9 @@ const (
 	StatusActive   ResourceStatus = "ACTIVE"
 	StatusFailed   ResourceStatus = "FAILED"
 	StatusDeleting ResourceStatus = "DELETING"
+	// StatusDeleted is terminal and exists only on audit events — resource
+	// rows are removed at deletion, never parked in this state.
+	StatusDeleted ResourceStatus = "DELETED"
 )
 
 // VMSize defines a named instance size — CPU, memory, and a default root disk.

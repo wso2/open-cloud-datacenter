@@ -29,6 +29,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../api/useApi';
+import { detailErrorMessage } from '../lib/apiError';
 import { useActiveProject } from '../hooks/useActiveProject';
 import { useConfirmDialog } from '../components/useConfirmDialog';
 import PeeringsTab from '../components/PeeringsTab';
@@ -174,7 +175,6 @@ export default function VNetDetailPage() {
   }
 
   if (vnetQuery.isError) {
-    const msg = (vnetQuery.error as Error).message;
     return (
       <div className={styles.root}>
         <Card>
@@ -183,7 +183,7 @@ export default function VNetDetailPage() {
             <Body1
               style={{ color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalS }}
             >
-              {msg.includes('404') ? 'No VNet with this ID exists in this tenant.' : msg}
+              {detailErrorMessage(vnetQuery.error, 'VNet')}
             </Body1>
             <Button
               appearance="primary"

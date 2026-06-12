@@ -246,13 +246,6 @@ func (h *ServiceAccountHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: sa.ID,
-		ActorID:    callerID,
-		Action:     "SERVICE_ACCOUNT_CREATE",
-		Message: fmt.Sprintf("created service account %s with role %s",
-			req.Name, req.Role),
-	})
 
 	writeJSON(w, http.StatusCreated, createServiceAccountResponse{
 		ID:          sa.ID.String(),
@@ -383,7 +376,7 @@ func (h *ServiceAccountHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, callerID, ok := middleware.PrincipalFromContext(r.Context())
+	_, _, ok = middleware.PrincipalFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no principal in context")
 		return
@@ -415,12 +408,6 @@ func (h *ServiceAccountHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: saID,
-		ActorID:    callerID,
-		Action:     "SERVICE_ACCOUNT_DELETE",
-		Message:    fmt.Sprintf("deleted service account %s", sa.Name),
-	})
 
 	w.WriteHeader(http.StatusNoContent)
 }

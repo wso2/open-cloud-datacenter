@@ -22,6 +22,7 @@ import { ArrowLeft20Regular, Delete20Regular } from '@fluentui/react-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../api/useApi';
+import { detailErrorMessage } from '../lib/apiError';
 import { useActiveProject } from '../hooks/useActiveProject';
 import { useConfirmDialog } from '../components/useConfirmDialog';
 import StatusPill from '../components/StatusPill';
@@ -168,7 +169,7 @@ export default function BastionDetailPage() {
           <MessageBar intent="error">
             <MessageBarBody>
               <MessageBarTitle>Failed to load bastion</MessageBarTitle>
-              {bastionQuery.error instanceof Error ? bastionQuery.error.message : 'Not found.'}
+              {detailErrorMessage(bastionQuery.error, 'bastion')}
             </MessageBarBody>
           </MessageBar>
         </div>

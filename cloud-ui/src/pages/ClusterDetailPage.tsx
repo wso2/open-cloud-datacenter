@@ -37,6 +37,7 @@ import { useConfirmDialog } from '../components/useConfirmDialog';
 import NodePoolsTab from '../components/NodePoolsTab';
 import StatusPill from '../components/StatusPill';
 import { fmtDate } from '../lib/date';
+import { detailErrorMessage } from '../lib/apiError';
 import MembersPage from './MembersPage';
 
 const useStyles = makeStyles({
@@ -267,7 +268,6 @@ export default function ClusterDetailPage() {
   }
 
   if (clusterQuery.isError) {
-    const msg = (clusterQuery.error as Error).message;
     return (
       <div className={styles.root}>
         <Card>
@@ -276,7 +276,7 @@ export default function ClusterDetailPage() {
             <Body1
               style={{ color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalS }}
             >
-              {msg.includes('404') ? 'No cluster with this ID exists in this tenant.' : msg}
+              {detailErrorMessage(clusterQuery.error, 'cluster')}
             </Body1>
             <Button
               appearance="primary"

@@ -24,6 +24,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
@@ -38,6 +39,19 @@ var schemaSQL string
 // Phase 6a tenant_uuid backfill.
 // It is safe to call on every boot regardless of database state.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	// Enum extension must run as its own statement: Postgres rejects
+	// ALTER TYPE … ADD VALUE inside the multi-statement script's implicit
+	// transaction. IF NOT EXISTS keeps it idempotent across boots; running
+	// it BEFORE the script keeps fresh and existing databases identical.
+	if _, err := pool.Exec(ctx,
+		`ALTER TYPE resource_status ADD VALUE IF NOT EXISTS 'DELETED'`); err != nil {
+		// Fresh database: the type doesn't exist yet — the script creates it
+		// with DELETED included, so a missing type is not an error here.
+		if !strings.Contains(err.Error(), "does not exist") {
+			return fmt.Errorf("extend resource_status enum: %w", err)
+		}
+	}
+
 	log.Info().Msg("applying database schema (idempotent)…")
 	if _, err := pool.Exec(ctx, schemaSQL); err != nil {
 		return fmt.Errorf("apply schema.sql: %w", err)

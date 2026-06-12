@@ -429,12 +429,6 @@ func (h *ClusterHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: resource.ID,
-		ActorID:    userID,
-		Action:     "CREATE",
-		ToStatus:   models.StatusPending,
-	})
 
 	// Pre-generate the HarvesterConfig CR name so the provider can use it
 	// deterministically and the reconciler knows which CR to cascade-clean.
@@ -648,7 +642,6 @@ func (h *ClusterHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !requireAction(w, r, h.repo, rbac.ActionClusterDelete) {
 		return
 	}
-	userID, _ := middleware.UserFromContext(r.Context())
 
 	rawID := chi.URLParam(r, "id")
 	id, err := uuid.Parse(rawID)
@@ -664,10 +657,6 @@ func (h *ClusterHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = h.repo.UpdateStatus(r.Context(), id, models.StatusDeleting, "deletion requested", "")
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: id, ActorID: userID, Action: "DELETE",
-		FromStatus: resource.Status, ToStatus: models.StatusDeleting,
-	})
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -1028,10 +1017,6 @@ func (h *ClusterHandler) asyncProvision(resourceID uuid.UUID, tenantID, projectI
 		h.log.Error().Err(err).Str("cluster", spec.Name).Msg("rancher CreateCluster failed")
 		_ = h.repo.UpdateStatus(ctx, resourceID, models.StatusFailed,
 			"provisioning failed: "+err.Error(), "")
-		_ = h.repo.AppendAuditEvent(ctx, &models.AuditEvent{
-			ResourceID: resourceID, ActorID: userID, Action: "STATUS_CHANGE",
-			FromStatus: models.StatusPending, ToStatus: models.StatusFailed, Message: err.Error(),
-		})
 		// Mark system pool failed too.
 		if sysPool, pErr := h.repo.GetNodePool(ctx, resourceID, "system"); pErr == nil {
 			sysPool.Status = models.NodePoolStatusFailed

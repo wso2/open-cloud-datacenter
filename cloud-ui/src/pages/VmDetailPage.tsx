@@ -31,6 +31,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../api/useApi';
+import { detailErrorMessage } from '../lib/apiError';
 import { useActiveProject } from '../hooks/useActiveProject';
 import { useConfirmDialog } from '../components/useConfirmDialog';
 import StatusPill from '../components/StatusPill';
@@ -216,14 +217,13 @@ export default function VmDetailPage() {
   }
 
   if (vmQuery.isError) {
-    const msg = (vmQuery.error as Error).message;
     return (
       <div className={styles.root}>
         <Card>
           <div className={styles.notFound}>
             <Subtitle1>VM not found</Subtitle1>
             <Body1 style={{ color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalS }}>
-              {msg.includes('404') ? 'No VM with this ID exists in this tenant.' : msg}
+              {detailErrorMessage(vmQuery.error, 'VM')}
             </Body1>
             <Button
               appearance="primary"

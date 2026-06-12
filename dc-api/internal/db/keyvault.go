@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/wso2/dc-api/internal/audit"
 	"github.com/wso2/dc-api/internal/models"
 )
 
@@ -41,6 +42,11 @@ func (r *Repository) CreateKeyVault(ctx context.Context, kv *models.KeyVault) (*
 	).Scan(&kv.ID, &kv.CreatedAt, &kv.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create key_vault: %w", err)
 	}
+	r.recordAudit(ctx, r.pool, auditInsert{
+		ID: kv.ID, Name: kv.Name, Kind: familyKeyVault.kind,
+		TenantUUID: &kv.TenantUUID, ProjectUUID: nilIfNilUUID(kv.ProjectUUID),
+		Action: audit.ActionCreate, To: kv.Status,
+	})
 	return kv, nil
 }
 
@@ -214,13 +220,8 @@ func (r *Repository) ListKeyVaults(ctx context.Context, tenantUUID uuid.UUID) ([
 // When the OpenBao mount + endpoints land (chunk 2-3) this becomes a soft
 // delete + reconciler-driven teardown.
 func (r *Repository) DeleteKeyVault(ctx context.Context, id uuid.UUID) error {
-	const q = `DELETE FROM key_vaults WHERE id = $1`
-	tag, err := r.pool.Exec(ctx, q, id)
-	if err != nil {
+	if err := r.auditedDelete(ctx, familyKeyVault, id); err != nil {
 		return fmt.Errorf("db delete key_vault: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrKeyVaultNotFound
 	}
 	return nil
 }

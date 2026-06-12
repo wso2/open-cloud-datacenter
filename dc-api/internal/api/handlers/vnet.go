@@ -206,12 +206,6 @@ func (h *VNetHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: vnet.ID,
-		ActorID:    userID,
-		Action:     "CREATE",
-		ToStatus:   models.StatusPending,
-	})
 
 	go h.asyncProvisionVNet(vnet.ID, tenantID, projectID, userID, models.VNetSpec{
 		Name:         req.Name,
@@ -285,7 +279,6 @@ func (h *VNetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !requireAction(w, r, h.repo, rbac.ActionVNetDelete) {
 		return
 	}
-	userID, _ := middleware.UserFromContext(r.Context())
 
 	tenantUUID, ok := middleware.TenantUUIDFromContext(r.Context())
 	if !ok {
@@ -363,13 +356,6 @@ func (h *VNetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update VNet status")
 		return
 	}
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: id,
-		ActorID:    userID,
-		Action:     "DELETE",
-		FromStatus: vnet.Status,
-		ToStatus:   models.StatusDeleting,
-	})
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -421,10 +407,6 @@ func (h *VNetHandler) asyncProvisionVNet(resourceID uuid.UUID, tenantID, project
 		h.log.Error().Err(err).Str("vnet", spec.Name).Msg(msg)
 		_ = h.repo.UpdateVNetStatus(ctx, resourceID, models.StatusFailed,
 			msg+": "+err.Error(), "")
-		_ = h.repo.AppendAuditEvent(ctx, &models.AuditEvent{
-			ResourceID: resourceID, ActorID: userID, Action: "STATUS_CHANGE",
-			FromStatus: models.StatusPending, ToStatus: models.StatusFailed, Message: err.Error(),
-		})
 	}
 
 	// ── 1. Create KubeOVN VPC ─────────────────────────────────────────────────
@@ -441,8 +423,4 @@ func (h *VNetHandler) asyncProvisionVNet(resourceID uuid.UUID, tenantID, project
 
 	_ = h.repo.UpdateVNetStatus(ctx, resourceID, models.StatusActive,
 		"VNet provisioned", vpcName)
-	_ = h.repo.AppendAuditEvent(ctx, &models.AuditEvent{
-		ResourceID: resourceID, ActorID: userID, Action: "STATUS_CHANGE",
-		FromStatus: models.StatusPending, ToStatus: models.StatusActive,
-	})
 }

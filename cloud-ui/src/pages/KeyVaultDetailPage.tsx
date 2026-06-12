@@ -35,6 +35,7 @@ import KeyVaultSecretsTab from '../components/KeyVaultSecretsTab';
 import SecretRevealBanner, { type Secret } from '../components/SecretRevealBanner';
 import StatusPill from '../components/StatusPill';
 import { fmtDate } from '../lib/date';
+import { detailErrorMessage } from '../lib/apiError';
 import MembersPage from './MembersPage';
 
 interface KeyVault {
@@ -292,7 +293,7 @@ export default function KeyVaultDetailPage() {
         <MessageBar intent="error">
           <MessageBarBody>
             <MessageBarTitle>Failed to load key vault</MessageBarTitle>
-            {kvQuery.error instanceof Error ? kvQuery.error.message : 'Not found.'}
+            {detailErrorMessage(kvQuery.error, 'key vault')}
           </MessageBarBody>
         </MessageBar>
       </div>

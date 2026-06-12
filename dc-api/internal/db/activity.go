@@ -28,6 +28,10 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/rs/zerolog/log"
+	"github.com/wso2/dc-api/internal/audit"
 	"github.com/wso2/dc-api/internal/models"
 )
 
@@ -50,10 +54,11 @@ func (r *Repository) ListProjectActivity(ctx context.Context, projectUUID uuid.U
 		return nil, 0, fmt.Errorf("db count project activity: %w", err)
 	}
 
-	const q = `
+	q := `
 		SELECT ae.id, ae.resource_id, ae.resource_name, ae.resource_type,
 		       ae.actor_id, ae.action, ae.from_status, ae.to_status, ae.message,
-		       ae.created_at
+		       ae.created_at,
+		       (ae.resource_id IS NOT NULL AND ` + auditLivenessSQL + `) AS live
 		FROM   audit_events ae
 		WHERE  ae.project_uuid = $1
 		ORDER  BY ae.created_at DESC, ae.id DESC
@@ -68,17 +73,20 @@ func (r *Repository) ListProjectActivity(ctx context.Context, projectUUID uuid.U
 	var entries []models.ActivityEntry
 	for rows.Next() {
 		var e models.ActivityEntry
-		var resourceID *uuid.UUID // NULL once the resource is deleted
-		var name, rtype *string   // NULL only on rows that predate snapshots
+		var resourceID *uuid.UUID
+		var name, rtype *string // NULL only on rows that predate snapshots
 		var fromStatus, toStatus, message *string
+		var live bool
 		if err := rows.Scan(
 			&e.ID, &resourceID, &name, &rtype,
 			&e.ActorID, &e.Action, &fromStatus, &toStatus, &message,
-			&e.CreatedAt,
+			&e.CreatedAt, &live,
 		); err != nil {
 			return nil, 0, fmt.Errorf("db scan project activity: %w", err)
 		}
-		if resourceID != nil {
+		// The pointer is exposed only while the resource exists, so clients
+		// never render deep links to deleted resources.
+		if resourceID != nil && live {
 			e.ResourceID = *resourceID
 		}
 		if name != nil {
@@ -159,5 +167,172 @@ var auditSnapshotUnion = func() string {
 		out += arm + " "
 	}
 	return out
+}()
+
+// ── Write side: the framework's recorder ─────────────────────────────────────
+
+// execer abstracts pool vs transaction so recording can join the caller's tx.
+type execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// auditInsert is one lifecycle event with its identity snapshot already
+// resolved — repository methods capture these values from their own
+// INSERT/UPDATE/DELETE … RETURNING, so no extra lookup happens here.
+type auditInsert struct {
+	ID          uuid.UUID
+	Name        string
+	Kind        string // ActivityEvent.resource_type value, e.g. "VNET"
+	TenantUUID  *uuid.UUID
+	ProjectUUID *uuid.UUID
+	Action      string // audit.Action*
+	From        models.ResourceStatus
+	To          models.ResourceStatus
+	Message     string
+}
+
+// recordAudit writes one event. It never fails the caller's operation —
+// auditing is best-effort — but unlike the bad old days it LOGS failures:
+// a silently-failing audit write hid an entire missing feature once.
+// No-op transitions (From == To on a STATUS_CHANGE) are skipped here so the
+// rule holds for every family, not per call site.
+func (r *Repository) recordAudit(ctx context.Context, q execer, in auditInsert) {
+	if in.Action == audit.ActionStatusChange && in.From == in.To {
+		return
+	}
+	const sql = `
+		INSERT INTO audit_events
+			(resource_id, actor_id, action, from_status, to_status, message,
+			 resource_name, resource_type, tenant_uuid, project_uuid)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	_, err := q.Exec(ctx, sql,
+		in.ID, audit.ActorFromContext(ctx), in.Action,
+		nilIfStatusEmpty(in.From), nilIfStatusEmpty(in.To), nilIfEmpty(in.Message),
+		nilIfEmpty(in.Name), nilIfEmpty(in.Kind), in.TenantUUID, in.ProjectUUID,
+	)
+	if err != nil {
+		log.Warn().Err(err).
+			Str("kind", in.Kind).Str("action", in.Action).Str("resource", in.ID.String()).
+			Msg("audit: event write failed (operation unaffected)")
+	}
+}
+
+// auditedTable describes one family for the generic audited helpers below —
+// the second half of the framework. Families whose tables don't carry
+// tenant/project UUIDs resolve identity through their parent VNet.
+type auditedTable struct {
+	kind         string
+	table        string
+	nameCol      string // display-name column ("name", "zone_name", …)
+	parentVNetFK string // "" = own tenant_uuid/project_uuid columns
+}
+
+// auditedStatusUpdate is the framework's standard status transition: update
+// the row, capture the previous status via a self-join RETURNING, and record
+// the STATUS_CHANGE (no-ops skipped inside recordAudit).
+func (r *Repository) auditedStatusUpdate(ctx context.Context, f auditedTable, id uuid.UUID, status models.ResourceStatus, message, backendUID string) error {
+	var q string
+	if f.parentVNetFK == "" {
+		q = `UPDATE ` + f.table + ` x
+			SET status = $2, message = $3, backend_uid = COALESCE(NULLIF($4,''), x.backend_uid)
+			FROM ` + f.table + ` old
+			WHERE x.id = $1 AND old.id = x.id
+			RETURNING old.status::text, x.` + f.nameCol + `, x.tenant_uuid, x.project_uuid`
+	} else {
+		q = `UPDATE ` + f.table + ` x
+			SET status = $2, message = $3, backend_uid = COALESCE(NULLIF($4,''), x.backend_uid)
+			FROM ` + f.table + ` old, vnets v
+			WHERE x.id = $1 AND old.id = x.id AND v.id = old.` + f.parentVNetFK + `
+			RETURNING old.status::text, x.` + f.nameCol + `, v.tenant_uuid, v.project_uuid`
+	}
+	var from, name string
+	var tuid, puid *uuid.UUID
+	err := r.pool.QueryRow(ctx, q, id, string(status), message, backendUID).
+		Scan(&from, &name, &tuid, &puid)
+	if err == pgx.ErrNoRows {
+		return nil // row already gone — keep the old Exec semantics
+	}
+	if err != nil {
+		return fmt.Errorf("db update %s status %s: %w", f.table, id, err)
+	}
+	r.recordAudit(ctx, r.pool, auditInsert{
+		ID: id, Name: name, Kind: f.kind, TenantUUID: tuid, ProjectUUID: puid,
+		Action: audit.ActionStatusChange,
+		From:   models.ResourceStatus(from), To: status, Message: message,
+	})
+	return nil
+}
+
+// auditedDelete is the framework's standard terminal event: delete the row
+// and record DELETE with to_status DELETED, identity captured from the row's
+// last breath via RETURNING.
+func (r *Repository) auditedDelete(ctx context.Context, f auditedTable, id uuid.UUID) error {
+	var q string
+	if f.parentVNetFK == "" {
+		q = `DELETE FROM ` + f.table + ` x WHERE x.id = $1
+			RETURNING x.status::text, x.` + f.nameCol + `, x.tenant_uuid, x.project_uuid`
+	} else {
+		q = `DELETE FROM ` + f.table + ` x USING vnets v
+			WHERE x.id = $1 AND v.id = x.` + f.parentVNetFK + `
+			RETURNING x.status::text, x.` + f.nameCol + `, v.tenant_uuid, v.project_uuid`
+	}
+	var from, name string
+	var tuid, puid *uuid.UUID
+	err := r.pool.QueryRow(ctx, q, id).Scan(&from, &name, &tuid, &puid)
+	if err == pgx.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("db delete %s %s: %w", f.table, id, err)
+	}
+	r.recordAudit(ctx, r.pool, auditInsert{
+		ID: id, Name: name, Kind: f.kind, TenantUUID: tuid, ProjectUUID: puid,
+		Action: audit.ActionDelete,
+		From:   models.ResourceStatus(from), To: models.StatusDeleted,
+	})
+	return nil
+}
+
+// The families wired through the generic helpers. resources, databases, and
+// private endpoints have bespoke methods (extra columns / tx semantics) that
+// call recordAudit directly.
+var (
+	familyVNet       = auditedTable{kind: "VNET", table: "vnets", nameCol: "name"}
+	familySubnet     = auditedTable{kind: "SUBNET", table: "subnets", nameCol: "name"}
+	familyRouteTable = auditedTable{kind: "ROUTE_TABLE", table: "route_tables", nameCol: "name"}
+	familyNSG        = auditedTable{kind: "NSG", table: "network_security_groups", nameCol: "name"}
+	familyPeering    = auditedTable{kind: "PEERING", table: "peerings", nameCol: "name", parentVNetFK: "vnet_id"}
+	familyDNSZone    = auditedTable{kind: "PRIVATE_DNS_ZONE", table: "private_dns_zones", nameCol: "zone_name", parentVNetFK: "vnet_id"}
+	familyKeyVault   = auditedTable{kind: "KEYVAULT", table: "key_vaults", nameCol: "name"}
+)
+
+// vnetIdentity resolves a VNet's tenant/project UUIDs for child events
+// whose own tables don't carry them. Best-effort: nils on a missing row.
+func (r *Repository) vnetIdentity(ctx context.Context, vnetID uuid.UUID) (tuid, puid *uuid.UUID) {
+	_ = r.pool.QueryRow(ctx,
+		`SELECT tenant_uuid, project_uuid FROM vnets WHERE id = $1`, vnetID).
+		Scan(&tuid, &puid)
+	return tuid, puid
+}
+
+// auditedLivenessTables lists every table a resource_id pointer may refer
+// to — used by the feed to decide whether the pointer still resolves (the
+// UI only renders deep links for live resources).
+var auditedLivenessTables = []string{
+	"resources", "vnets", "subnets", "route_tables", "network_security_groups",
+	"peerings", "private_dns_zones", "key_vaults", "databases", "private_endpoints",
+}
+
+// auditLivenessSQL is "(EXISTS(...) OR EXISTS(...) …)" for $-substitution-free
+// embedding in the feed query (table names are compile-time constants).
+var auditLivenessSQL = func() string {
+	out := "("
+	for i, t := range auditedLivenessTables {
+		if i > 0 {
+			out += " OR "
+		}
+		out += "EXISTS (SELECT 1 FROM " + t + " WHERE id = ae.resource_id)"
+	}
+	return out + ")"
 }()
 

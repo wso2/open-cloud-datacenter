@@ -226,13 +226,6 @@ func (h *PeeringHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: peering.ID,
-		ActorID:    userID,
-		Action:     "CREATE",
-		ToStatus:   models.StatusPending,
-		Message:    fmt.Sprintf("vnet_id=%s peer_vnet_id=%s", vnetID, peerID),
-	})
 
 	// F6: allocate the transit /24 BEFORE the async goroutine fires. Doing it
 	// inline lets us surface "pool exhausted" or DB errors as a synchronous
@@ -349,7 +342,6 @@ func (h *PeeringHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !requireAction(w, r, h.repo, rbac.ActionPeeringDelete) {
 		return
 	}
-	userID, _ := middleware.UserFromContext(r.Context())
 
 	vnetID, err := uuid.Parse(chi.URLParam(r, "vnet_id"))
 	if err != nil {
@@ -407,10 +399,6 @@ func (h *PeeringHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update peering status")
 		return
 	}
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: peeringID, ActorID: userID, Action: "DELETE",
-		FromStatus: peering.Status, ToStatus: models.StatusDeleting,
-	})
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -454,10 +442,6 @@ func (h *PeeringHandler) asyncProvisionPeering(
 		h.log.Error().Err(err).Str("peering", spec.Name).Msg("kubeovn CreatePeering failed")
 		_ = h.repo.UpdatePeeringStatus(ctx, peeringID, models.StatusFailed,
 			"provisioning failed: "+err.Error(), "")
-		_ = h.repo.AppendAuditEvent(ctx, &models.AuditEvent{
-			ResourceID: peeringID, ActorID: userID, Action: "STATUS_CHANGE",
-			FromStatus: models.StatusPending, ToStatus: models.StatusFailed, Message: err.Error(),
-		})
 		return
 	}
 
@@ -471,8 +455,4 @@ func (h *PeeringHandler) asyncProvisionPeering(
 	h.log.Info().Str("peering_id", peeringID.String()).
 		Str("backend_uid", providerRes.BackendUID).
 		Msg("asyncProvisionPeering: peering marked ACTIVE")
-	_ = h.repo.AppendAuditEvent(ctx, &models.AuditEvent{
-		ResourceID: peeringID, ActorID: userID, Action: "STATUS_CHANGE",
-		FromStatus: models.StatusPending, ToStatus: models.StatusActive,
-	})
 }

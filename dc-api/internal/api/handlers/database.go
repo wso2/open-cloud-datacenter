@@ -262,10 +262,6 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	actorID, _ := middleware.UserFromContext(r.Context())
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: created.ID, ActorID: actorID, Action: "CREATE", ToStatus: created.Status,
-	})
 
 	// ── Drive the operator ─────────────────────────────────────────────
 	// Failures here don't roll back the DB row — they leave the row in
@@ -460,12 +456,6 @@ func (h *DatabaseHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Audit before the hard delete — the snapshot resolves only while the
-	// row exists.
-	actorID, _ := middleware.UserFromContext(r.Context())
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: d.ID, ActorID: actorID, Action: "DELETE", FromStatus: d.Status,
-	})
 	if err := h.repo.DeleteDatabase(r.Context(), id); err != nil {
 		if errors.Is(err, db.ErrDatabaseNotFound) {
 			writeError(w, http.StatusNotFound, "database not found")

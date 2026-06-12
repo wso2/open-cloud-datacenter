@@ -182,8 +182,19 @@ func TestActivity_FeedPaginationAndIsolation(t *testing.T) {
 	after, _, status, err := client.ListActivity(ctx, "?limit=100")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status)
-	assert.Equal(t, want, after.Total,
-		"deleting the resource must not change the event count")
+	assert.Equal(t, want+1, after.Total,
+		"row removal must add exactly one terminal DELETE event")
+
+	// The terminal event is the framework's: DELETING/old status → DELETED.
+	var terminal *ActivityEventDTO
+	for i := range after.Items {
+		if after.Items[i].ResourceName == vmName && after.Items[i].Action == "DELETE" {
+			terminal = &after.Items[i]
+			break
+		}
+	}
+	require.NotNil(t, terminal, "terminal DELETE event must exist")
+	assert.Equal(t, "DELETED", terminal.ToStatus, "terminal event must end in DELETED")
 
 	var survived *ActivityEventDTO
 	for i := range after.Items {
@@ -193,8 +204,8 @@ func TestActivity_FeedPaginationAndIsolation(t *testing.T) {
 		}
 	}
 	require.NotNil(t, survived, "CREATE event must survive resource deletion")
-	assert.Equal(t, vmID, survived.ResourceID,
-		"resource_id is a point-in-time pointer — it remains after deletion")
+	assert.Empty(t, survived.ResourceID,
+		"resource_id must be omitted once the resource is gone (no dangling deep links)")
 	assert.Equal(t, string(models.ResourceTypeVM), survived.ResourceType,
 		"resource_type snapshot must survive deletion")
 }
@@ -237,8 +248,52 @@ func TestActivity_FamilyCoverage_VNet(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		p, _, s, e := client.ListActivity(ctx, "?limit=100")
-		return e == nil && s == http.StatusOK && findActivityEvent(p.Items, vnetID, "DELETE") != nil
-	}, 10*time.Second, 250*time.Millisecond, "VNet DELETE event never appeared")
+		if e != nil || s != http.StatusOK {
+			return false
+		}
+		for i := range p.Items {
+			it := p.Items[i]
+			if it.ResourceName == vnetName && it.Action == "DELETE" && it.ToStatus == "DELETED" {
+				// Once deleted, the live pointer must be gone.
+				return it.ResourceID == ""
+			}
+		}
+		return false
+	}, 15*time.Second, 250*time.Millisecond,
+		"VNet terminal DELETE→DELETED event (without a live pointer) never appeared")
+}
+
+// TestActivity_NoOpTransitionsAreSkipped pins the framework rule that a
+// status update to the SAME status records nothing — the bug class that
+// produced DELETING → DELETING entries.
+func TestActivity_NoOpTransitionsAreSkipped(t *testing.T) {
+	ctx := context.Background()
+	client := clientForTenant(t, "tenant-act-noop")
+	mustGrantOwnerForClient(t, "tenant-act-noop")
+
+	created, body, status, err := client.CreateVNet(ctx, CreateVNetRequest{
+		Name: randomName("act-noop"), AddressSpace: []string{"10.243.0.0/16"}, Region: "lk",
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusAccepted, status, "CreateVNet: %s", ErrorBody(body))
+
+	// Wait for the async nop provisioning to settle (PENDING → FAILED).
+	require.Eventually(t, func() bool {
+		p, _, s, e := client.ListActivity(ctx, "?limit=100")
+		return e == nil && s == http.StatusOK && p.Total >= 2
+	}, 10*time.Second, 250*time.Millisecond)
+
+	page, _, _, err := client.ListActivity(ctx, "?limit=100")
+	require.NoError(t, err)
+	before := page.Total
+
+	// Same-status update: must record nothing, for every family by construction.
+	require.NoError(t, env.DB.UpdateVNetStatus(ctx,
+		uuid.MustParse(created.Resource.ID), models.StatusFailed, "still failed", ""))
+
+	page, _, _, err = client.ListActivity(ctx, "?limit=100")
+	require.NoError(t, err)
+	assert.Equal(t, before, page.Total, "a no-op status transition must not be recorded")
 }
 
 // TestActivity_ViewerCanRead proves the gate is at viewer level: a principal

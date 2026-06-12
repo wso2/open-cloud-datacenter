@@ -40,6 +40,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/wso2/dc-api/internal/api/respond"
+	"github.com/wso2/dc-api/internal/audit"
 	"github.com/wso2/dc-api/internal/models"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -151,6 +152,8 @@ func (a *ServiceAccountAuth) Validate(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, ContextKeyIsAdmin, false) // SAs cannot be platform-admin in M1.5
 		// ContextKeyUserID: set to sa.ID.String() for legacy compat — audit_events.actor_id expects a string here.
 		ctx = context.WithValue(ctx, ContextKeyUserID, sa.ID.String())
+		// Stamp the actor for the repository layer's automatic audit recording.
+		ctx = audit.WithActor(ctx, sa.ID.String())
 
 		// ── Fire-and-forget last_used update ────────────────────────────────
 		// We do not block the request on this write. A failed update is only

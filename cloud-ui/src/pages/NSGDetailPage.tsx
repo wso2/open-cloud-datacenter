@@ -41,6 +41,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../api/useApi';
+import { detailErrorMessage } from '../lib/apiError';
 import { useActiveProject } from '../hooks/useActiveProject';
 import { useConfirmDialog } from '../components/useConfirmDialog';
 import StatusPill from '../components/StatusPill';
@@ -236,7 +237,7 @@ export default function NSGDetailPage() {
           <div className={styles.notFound}>
             <Subtitle1>Security group not found</Subtitle1>
             <Body1 style={{ color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalS }}>
-              {(nsgQuery.error as Error).message}
+              {detailErrorMessage(nsgQuery.error, 'security group')}
             </Body1>
             <Button appearance="primary" style={{ marginTop: tokens.spacingVerticalL }} onClick={() => navigate(`/tenants/${tenantId}/projects/${projectId}/nsgs`)}>
               Back to security groups

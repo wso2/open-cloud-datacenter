@@ -32,3 +32,23 @@ function unwrapApiError(raw: string): string {
   }
   return raw;
 }
+
+/**
+ * detailErrorMessage is listErrorMessage's sibling for detail pages: unwrap
+ * the {"error":"…"} envelope and classify the two common cases (missing row,
+ * permission denial) into plain sentences. Detail pages hit "not found" far
+ * more than lists do — stale deep links, deleted resources, activity-feed
+ * history — so the raw envelope must never reach the screen.
+ */
+export function detailErrorMessage(error: unknown, resource: string): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const detail = unwrapApiError(raw);
+  if (/not found|404/i.test(detail)) {
+    return `This ${resource} no longer exists — it may have been deleted.`;
+  }
+  if (/insufficient permissions/i.test(detail)) {
+    return `You don't have permission to view this ${resource}.`;
+  }
+  return detail;
+}
+

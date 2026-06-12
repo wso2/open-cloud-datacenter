@@ -30,6 +30,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2/dc-api/internal/audit"
 	"github.com/wso2/dc-api/internal/models"
 )
 
@@ -130,6 +131,12 @@ func (r *Repository) Create(ctx context.Context, res *models.Resource) (*models.
 	if err := row.Scan(&res.ID, &res.CreatedAt, &res.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create resource: %w", err)
 	}
+
+	r.recordAudit(ctx, tx, auditInsert{
+		ID: res.ID, Name: res.Name, Kind: string(res.Type),
+		TenantUUID: &res.TenantUUID, ProjectUUID: nilIfNilUUID(res.ProjectUUID),
+		Action: audit.ActionCreate, To: res.Status,
+	})
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("db commit create resource: %w", err)
@@ -586,15 +593,30 @@ func (r *Repository) CountByTenant(ctx context.Context, tenantUUID uuid.UUID, re
 // The message field stores human-readable detail (e.g., error messages from providers).
 // updated_at is handled automatically by the PostgreSQL trigger.
 func (r *Repository) UpdateStatus(ctx context.Context, id uuid.UUID, status models.ResourceStatus, message string, backendUID string) error {
+	// The self-join exposes the pre-update row so the audit framework can
+	// record the real transition (and skip no-ops) without a second query.
 	const q = `
-		UPDATE resources
-		SET    status = $2, message = $3, backend_uid = COALESCE(NULLIF($4, ''), backend_uid)
-		WHERE  id = $1`
+		UPDATE resources t
+		SET    status = $2, message = $3, backend_uid = COALESCE(NULLIF($4, ''), t.backend_uid)
+		FROM   resources old
+		WHERE  t.id = $1 AND old.id = t.id
+		RETURNING old.status::text, t.name, t.type::text, t.tenant_uuid, t.project_uuid`
 
-	_, err := r.pool.Exec(ctx, q, id, string(status), message, backendUID)
+	var from, name, kind string
+	var tuid, puid *uuid.UUID
+	err := r.pool.QueryRow(ctx, q, id, string(status), message, backendUID).
+		Scan(&from, &name, &kind, &tuid, &puid)
+	if err == pgx.ErrNoRows {
+		return nil // row already gone — matches the old Exec semantics
+	}
 	if err != nil {
 		return fmt.Errorf("db update status for %s: %w", id, err)
 	}
+	r.recordAudit(ctx, r.pool, auditInsert{
+		ID: id, Name: name, Kind: kind, TenantUUID: tuid, ProjectUUID: puid,
+		Action: audit.ActionStatusChange,
+		From:   models.ResourceStatus(from), To: status, Message: message,
+	})
 	return nil
 }
 
@@ -719,7 +741,24 @@ func (r *Repository) UpdateMgmtIP(ctx context.Context, id uuid.UUID, ip string) 
 // Delete removes a resource row by ID. Used by the reconciler when a DELETING
 // resource is confirmed gone from the provider.
 func (r *Repository) Delete(ctx context.Context, id uuid.UUID) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM resources WHERE id = $1`, id)
+	const q = `
+		DELETE FROM resources
+		WHERE  id = $1
+		RETURNING status::text, name, type::text, tenant_uuid, project_uuid`
+	var from, name, kind string
+	var tuid, puid *uuid.UUID
+	err := r.pool.QueryRow(ctx, q, id).Scan(&from, &name, &kind, &tuid, &puid)
+	if err == pgx.ErrNoRows {
+		return nil
+	}
+	if err == nil {
+		r.recordAudit(ctx, r.pool, auditInsert{
+			ID: id, Name: name, Kind: kind, TenantUUID: tuid, ProjectUUID: puid,
+			Action: audit.ActionDelete,
+			From:   models.ResourceStatus(from), To: models.StatusDeleted,
+		})
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("db delete resource %s: %w", id, err)
 	}

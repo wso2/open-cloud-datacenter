@@ -206,7 +206,6 @@ func (h *RoleAssignmentsHandler) Create(w http.ResponseWriter, r *http.Request) 
 	// used as the display_alias default.
 	principalID := req.UserSub
 	displayAlias := req.DisplayAlias
-	resolvedFromEmail := false
 	if req.UserEmail != "" {
 		if h.directory == nil {
 			writeError(w, http.StatusUnprocessableEntity,
@@ -244,7 +243,6 @@ func (h *RoleAssignmentsHandler) Create(w http.ResponseWriter, r *http.Request) 
 				displayAlias = req.UserEmail
 			}
 		}
-		resolvedFromEmail = true
 	}
 
 	ra, err := h.repo.CreateRoleAssignment(r.Context(), models.RoleAssignment{
@@ -279,22 +277,11 @@ func (h *RoleAssignmentsHandler) Create(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Audit: record email resolution explicitly. Emails in audit_events are
-	// fine — audit is internal; the no-PII rule applies to the
-	// role_assignments row (where display_alias defaults to the resolved IdP
-	// display name, falling back to the email).
-	auditMsg := fmt.Sprintf("granted %s to %s at %s %s",
-		req.RoleDefinition, principalID, scope.Type, scope.ID)
-	if resolvedFromEmail {
-		auditMsg = fmt.Sprintf("granted %s to %s (resolved from %s) at %s %s",
-			req.RoleDefinition, principalID, req.UserEmail, scope.Type, scope.ID)
-	}
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		ResourceID: ra.ID,
-		ActorID:    callerID,
-		Action:     "ROLE_ASSIGNMENT_CREATE",
-		Message:    auditMsg,
-	})
+	// NOTE: role grants are IAM events, not resource lifecycle — they are
+	// outside the audit framework's resource registry today. Extending the
+	// framework with an IAM event kind is tracked as follow-up work; the old
+	// inline audit write here had never actually inserted a row (its
+	// principal UUID was unresolvable under every historical schema).
 
 	writeJSON(w, http.StatusCreated, toRoleAssignmentResponse(ra))
 }
@@ -348,7 +335,7 @@ func (h *RoleAssignmentsHandler) Remove(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	_, callerID, ok := middleware.PrincipalFromContext(r.Context())
+	_, _, ok = middleware.PrincipalFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no principal in context")
 		return
@@ -383,12 +370,6 @@ func (h *RoleAssignmentsHandler) Remove(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	_ = h.repo.AppendAuditEvent(r.Context(), &models.AuditEvent{
-		// ResourceID intentionally zero — removal affects multiple rows atomically.
-		ActorID: callerID,
-		Action:  "ROLE_ASSIGNMENT_DELETE",
-		Message: fmt.Sprintf("revoked %s at %s %s", targetPrincipalID, scope.Type, scope.ID),
-	})
 
 	w.WriteHeader(http.StatusNoContent)
 }

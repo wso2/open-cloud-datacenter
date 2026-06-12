@@ -5715,13 +5715,15 @@ components:
 
     ResourceStatus:
       type: string
-      enum: [PENDING, ACTIVE, FAILED, DELETING]
+      enum: [PENDING, ACTIVE, FAILED, DELETING, DELETED]
       description: |
         Lifecycle status of any DC-API resource.
         - `PENDING` — accepted, provisioning in progress
         - `ACTIVE` — running and healthy
         - `FAILED` — provisioning or deletion failed
         - `DELETING` — deletion requested, async removal in progress
+        - `DELETED` — terminal; appears only as an audit event's to_status
+          (resource records are removed at deletion, never parked here)
 
     # ── Projects ───────────────────────────────────────────────────────────────
 
@@ -6789,10 +6791,10 @@ components:
           type: string
           format: uuid
           description: |
-            UUID of the resource the event was recorded against. The pointer
-            is point-in-time: it may reference a resource that has since been
-            deleted, in which case deep links resolve to a not-found page.
-            Absent only on legacy events recorded before identity snapshots.
+            UUID of the resource the event was recorded against. Present only
+            while the resource exists — once it is deleted the field is
+            omitted, so clients never render deep links to gone resources.
+            The snapshot fields (resource_name/resource_type) always render.
           example: 3a1c2e5d-1234-5678-abcd-000000000001
         resource_name:
           type: string
@@ -6805,7 +6807,8 @@ components:
             per auditable resource family — kept in lockstep with the audit
             framework's registry (`internal/db/activity.go`).
           enum: [VIRTUAL_MACHINE, CLUSTER, VOLUME, BASTION, VNET, SUBNET, NSG,
-                 PEERING, PRIVATE_DNS_ZONE, KEYVAULT, DATABASE, PRIVATE_ENDPOINT]
+                 ROUTE_TABLE, PEERING, PRIVATE_DNS_ZONE, KEYVAULT, DATABASE,
+                 PRIVATE_ENDPOINT]
           example: VIRTUAL_MACHINE
         action:
           type: string
