@@ -28,8 +28,8 @@ func (r *Repository) CreatePrivateEndpoint(ctx context.Context, ep *models.Priva
 	const q = `
 		INSERT INTO private_endpoints
 		    (tenant_id, tenant_uuid, project_id, project_uuid, target_type, target_id, vnet_id, subnet_id, name,
-		     ip_address, hostname, backend_addr, proxy_pod_name, status, message)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		     ip_address, hostname, backend_addr, proxy_pod_name, status, message, region)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		RETURNING id, created_at, updated_at`
 
 	var ipPtr, hostnamePtr, proxyPodPtr, messagePtr *string
@@ -49,7 +49,7 @@ func (r *Repository) CreatePrivateEndpoint(ctx context.Context, ep *models.Priva
 		ep.TenantID, ep.TenantUUID,
 		nilIfEmpty(ep.ProjectID), nilIfNilUUID(ep.ProjectUUID),
 		string(ep.TargetType), ep.TargetID, ep.VNetID, ep.SubnetID, ep.Name,
-		ipPtr, hostnamePtr, ep.BackendAddr, proxyPodPtr, string(ep.Status), messagePtr,
+		ipPtr, hostnamePtr, ep.BackendAddr, proxyPodPtr, string(ep.Status), messagePtr, r.regionStamp(),
 	).Scan(&ep.ID, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create private_endpoint: %w", err)
 	}

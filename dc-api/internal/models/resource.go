@@ -92,8 +92,14 @@ type Resource struct {
 	VNetID    *uuid.UUID `json:"vnet_id,omitempty"`
 	SubnetID  *uuid.UUID `json:"subnet_id,omitempty"`
 	Message   string     `json:"message,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	// Region is the phase-0 multi-region stamp: the region whose control
+	// plane created this resource. Stamped from DCAPI_LOCAL_REGION at
+	// create time; nullable in the DB for pre-stamp rows (backfilled to
+	// 'lk' by schema.sql). Full multi-region semantics are tracked in the
+	// multi-region design.
+	Region    string    `json:"region,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // VMSpec is the intent (desired state) for a virtual machine.

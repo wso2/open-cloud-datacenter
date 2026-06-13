@@ -52,6 +52,17 @@ var allowlistedV1Routes = map[string]bool{
 	// writes (create/patch/delete) ARE gated.
 	"GET /v1/tenants/{tenant_id}/projects/":               true,
 	"GET /v1/tenants/{tenant_id}/projects/{project_id}/":  true,
+	// Multi-region foundation (phase 0): platform-wide, not tenant/project-
+	// scoped, so there's no resource gate to apply.
+	//   - GET /v1/regions — region/zone health; any authenticated caller (read).
+	//   - the agent-token mint self-enforces platform-admin in the handler,
+	//     exactly like POST /v1/admin/tenants.
+	//   - GET /v1/agent/ws authenticates with a dcagent_ bearer token, not an
+	//     OIDC JWT; it is mounted outside the /v1 OIDC group and validates the
+	//     credential itself before upgrading.
+	"GET /v1/regions": true,
+	"POST /v1/admin/regions/{region}/zones/{zone}/agent-token": true,
+	"GET /v1/agent/ws": true,
 }
 
 // TestRouter_EveryV1RouteIsGated is the enforcement framework's safety net. It

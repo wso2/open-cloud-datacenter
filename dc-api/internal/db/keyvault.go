@@ -27,8 +27,8 @@ var ErrKeyVaultNotFound = errors.New("key vault not found")
 // M2.5: includes project_id, project_uuid in INSERT.
 func (r *Repository) CreateKeyVault(ctx context.Context, kv *models.KeyVault) (*models.KeyVault, error) {
 	const q = `
-		INSERT INTO key_vaults (tenant_id, tenant_uuid, project_id, project_uuid, name, soft_delete_days, status, message)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO key_vaults (tenant_id, tenant_uuid, project_id, project_uuid, name, soft_delete_days, status, message, region)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, created_at, updated_at`
 
 	var message *string
@@ -38,7 +38,7 @@ func (r *Repository) CreateKeyVault(ctx context.Context, kv *models.KeyVault) (*
 	if err := r.pool.QueryRow(ctx, q,
 		kv.TenantID, kv.TenantUUID,
 		nilIfEmpty(kv.ProjectID), nilIfNilUUID(kv.ProjectUUID),
-		kv.Name, kv.SoftDeleteDays, string(kv.Status), message,
+		kv.Name, kv.SoftDeleteDays, string(kv.Status), message, r.regionStamp(),
 	).Scan(&kv.ID, &kv.CreatedAt, &kv.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create key_vault: %w", err)
 	}

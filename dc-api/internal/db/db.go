@@ -7,19 +7,20 @@
 // Handlers never write SQL — they call methods like repo.Create() or repo.UpdateStatus().
 //
 // Benefits for an SRE learning Go:
-//   1. If you switch databases (PostgreSQL → CockroachDB), you only change db.go.
-//   2. In tests, you can replace the real repository with a mock (a struct that
-//      records calls without hitting a database). This makes unit tests fast and
-//      deterministic — no need for a running PostgreSQL in CI.
-//   3. All SQL is in one place. SQL injection vulnerabilities are easier to audit.
+//  1. If you switch databases (PostgreSQL → CockroachDB), you only change db.go.
+//  2. In tests, you can replace the real repository with a mock (a struct that
+//     records calls without hitting a database). This makes unit tests fast and
+//     deterministic — no need for a running PostgreSQL in CI.
+//  3. All SQL is in one place. SQL injection vulnerabilities are easier to audit.
 //
 // Dependency Injection (related pattern):
-//   The repository is created in main.go and INJECTED into handlers:
-//     repo := db.NewRepository(pool)
-//     vmHandler := handlers.NewVMHandler(repo, computeProvider)
-//   The VMHandler does not call db.NewRepository() itself — it receives the
-//   repository as an argument. This is Dependency Injection.
-//   It means you can pass a *MockRepository in tests instead of a real one.
+//
+//	The repository is created in main.go and INJECTED into handlers:
+//	  repo := db.NewRepository(pool)
+//	  vmHandler := handlers.NewVMHandler(repo, computeProvider)
+//	The VMHandler does not call db.NewRepository() itself — it receives the
+//	repository as an argument. This is Dependency Injection.
+//	It means you can pass a *MockRepository in tests instead of a real one.
 package db
 
 import (
@@ -38,6 +39,11 @@ import (
 // All methods are safe for concurrent use (pgxpool is connection-pooled).
 type Repository struct {
 	pool *pgxpool.Pool
+	// localRegion is the region THIS control plane stamps on the resources it
+	// creates (multi-region phase 0). Set once at startup via SetLocalRegion
+	// from cfg.LocalRegion. Empty falls back to "lk" at write time so a repo
+	// constructed without the call (older tests) still produces valid rows.
+	localRegion string
 }
 
 // NewRepository creates a Repository backed by the given connection pool.
@@ -50,6 +56,21 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 // that need to seed/manipulate rows directly (e.g. setting per-tenant quotas).
 // Production code should NOT call this — use the typed Repository methods.
 func (r *Repository) Pool() *pgxpool.Pool { return r.pool }
+
+// SetLocalRegion records the region this control plane stamps on resources it
+// creates (multi-region phase 0). Called once at startup from cfg.LocalRegion
+// (and in test setup). Safe to leave unset — regionStamp falls back to "lk".
+func (r *Repository) SetLocalRegion(region string) { r.localRegion = region }
+
+// regionStamp returns the region to write on a newly created row. Defaults to
+// "lk" when SetLocalRegion was never called, matching the schema's seeded
+// region and the backfill of pre-existing rows.
+func (r *Repository) regionStamp() string {
+	if r.localRegion == "" {
+		return "lk"
+	}
+	return r.localRegion
+}
 
 // Connect opens a pgxpool connection to the given DSN.
 // Call this once in main.go; pass the returned pool to NewRepository.
@@ -107,9 +128,9 @@ func (r *Repository) Create(ctx context.Context, res *models.Resource) (*models.
 
 	const q = `
 		INSERT INTO resources
-			(tenant_id, tenant_uuid, project_id, project_uuid, owner_id, name, type, size, status, provider_type, backend_uid, vnet_id, subnet_id, message)
+			(tenant_id, tenant_uuid, project_id, project_uuid, owner_id, name, type, size, status, provider_type, backend_uid, vnet_id, subnet_id, message, region)
 		VALUES
-			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		RETURNING id, created_at, updated_at`
 
 	row := tx.QueryRow(ctx, q,
@@ -127,6 +148,7 @@ func (r *Repository) Create(ctx context.Context, res *models.Resource) (*models.
 		res.VNetID,
 		res.SubnetID,
 		nilIfEmpty(res.Message),
+		r.regionStamp(),
 	)
 	if err := row.Scan(&res.ID, &res.CreatedAt, &res.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create resource: %w", err)

@@ -36,12 +36,12 @@ func (r *Repository) CreateDatabase(ctx context.Context, d *models.Database) (*m
 			tenant_id, tenant_uuid, project_id, project_uuid,
 			name, engine, engine_version, instance_class, allocated_storage_gb,
 			network_mode, vnet_id, subnet_id, nad_ref,
-			status, message
+			status, message, region
 		) VALUES (
 			$1, $2, $3, $4,
 			$5, $6, $7, $8, $9,
 			$10, $11, $12, $13,
-			$14, $15
+			$14, $15, $16
 		)
 		RETURNING id, created_at, updated_at`
 
@@ -49,7 +49,7 @@ func (r *Repository) CreateDatabase(ctx context.Context, d *models.Database) (*m
 		d.TenantID, d.TenantUUID, d.ProjectID, d.ProjectUUID,
 		d.Name, string(d.Engine), nilIfEmpty(d.EngineVersion), d.InstanceClass, d.AllocatedStorageGB,
 		string(d.NetworkMode), d.VNetID, d.SubnetID, nilIfEmpty(d.NadRef),
-		string(d.Status), nilIfEmpty(d.Message),
+		string(d.Status), nilIfEmpty(d.Message), r.regionStamp(),
 	).Scan(&d.ID, &d.CreatedAt, &d.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create database: %w", err)
 	}

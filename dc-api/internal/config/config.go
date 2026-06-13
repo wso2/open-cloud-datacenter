@@ -272,6 +272,12 @@ type Config struct {
 	// all-or-nothing ValidateDirectory check.
 	IDPUserstoreDomain string `envconfig:"IDP_USERSTORE_DOMAIN" default:"DEFAULT"`
 
+	// ── Multi-region (phase 0) ────────────────────────────────────────────────
+	// LocalRegion is the region THIS control plane stamps on phase-0 resources
+	// (resources, key_vaults, databases, private_endpoints rows). It must name
+	// a row in the `regions` table (schema.sql seeds 'lk').
+	LocalRegion string `envconfig:"LOCAL_REGION" default:"lk"`
+
 	// ── Logging ───────────────────────────────────────────────────────────────
 	LogLevel string `envconfig:"LOG_LEVEL" default:"info"`
 

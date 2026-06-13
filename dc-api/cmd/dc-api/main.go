@@ -82,6 +82,10 @@ func main() {
 	}
 
 	repo := db.NewRepository(pool)
+	// Multi-region phase 0: stamp every resource this control plane creates with
+	// its local region (default "lk"). GET /v1/regions and the dc-agent channel
+	// build on the same regions/zones catalog.
+	repo.SetLocalRegion(cfg.LocalRegion)
 
 	// ── Provider instantiation (Factory Pattern) ──────────────────────────────
 	// The factory reads cfg.VMProvider and returns the right implementation.

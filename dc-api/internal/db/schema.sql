@@ -956,3 +956,80 @@ FROM   resources res
 WHERE  ae.resource_id = res.id AND ae.resource_name IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_audit_project_time ON audit_events (project_uuid, created_at DESC);
+
+-- ─────────────────────── Multi-region foundation (phase 0) ───────────────────
+-- Extends the existing `regions` catalog (seeded above) with zones, dc-agent
+-- connection records, and agent auth tokens. Zones are availability domains
+-- within a region; each zone is served by one dc-agent that dials in over the
+-- /v1/agent/ws WebSocket. Zone/region health is DERIVED from agents.last_seen
+-- (no stored status column — status decays naturally when an agent goes quiet).
+--
+-- These are operator/platform tables, not tenant resource families — they are
+-- deliberately NOT wired into the audit/activity framework (see activity.go).
+
+ALTER TABLE regions ADD COLUMN IF NOT EXISTS display_name TEXT;
+
+-- ── Zones ─────────────────────────────────────────────────────────────────────
+-- One row per availability zone within a region. Operator-managed, like the
+-- regions catalog.
+CREATE TABLE IF NOT EXISTS zones (
+    region_name TEXT        NOT NULL REFERENCES regions(name) ON DELETE CASCADE,
+    name        TEXT        NOT NULL,
+    description TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (region_name, name)
+);
+
+-- Seed: the lk region's single zone (mirrors the 'lk' region seed precedent).
+INSERT INTO zones (region_name, name, description)
+VALUES ('lk', 'zone-1', 'Default zone for region lk')
+ON CONFLICT (region_name, name) DO NOTHING;
+
+-- ── Agents ────────────────────────────────────────────────────────────────────
+-- One row per (region, zone) dc-agent. The /v1/agent/ws handler UPSERTs on
+-- hello (refreshing version/remote_addr/connected_at) and bumps last_seen on
+-- every frame. Nothing is written on disconnect — health is computed from
+-- last_seen age by GET /v1/regions.
+CREATE TABLE IF NOT EXISTS agents (
+    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    region_name  TEXT        NOT NULL,
+    zone_name    TEXT        NOT NULL,
+    version      TEXT,
+    remote_addr  TEXT,
+    connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- UNIQUE: one agent row per zone, and the upsert target for the hello frame.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_region_zone ON agents (region_name, zone_name);
+
+-- ── Agent tokens ──────────────────────────────────────────────────────────────
+-- Bearer credentials for dc-agents (format: "dcagent_<random>"). Only the
+-- sha256 hex digest is stored; the raw token is returned exactly once by
+-- POST /v1/admin/regions/{region}/zones/{zone}/agent-token.
+CREATE TABLE IF NOT EXISTS agent_tokens (
+    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    region_name  TEXT        NOT NULL,
+    zone_name    TEXT        NOT NULL,
+    token_hash   TEXT        NOT NULL UNIQUE,  -- sha256 hex of the raw token
+    created_by   TEXT        NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ
+);
+
+-- ── Phase-0 region stamps on existing resource families ─────────────────────
+-- Every row records which region's control plane created it. New rows are
+-- stamped from DCAPI_LOCAL_REGION in the repo Create* methods; pre-existing
+-- rows are backfilled to 'lk' (matches the seeded-region precedent). The
+-- UPDATEs are guarded on `region IS NULL` so re-runs are no-ops.
+-- (vnets already carry a region column; subnets/peerings/DNS zones derive
+-- theirs from the parent VNet by containment.)
+ALTER TABLE resources         ADD COLUMN IF NOT EXISTS region TEXT;
+ALTER TABLE key_vaults        ADD COLUMN IF NOT EXISTS region TEXT;
+ALTER TABLE databases         ADD COLUMN IF NOT EXISTS region TEXT;
+ALTER TABLE private_endpoints ADD COLUMN IF NOT EXISTS region TEXT;
+
+UPDATE resources         SET region = 'lk' WHERE region IS NULL;
+UPDATE key_vaults        SET region = 'lk' WHERE region IS NULL;
+UPDATE databases         SET region = 'lk' WHERE region IS NULL;
+UPDATE private_endpoints SET region = 'lk' WHERE region IS NULL;

@@ -160,7 +160,11 @@ func TestSpec_Conformance(t *testing.T) {
 	// are out of scope. --include-tag matches a single tag value, so we use
 	// the regex variant to express the allowlist.
 	//   - activity: pure DB read (audit_events ⋈ resources) — no provider calls
-	tagRegex := `^(health|directory|keyvaults|roleAssignments|projects|service-accounts|tenants|activity)$`
+	//   - regions: pure DB — GET /v1/regions (read) and the admin token mint
+	//     (deterministic 403 for the member token here). The dc-agent WebSocket
+	//     is tagged `agent`, NOT `regions`, so it stays out of schemathesis —
+	//     a protocol upgrade can't be fuzzed as a REST operation.
+	tagRegex := `^(health|directory|keyvaults|roleAssignments|projects|service-accounts|tenants|activity|regions)$`
 	checks := strings.Join([]string{
 		"not_a_server_error",
 		"status_code_conformance",

@@ -138,6 +138,20 @@ tags:
       RBAC v2 role catalog: the assignable role definitions (built-in today,
       tenant custom roles later) that the UI and CLI pick from when granting
       access.
+  - name: regions
+    description: |
+      Multi-region foundation (phase 0). A region is a deployment locality; each
+      region holds one or more zones (availability domains), and each zone is
+      served by a dc-agent that dials the control plane outbound over WSS. Zone
+      and region health are DERIVED from each agent's last heartbeat — there is
+      no stored status. The read endpoint is platform-wide (not tenant-scoped);
+      the agent-token mint is platform-admin only.
+  - name: agent
+    description: |
+      The dc-agent channel. Agents dial `GET /v1/agent/ws` outbound over WSS/443
+      and speak protocol v0 (hello/ping keepalive) authenticated with a
+      `dcagent_` bearer token — not an OIDC JWT. Datacenters never accept inbound
+      connections; only the agent dials out.
 
 security:
   - bearerAuth: []
@@ -166,6 +180,112 @@ paths:
                   status:
                     type: string
                     example: ok
+
+  # ── Regions (multi-region foundation, phase 0) ──────────────────────────────
+
+  /v1/regions:
+    get:
+      operationId: listRegions
+      tags: [regions]
+      summary: List regions with zone and agent health
+      description: |
+        Returns every region with its zones and a DERIVED health status. Zone
+        status is the age of that zone's dc-agent heartbeat — `up` (seen within
+        ~90s), `degraded` (stale but recent), `down` (long silent), or `unknown`
+        (no agent has ever connected). A region's status is the best of its
+        zones. Any authenticated caller may read; the endpoint is platform-wide,
+        not tenant- or project-scoped.
+      responses:
+        "200":
+          description: Regions with derived health
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegionList"
+        "401":
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/admin/regions/{region}/zones/{zone}/agent-token:
+    parameters:
+      - name: region
+        in: path
+        required: true
+        description: Region name (must exist in the regions catalog)
+        schema:
+          type: string
+          example: lk
+      - name: zone
+        in: path
+        required: true
+        description: Zone name within the region
+        schema:
+          type: string
+          example: zone-1
+    post:
+      operationId: mintAgentToken
+      tags: [regions]
+      summary: Mint a dc-agent bearer token for a zone
+      description: |
+        Generates a `dcagent_`-prefixed bearer token authorising a dc-agent to
+        connect to `GET /v1/agent/ws` for the given (region, zone). The raw token
+        is returned ONCE — only its sha256 digest is stored, so it is never
+        recoverable afterwards. Platform-admin only; non-admin callers receive
+        403 regardless of their tenant/project roles.
+      responses:
+        "201":
+          description: Token minted (raw value returned exactly once)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentTokenResponse"
+        "403":
+          description: Caller is not a platform admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Region or zone not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── dc-agent channel ────────────────────────────────────────────────────────
+
+  /v1/agent/ws:
+    get:
+      operationId: agentChannel
+      tags: [agent]
+      summary: dc-agent WebSocket channel (protocol v0)
+      description: |
+        WebSocket upgrade endpoint for a per-zone dc-agent. The agent dials this
+        outbound over WSS/443 with `Authorization: Bearer dcagent_<token>` and
+        then speaks protocol v0 — JSON text frames discriminated by `type`:
+
+          agent  → server   {"type":"hello","region":"…","zone":"…","version":"…"}
+          server → agent    {"type":"hello_ack","agent_id":"<uuid>"}
+          agent  → server   {"type":"ping","ts":"<RFC3339>"}   (every 30s)
+          server → agent    {"type":"pong","ts":"<RFC3339>"}
+
+        The server enforces a ~120s read deadline; a silent agent is dropped and
+        reconnects on its side. This is a protocol upgrade, not a JSON REST
+        endpoint, so it has no response body schema.
+      security:
+        - agentToken: []
+      responses:
+        "101":
+          description: Switching Protocols — WebSocket established
+        "401":
+          description: Missing, malformed, or unknown agent bearer token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   # ── Projects ────────────────────────────────────────────────────────────────
 
@@ -5530,6 +5650,14 @@ components:
         2. A DC-API service-account token with the format
            `dcapi_sa_<lookup_id>_<secret>` — issued by
            `POST /v1/tenants/{tenant_id}/service-accounts`.
+    agentToken:
+      type: http
+      scheme: bearer
+      description: |
+        A dc-agent bearer token with the format `dcagent_<random>`, minted by
+        `POST /v1/admin/regions/{region}/zones/{zone}/agent-token`. Used only by
+        the `GET /v1/agent/ws` channel — NOT an OIDC JWT. The control plane
+        stores only the token's sha256 digest; the raw value is shown once.
 
   parameters:
     ResourceID:
@@ -5712,6 +5840,94 @@ components:
           type: string
           description: Human-readable description of what went wrong
           example: "name is required"
+
+    # ── Regions (multi-region foundation, phase 0) ───────────────────────────
+
+    RegionStatus:
+      type: string
+      enum: [up, degraded, down, unknown]
+      description: |
+        Derived health of a zone or region, from the age of the zone's dc-agent
+        heartbeat. `up` — seen within ~90s; `degraded` — stale but within ~10m;
+        `down` — silent beyond that; `unknown` — no agent has ever connected.
+
+    AgentStatus:
+      type: object
+      required: [version, last_seen]
+      description: The dc-agent currently (or last) connected for a zone.
+      properties:
+        version:
+          type: string
+          description: Agent build version reported in its hello frame.
+          example: "0.1.0"
+        last_seen:
+          type: string
+          format: date-time
+          description: RFC3339 timestamp of the agent's most recent heartbeat.
+
+    Zone:
+      type: object
+      required: [name, status, agent]
+      properties:
+        name:
+          type: string
+          example: zone-1
+        status:
+          $ref: "#/components/schemas/RegionStatus"
+        agent:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AgentStatus"
+          description: Null when no agent has ever registered for the zone.
+
+    Region:
+      type: object
+      required: [name, display_name, description, status, zones]
+      properties:
+        name:
+          type: string
+          example: lk
+        display_name:
+          type: string
+          nullable: true
+          description: Human-friendly label; null when unset (clients fall back to name).
+        description:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/RegionStatus"
+        zones:
+          type: array
+          items:
+            $ref: "#/components/schemas/Zone"
+
+    RegionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Region"
+
+    AgentTokenResponse:
+      type: object
+      required: [token, region, zone]
+      description: |
+        A freshly minted dc-agent token. The raw `token` is present only in this
+        response — only its sha256 digest is persisted server-side.
+      properties:
+        token:
+          type: string
+          description: The raw bearer token (format `dcagent_<random>`).
+          example: dcagent_9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+        region:
+          type: string
+          example: lk
+        zone:
+          type: string
+          example: zone-1
 
     ResourceStatus:
       type: string

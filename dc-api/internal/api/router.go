@@ -170,6 +170,14 @@ func NewRouter(deps RouterDeps) http.Handler {
 		r.Get("/v1/auth/me", deps.AuthService.HandleMe(deps.Log))
 	}
 
+	// ── dc-agent channel (bearer-token auth, NOT OIDC) ────────────────────────
+	// GET /v1/agent/ws is the WebSocket a per-zone dc-agent dials outbound over
+	// WSS/443. It authenticates with a "dcagent_" token from agent_tokens — not
+	// an Asgardeo JWT — so it is mounted OUTSIDE the /v1 OIDC group (like
+	// /healthz). The handler validates the bearer before upgrading.
+	agentWSHandler := handlers.NewAgentWSHandler(deps.Repo, deps.Log)
+	r.Get("/v1/agent/ws", agentWSHandler.ServeHTTP)
+
 	// ── API v1 (authenticated) ────────────────────────────────────────────────
 	// All /v1/* routes require a valid Asgardeo JWT.
 	// The auth middleware is applied only inside this route group.
@@ -237,6 +245,15 @@ func NewRouter(deps RouterDeps) http.Handler {
 		roleDefHandler := handlers.NewRoleDefinitionsHandler(deps.Log)
 		r.Get("/role-definitions", roleDefHandler.List)      // GET /v1/role-definitions
 		r.Get("/role-definitions/{key}", roleDefHandler.Get) // GET /v1/role-definitions/{key}
+
+		// ── Multi-region foundation (phase 0) ──────────────────────────────
+		// GET /v1/regions — region/zone health, derived from each zone's
+		// dc-agent last_seen. Any authenticated caller (the dashboard reads
+		// it); not tenant- or project-scoped. The admin token-mint route is
+		// platform-admin-only (enforced inside the handler, like admin/tenants).
+		regionsHandler := handlers.NewRegionsHandler(deps.Repo, deps.Log)
+		r.Get("/regions", regionsHandler.List) // GET /v1/regions
+		r.Post("/admin/regions/{region}/zones/{zone}/agent-token", regionsHandler.MintAgentToken)
 
 		// Admin tenant registry — pre-register empty tenants so they're
 		// visible to GET /v1/tenants before any member has logged in.
