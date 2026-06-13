@@ -20,6 +20,7 @@ import (
 )
 
 const (
+	AgentTokenScopes agentTokenContextKey = "agentToken.Scopes"
 	BearerAuthScopes bearerAuthContextKey = "bearerAuth.Scopes"
 )
 
@@ -572,6 +573,30 @@ func (e QuotaExceededErrorError) Valid() bool {
 	}
 }
 
+// Defines values for RegionStatus.
+const (
+	Degraded RegionStatus = "degraded"
+	Down     RegionStatus = "down"
+	Unknown  RegionStatus = "unknown"
+	Up       RegionStatus = "up"
+)
+
+// Valid indicates whether the value is a known member of the RegionStatus enum.
+func (e RegionStatus) Valid() bool {
+	switch e {
+	case Degraded:
+		return true
+	case Down:
+		return true
+	case Unknown:
+		return true
+	case Up:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ResourceStatus.
 const (
 	ResourceStatusACTIVE   ResourceStatus = "ACTIVE"
@@ -864,6 +889,25 @@ type ActivityPage struct {
 	// Total Total number of events for the project across all pages, not the
 	// size of this page.
 	Total int `json:"total"`
+}
+
+// AgentStatus The dc-agent currently (or last) connected for a zone.
+type AgentStatus struct {
+	// LastSeen RFC3339 timestamp of the agent's most recent heartbeat.
+	LastSeen time.Time `json:"last_seen"`
+
+	// Version Agent build version reported in its hello frame.
+	Version string `json:"version"`
+}
+
+// AgentTokenResponse A freshly minted dc-agent token. The raw `token` is present only in this
+// response — only its sha256 digest is persisted server-side.
+type AgentTokenResponse struct {
+	Region string `json:"region"`
+
+	// Token The raw bearer token (format `dcagent_<random>`).
+	Token string `json:"token"`
+	Zone  string `json:"zone"`
 }
 
 // AsyncNetworkResponse Generic 202 envelope for async network resource operations.
@@ -2148,6 +2192,31 @@ type QuotaExceededError struct {
 // QuotaExceededErrorError defines model for QuotaExceededError.Error.
 type QuotaExceededErrorError string
 
+// Region defines model for Region.
+type Region struct {
+	Description *string `json:"description"`
+
+	// DisplayName Human-friendly label; null when unset (clients fall back to name).
+	DisplayName *string `json:"display_name"`
+	Name        string  `json:"name"`
+
+	// Status Derived health of a zone or region, from the age of the zone's dc-agent
+	// heartbeat. `up` — seen within ~90s; `degraded` — stale but within ~10m;
+	// `down` — silent beyond that; `unknown` — no agent has ever connected.
+	Status RegionStatus `json:"status"`
+	Zones  []Zone       `json:"zones"`
+}
+
+// RegionList defines model for RegionList.
+type RegionList struct {
+	Items []Region `json:"items"`
+}
+
+// RegionStatus Derived health of a zone or region, from the age of the zone's dc-agent
+// heartbeat. `up` — seen within ~90s; `degraded` — stale but within ~10m;
+// `down` — silent beyond that; `unknown` — no agent has ever connected.
+type RegionStatus string
+
 // ResourceStatus Lifecycle status of any DC-API resource.
 //   - `PENDING` — accepted, provisioning in progress
 //   - `ACTIVE` — running and healthy
@@ -2519,6 +2588,18 @@ type VirtualMachine struct {
 // VirtualMachineSize defines model for VirtualMachine.Size.
 type VirtualMachineSize string
 
+// Zone defines model for Zone.
+type Zone struct {
+	// Agent Null when no agent has ever registered for the zone.
+	Agent *AgentStatus `json:"agent"`
+	Name  string       `json:"name"`
+
+	// Status Derived health of a zone or region, from the age of the zone's dc-agent
+	// heartbeat. `up` — seen within ~90s; `degraded` — stale but within ~10m;
+	// `down` — silent beyond that; `unknown` — no agent has ever connected.
+	Status RegionStatus `json:"status"`
+}
+
 // ProjectID defines model for ProjectID.
 type ProjectID = string
 
@@ -2563,6 +2644,9 @@ type ServiceUnavailable = Error
 
 // Unauthorized defines model for Unauthorized.
 type Unauthorized = Error
+
+// agentTokenContextKey is the context key for agentToken security scheme
+type agentTokenContextKey string
 
 // bearerAuthContextKey is the context key for bearerAuth security scheme
 type bearerAuthContextKey string
@@ -3119,6 +3203,9 @@ type ClientInterface interface {
 	// GetHealth request
 	GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// MintAgentToken request
+	MintAgentToken(ctx context.Context, region string, zone string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// AdminCreateTenantWithBody request with any body
 	AdminCreateTenantWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -3128,6 +3215,9 @@ type ClientInterface interface {
 	AdminUpdateTenantCapWithBody(ctx context.Context, tenantId TenantID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	AdminUpdateTenantCap(ctx context.Context, tenantId TenantID, body AdminUpdateTenantCapJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AgentChannel request
+	AgentChannel(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// AuthCallback request
 	AuthCallback(ctx context.Context, params *AuthCallbackParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3140,6 +3230,9 @@ type ClientInterface interface {
 
 	// AuthMe request
 	AuthMe(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListRegions request
+	ListRegions(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListRoleDefinitions request
 	ListRoleDefinitions(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3579,6 +3672,18 @@ func (c *Client) GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (
 	return c.Client.Do(req)
 }
 
+func (c *Client) MintAgentToken(ctx context.Context, region string, zone string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMintAgentTokenRequest(c.Server, region, zone)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) AdminCreateTenantWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewAdminCreateTenantRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -3627,6 +3732,18 @@ func (c *Client) AdminUpdateTenantCap(ctx context.Context, tenantId TenantID, bo
 	return c.Client.Do(req)
 }
 
+func (c *Client) AgentChannel(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAgentChannelRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) AuthCallback(ctx context.Context, params *AuthCallbackParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewAuthCallbackRequest(c.Server, params)
 	if err != nil {
@@ -3665,6 +3782,18 @@ func (c *Client) AuthLogout(ctx context.Context, reqEditors ...RequestEditorFn) 
 
 func (c *Client) AuthMe(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewAuthMeRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListRegions(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRegionsRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -5550,6 +5679,47 @@ func NewGetHealthRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewMintAgentTokenRequest generates requests for MintAgentToken
+func NewMintAgentTokenRequest(server string, region string, zone string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "region", region, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "zone", zone, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/admin/regions/%s/zones/%s/agent-token", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewAdminCreateTenantRequest calls the generic AdminCreateTenant builder with application/json body
 func NewAdminCreateTenantRequest(server string, body AdminCreateTenantJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -5633,6 +5803,33 @@ func NewAdminUpdateTenantCapRequestWithBody(server string, tenantId TenantID, co
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewAgentChannelRequest generates requests for AgentChannel
+func NewAgentChannelRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/agent/ws")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -5786,6 +5983,33 @@ func NewAuthMeRequest(server string) (*http.Request, error) {
 	}
 
 	operationPath := fmt.Sprintf("/v1/auth/me")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListRegionsRequest generates requests for ListRegions
+func NewListRegionsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/regions")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -11987,6 +12211,9 @@ type ClientWithResponsesInterface interface {
 	// GetHealthWithResponse request
 	GetHealthWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHealthResp, error)
 
+	// MintAgentTokenWithResponse request
+	MintAgentTokenWithResponse(ctx context.Context, region string, zone string, reqEditors ...RequestEditorFn) (*MintAgentTokenResp, error)
+
 	// AdminCreateTenantWithBodyWithResponse request with any body
 	AdminCreateTenantWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AdminCreateTenantResp, error)
 
@@ -11996,6 +12223,9 @@ type ClientWithResponsesInterface interface {
 	AdminUpdateTenantCapWithBodyWithResponse(ctx context.Context, tenantId TenantID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AdminUpdateTenantCapResp, error)
 
 	AdminUpdateTenantCapWithResponse(ctx context.Context, tenantId TenantID, body AdminUpdateTenantCapJSONRequestBody, reqEditors ...RequestEditorFn) (*AdminUpdateTenantCapResp, error)
+
+	// AgentChannelWithResponse request
+	AgentChannelWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*AgentChannelResp, error)
 
 	// AuthCallbackWithResponse request
 	AuthCallbackWithResponse(ctx context.Context, params *AuthCallbackParams, reqEditors ...RequestEditorFn) (*AuthCallbackResp, error)
@@ -12008,6 +12238,9 @@ type ClientWithResponsesInterface interface {
 
 	// AuthMeWithResponse request
 	AuthMeWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*AuthMeResp, error)
+
+	// ListRegionsWithResponse request
+	ListRegionsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListRegionsResp, error)
 
 	// ListRoleDefinitionsWithResponse request
 	ListRoleDefinitionsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListRoleDefinitionsResp, error)
@@ -12467,6 +12700,38 @@ func (r GetHealthResp) ContentType() string {
 	return ""
 }
 
+type MintAgentTokenResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *AgentTokenResponse
+	JSON403      *Error
+	JSON404      *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r MintAgentTokenResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r MintAgentTokenResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r MintAgentTokenResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type AdminCreateTenantResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -12531,6 +12796,36 @@ func (r AdminUpdateTenantCapResp) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r AdminUpdateTenantCapResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type AgentChannelResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON401      *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r AgentChannelResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AgentChannelResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r AgentChannelResp) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -12650,6 +12945,37 @@ func (r AuthMeResp) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r AuthMeResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListRegionsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *RegionList
+	JSON401      *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRegionsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRegionsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListRegionsResp) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -16726,6 +17052,15 @@ func (c *ClientWithResponses) GetHealthWithResponse(ctx context.Context, reqEdit
 	return ParseGetHealthResp(rsp)
 }
 
+// MintAgentTokenWithResponse request returning *MintAgentTokenResp
+func (c *ClientWithResponses) MintAgentTokenWithResponse(ctx context.Context, region string, zone string, reqEditors ...RequestEditorFn) (*MintAgentTokenResp, error) {
+	rsp, err := c.MintAgentToken(ctx, region, zone, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMintAgentTokenResp(rsp)
+}
+
 // AdminCreateTenantWithBodyWithResponse request with arbitrary body returning *AdminCreateTenantResp
 func (c *ClientWithResponses) AdminCreateTenantWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AdminCreateTenantResp, error) {
 	rsp, err := c.AdminCreateTenantWithBody(ctx, contentType, body, reqEditors...)
@@ -16758,6 +17093,15 @@ func (c *ClientWithResponses) AdminUpdateTenantCapWithResponse(ctx context.Conte
 		return nil, err
 	}
 	return ParseAdminUpdateTenantCapResp(rsp)
+}
+
+// AgentChannelWithResponse request returning *AgentChannelResp
+func (c *ClientWithResponses) AgentChannelWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*AgentChannelResp, error) {
+	rsp, err := c.AgentChannel(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAgentChannelResp(rsp)
 }
 
 // AuthCallbackWithResponse request returning *AuthCallbackResp
@@ -16794,6 +17138,15 @@ func (c *ClientWithResponses) AuthMeWithResponse(ctx context.Context, reqEditors
 		return nil, err
 	}
 	return ParseAuthMeResp(rsp)
+}
+
+// ListRegionsWithResponse request returning *ListRegionsResp
+func (c *ClientWithResponses) ListRegionsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListRegionsResp, error) {
+	rsp, err := c.ListRegions(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRegionsResp(rsp)
 }
 
 // ListRoleDefinitionsWithResponse request returning *ListRoleDefinitionsResp
@@ -18173,6 +18526,46 @@ func ParseGetHealthResp(rsp *http.Response) (*GetHealthResp, error) {
 	return response, nil
 }
 
+// ParseMintAgentTokenResp parses an HTTP response from a MintAgentTokenWithResponse call
+func ParseMintAgentTokenResp(rsp *http.Response) (*MintAgentTokenResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &MintAgentTokenResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest AgentTokenResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseAdminCreateTenantResp parses an HTTP response from a AdminCreateTenantWithResponse call
 func ParseAdminCreateTenantResp(rsp *http.Response) (*AdminCreateTenantResp, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -18295,6 +18688,32 @@ func ParseAdminUpdateTenantCapResp(rsp *http.Response) (*AdminUpdateTenantCapRes
 	return response, nil
 }
 
+// ParseAgentChannelResp parses an HTTP response from a AgentChannelWithResponse call
+func ParseAgentChannelResp(rsp *http.Response) (*AgentChannelResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AgentChannelResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseAuthCallbackResp parses an HTTP response from a AuthCallbackWithResponse call
 func ParseAuthCallbackResp(rsp *http.Response) (*AuthCallbackResp, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -18383,6 +18802,39 @@ func ParseAuthMeResp(rsp *http.Response) (*AuthMeResp, error) {
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListRegionsResp parses an HTTP response from a ListRegionsWithResponse call
+func ParseListRegionsResp(rsp *http.Response) (*ListRegionsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRegionsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RegionList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
 
 	}
 
