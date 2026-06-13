@@ -79,6 +79,18 @@ patches:
         path: /spec/tls/0/hosts/0
         value: "CHANGE-ME-dcapi-hostname"
 
+  # dc-agent connect endpoint. Use a sibling host under the same wildcard cert
+  # as the API (e.g. connect.<domain>). This host must NOT sit behind a bot/JS
+  # challenge — dc-agents are programmatic clients that can't solve one.
+  - target: { kind: Ingress, name: dc-api-connect }
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: "CHANGE-ME-connect-hostname"
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: "CHANGE-ME-connect-hostname"
+
   - target: { kind: Ingress, name: cloud-ui }
     patch: |-
       - op: replace

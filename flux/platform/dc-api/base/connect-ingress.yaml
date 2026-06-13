@@ -1,0 +1,40 @@
+# Dedicated dc-agent "connect" Ingress.
+#
+# dc-agents dial THIS host (not the human/API host) over WSS to reach the agent
+# channel (/v1/agent/ws). It is a separate hostname on purpose so the platform
+# can apply different edge policy here: in particular this host must NOT sit
+# behind a bot/JS challenge (e.g. a CDN "managed challenge"), because dc-agents
+# are programmatic clients that can't solve one. Security still holds — the
+# agent authenticates with its dcagent_ bearer token, validated by dc-api.
+#
+# Typically a sibling subdomain under the same wildcard cert as the API host
+# (e.g. connect.<domain> alongside api.<domain>). The per-env overlay patches
+# the host + TLS secret name.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dc-api-connect
+  namespace: dc-system
+  annotations:
+    # WebSocket keepalive: hold the upgraded connection open well past nginx's
+    # 60s default so the agent's 30s-ping / ~120s read-deadline loop survives.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["connect.placeholder.example.com"]
+      secretName: dc-api-connect-tls
+  rules:
+    - host: connect.placeholder.example.com
+      http:
+        paths:
+          # Scoped to the agent channel only — widen if other programmatic
+          # (non-browser) clients need this non-challenged host too.
+          - path: /v1/agent/ws
+            pathType: Prefix
+            backend:
+              service:
+                name: dc-api
+                port:
+                  number: 80

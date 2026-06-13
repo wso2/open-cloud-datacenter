@@ -44,8 +44,8 @@ reporting every problem at once.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `DCAGENT_ENDPOINT` | yes | — | Control-plane WebSocket URL, e.g. `wss://controlplane.example.com/v1/agent/ws`. Scheme must be `wss` (`ws` allowed for local dev). |
-| `DCAGENT_TOKEN` | yes | — | Agent bearer token minted by the control plane (`POST /v1/admin/regions`). Must start with `dcagent_`. |
+| `DCAGENT_ENDPOINT` | yes | — | Control-plane agent-channel URL, e.g. `wss://connect.<domain>/v1/agent/ws`. This is the dedicated **connect** host (not the human/API host), which must not sit behind a bot/JS challenge. Scheme must be `wss` (`ws` allowed for local dev). |
+| `DCAGENT_TOKEN` | yes | — | Agent bearer token minted by the control plane — `dcctl admin agent-token create --region <r> --zone <z>` (or the cloud-ui admin page). Must start with `dcagent_`. |
 | `DCAGENT_REGION` | yes | — | Region this agent serves, e.g. `lk`. Sent in the `hello` frame. |
 | `DCAGENT_ZONE` | yes | — | Zone within the region, e.g. `zone-1`. Required even while regions have one zone — the region → zone model is first-class from day one. |
 | `DCAGENT_LOG_LEVEL` | no | `info` | `trace`, `debug`, `info`, `warn`, or `error`. |
