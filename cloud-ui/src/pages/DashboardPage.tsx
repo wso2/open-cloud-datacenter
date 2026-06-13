@@ -7,6 +7,7 @@ import {
   Subtitle1,
   Title2,
   makeStyles,
+  mergeClasses,
   tokens,
 } from '@fluentui/react-components';
 import {
@@ -23,6 +24,7 @@ import type { ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../api/useApi';
 import { ACTIVITY_RESOURCE_ROUTES, useActivityQuery } from '../api/activity';
+import { regionDotVariant, useRegionsQuery, zoneSummary } from '../api/regions';
 import { useActiveProject } from '../hooks/useActiveProject';
 import { fmtDate } from '../lib/date';
 
@@ -111,6 +113,7 @@ const useStyles = makeStyles({
   dotOk: { color: tokens.colorPaletteGreenForeground1 },
   dotWarn: { color: tokens.colorPaletteMarigoldForeground1 },
   dotBad: { color: tokens.colorPaletteRedForeground1 },
+  dotUnknown: { color: tokens.colorNeutralForeground3 },
   twoCol: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
@@ -147,6 +150,7 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalXS,
     cursor: 'pointer',
   },
+  listRowStatic: { cursor: 'default' },
   listName: { fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   listMeta: {
     color: tokens.colorNeutralForeground3,
@@ -252,6 +256,7 @@ export default function DashboardPage() {
   const project = (projectQuery.data ?? []).find((p) => p.id === projectId);
 
   const activityQuery = useActivityQuery(tenantId, projectId, 5, 0);
+  const regionsQuery = useRegionsQuery();
 
   // Cross-kind derivation for the attention card.
   const tagged = KINDS.flatMap((kind, i) =>
@@ -412,6 +417,38 @@ export default function DashboardPage() {
                       {ev.resource_name}
                     </span>
                     <span className={styles.listMeta}>{fmtDate(ev.created_at)}</span>
+                  </div>
+                );
+              })
+            ))}
+        </Card>
+
+        <Card className={styles.sectionCard}>
+          <Subtitle1>Regions</Subtitle1>
+          {regionsQuery.isLoading && <Spinner size="tiny" />}
+          {regionsQuery.isError && <span className={styles.cardError}>unavailable</span>}
+          {!regionsQuery.isLoading &&
+            !regionsQuery.isError &&
+            ((regionsQuery.data?.items ?? []).length === 0 ? (
+              <span className={styles.empty}>No regions registered.</span>
+            ) : (
+              (regionsQuery.data?.items ?? []).map((region) => {
+                const dotClass = {
+                  ok: styles.dotOk,
+                  warn: styles.dotWarn,
+                  bad: styles.dotBad,
+                  unknown: styles.dotUnknown,
+                }[regionDotVariant(region.status)];
+                return (
+                  <div
+                    key={region.name}
+                    className={mergeClasses(styles.listRow, styles.listRowStatic)}
+                  >
+                    <span className={styles.listName}>
+                      <span className={dotClass}>● </span>
+                      {region.display_name ?? region.name}
+                    </span>
+                    <span className={styles.listMeta}>{zoneSummary(region.zones)}</span>
                   </div>
                 );
               })
