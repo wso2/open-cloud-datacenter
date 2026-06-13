@@ -12704,8 +12704,8 @@ type MintAgentTokenResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON201      *AgentTokenResponse
+	JSON400      *Error
 	JSON403      *Error
-	JSON404      *Error
 }
 
 // Status returns HTTPResponse.Status
@@ -18547,19 +18547,19 @@ func ParseMintAgentTokenResp(rsp *http.Response) (*MintAgentTokenResp, error) {
 		}
 		response.JSON201 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
 		response.JSON403 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON404 = &dest
 
 	}
 

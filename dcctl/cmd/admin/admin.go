@@ -26,6 +26,7 @@ or DCAPI_ADMIN_GROUP membership).
 Non-admin callers receive 403 from every endpoint under this group.`,
 	}
 	cmd.AddCommand(newAdminTenantCmd())
+	cmd.AddCommand(newAdminAgentTokenCmd())
 	return cmd
 }
 
