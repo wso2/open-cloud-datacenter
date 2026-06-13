@@ -214,16 +214,18 @@ paths:
       - name: region
         in: path
         required: true
-        description: Region name (must exist in the regions catalog)
+        description: Region name (slug). Registered on first use if new.
         schema:
           type: string
+          pattern: '^[a-z][a-z0-9-]{0,30}[a-z0-9]$'
           example: lk
       - name: zone
         in: path
         required: true
-        description: Zone name within the region
+        description: Zone name within the region (slug). Registered on first use if new.
         schema:
           type: string
+          pattern: '^[a-z][a-z0-9-]{0,30}[a-z0-9]$'
           example: zone-1
     post:
       operationId: mintAgentToken
@@ -231,10 +233,16 @@ paths:
       summary: Mint a dc-agent bearer token for a zone
       description: |
         Generates a `dcagent_`-prefixed bearer token authorising a dc-agent to
-        connect to `GET /v1/agent/ws` for the given (region, zone). The raw token
+        connect to the agent channel for the given (region, zone). The raw token
         is returned ONCE — only its sha256 digest is stored, so it is never
         recoverable afterwards. Platform-admin only; non-admin callers receive
         403 regardless of their tenant/project roles.
+
+        If the region/zone is not yet known, it is registered as a side effect
+        (metadata only — provisioning the underlying Harvester/Rancher
+        infrastructure is owned by Terraform, not this API). There is therefore
+        no separate "create region/zone" call: a region/zone comes into being
+        when an admin mints the first token for it.
       responses:
         "201":
           description: Token minted (raw value returned exactly once)
@@ -242,14 +250,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentTokenResponse"
-        "403":
-          description: Caller is not a platform admin
+        "400":
+          description: Region or zone name is not a valid slug
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "404":
-          description: Region or zone not found
+        "403":
+          description: Caller is not a platform admin
           content:
             application/json:
               schema:

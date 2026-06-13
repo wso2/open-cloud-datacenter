@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -37,6 +38,11 @@ const (
 	agentUpWindow       = 90 * time.Second
 	agentDegradedWindow = 10 * time.Minute
 )
+
+// regionZonePattern is the slug rule for region and zone names — lowercase
+// ASCII, starts with a letter, ends alphanumeric, 2-32 chars. Mirrors the
+// tenant slug convention so the names stay DNS/label-safe.
+var regionZonePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}[a-z0-9]$`)
 
 // RegionsHandler handles the regions read endpoint and the admin token mint.
 type RegionsHandler struct {
@@ -125,15 +131,23 @@ func (h *RegionsHandler) MintAgentToken(w http.ResponseWriter, r *http.Request) 
 
 	region := chi.URLParam(r, "region")
 	zone := chi.URLParam(r, "zone")
-
-	exists, err := h.repo.ZoneExists(r.Context(), region, zone)
-	if err != nil {
-		h.log.Error().Err(err).Msg("zone exists check failed")
-		writeError(w, http.StatusInternalServerError, "failed to mint agent token")
+	if !regionZonePattern.MatchString(region) {
+		writeError(w, http.StatusBadRequest, "region must match ^[a-z][a-z0-9-]{0,30}[a-z0-9]$")
 		return
 	}
-	if !exists {
-		writeError(w, http.StatusNotFound, "region/zone not found")
+	if !regionZonePattern.MatchString(zone) {
+		writeError(w, http.StatusBadRequest, "zone must match ^[a-z][a-z0-9-]{0,30}[a-z0-9]$")
+		return
+	}
+
+	// Register the region/zone if this is the first token for a freshly
+	// bootstrapped cluster. This records metadata only — provisioning the
+	// underlying Harvester/Rancher infrastructure remains Terraform's job, so
+	// there is no "create region" API; the region/zone simply comes into being
+	// when an admin mints the first agent token for it.
+	if err := h.repo.EnsureRegionZone(r.Context(), region, zone); err != nil {
+		h.log.Error().Err(err).Msg("ensure region/zone failed")
+		writeError(w, http.StatusInternalServerError, "failed to mint agent token")
 		return
 	}
 

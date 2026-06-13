@@ -110,16 +110,22 @@ func (r *Repository) ListRegionsWithZones(ctx context.Context) ([]RegionRow, err
 	return regions, nil
 }
 
-// ZoneExists reports whether (region, zone) names a row in the zones table.
-// The admin token-mint handler calls this to return 404 for an unknown zone
-// before generating a credential.
-func (r *Repository) ZoneExists(ctx context.Context, region, zone string) (bool, error) {
-	const q = `SELECT EXISTS (SELECT 1 FROM zones WHERE region_name = $1 AND name = $2)`
-	var exists bool
-	if err := r.pool.QueryRow(ctx, q, region, zone).Scan(&exists); err != nil {
-		return false, fmt.Errorf("db zone exists: %w", err)
+// EnsureRegionZone records a region and its zone if they don't already exist,
+// so an admin minting the first token for a freshly bootstrapped cluster
+// implicitly registers it. This is metadata only — provisioning the underlying
+// Harvester/Rancher infrastructure stays with Terraform, so there is no
+// separate "create region" path; a region/zone exists once a token is minted
+// for it (or an agent connects). Both inserts are idempotent.
+func (r *Repository) EnsureRegionZone(ctx context.Context, region, zone string) error {
+	const regionQ = `INSERT INTO regions (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`
+	if _, err := r.pool.Exec(ctx, regionQ, region); err != nil {
+		return fmt.Errorf("db ensure region: %w", err)
 	}
-	return exists, nil
+	const zoneQ = `INSERT INTO zones (region_name, name) VALUES ($1, $2) ON CONFLICT (region_name, name) DO NOTHING`
+	if _, err := r.pool.Exec(ctx, zoneQ, region, zone); err != nil {
+		return fmt.Errorf("db ensure zone: %w", err)
+	}
+	return nil
 }
 
 // CreateAgentToken stores the sha256 hex digest of a freshly minted agent

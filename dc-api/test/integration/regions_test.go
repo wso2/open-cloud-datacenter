@@ -164,9 +164,26 @@ func TestAgentTokenMint(t *testing.T) {
 		t.Errorf("non-admin mint: status %d, want 403", status)
 	}
 
-	// Admin, unknown zone → 404.
-	if _, status := rawReq(t, http.MethodPost, env.BaseURL+"/v1/admin/regions/lk/zones/nope/agent-token", adminToken, nil); status != http.StatusNotFound {
-		t.Errorf("unknown-zone mint: status %d, want 404", status)
+	// Admin, invalid zone name → 400 (slug validation).
+	if _, status := rawReq(t, http.MethodPost, env.BaseURL+"/v1/admin/regions/lk/zones/Bad_Zone/agent-token", adminToken, nil); status != http.StatusBadRequest {
+		t.Errorf("invalid-zone mint: status %d, want 400", status)
+	}
+
+	// Admin, brand-new region/zone → 201 AND the region/zone is registered as a
+	// side effect (no separate create-region call), so it shows up in /v1/regions.
+	if _, status := rawReq(t, http.MethodPost, env.BaseURL+"/v1/admin/regions/lk/zones/zone-new/agent-token", adminToken, nil); status != http.StatusCreated {
+		t.Errorf("new-zone mint: status %d, want 201", status)
+	}
+	regBody, regStatus := rawReq(t, http.MethodGet, env.BaseURL+"/v1/regions", adminToken, nil)
+	if regStatus != http.StatusOK {
+		t.Fatalf("GET /v1/regions after new-zone mint: status %d", regStatus)
+	}
+	var regList tRegionList
+	_ = json.Unmarshal(regBody, &regList)
+	if reg, ok := findRegion(regList, "lk"); !ok {
+		t.Errorf("region lk missing after mint")
+	} else if _, ok := findZone(reg, "zone-new"); !ok {
+		t.Errorf("zone-new not registered by mint; /v1/regions = %s", regBody)
 	}
 
 	// Admin, valid zone → 201 + token once.
