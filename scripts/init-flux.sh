@@ -691,7 +691,18 @@ cmd_seal() {
   else
     bff_session_secret="$(openssl rand -base64 32)"
   fi
-  oidc_audience="$rancher_oidc_client_id,$bff_client_id,$cloud_ui_client_id"
+  # Audience = every client whose tokens dc-api must accept. Single source of
+  # truth: the asgardeo-auth layer's dc_api_oidc_audiences output, which joins
+  # every TF-managed client (rancher-sso, cloud-ui SPA, cloud-ui BFF, dcctl).
+  # Sourcing it here (instead of hand-assembling) is what keeps a from-scratch
+  # bootstrap and an ad-hoc re-seal byte-identical, and stops a client from
+  # being silently dropped (which is how dcctl fell out of the list before).
+  # Fallback: the legacy trio for consumers whose asgardeo-auth predates the
+  # output (it won't include dcctl — add the output to fix that).
+  oidc_audience="$(tf_get asgardeo-auth dc_api_oidc_audiences)"
+  if [[ -z "$oidc_audience" ]]; then
+    oidc_audience="$rancher_oidc_client_id,$bff_client_id,$cloud_ui_client_id"
+  fi
 
   seal() {
     local name="$1" namespace="$2"; shift 2
