@@ -2,6 +2,8 @@ package conn
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -186,6 +188,129 @@ func TestSessionHandshakeAndPing(t *testing.T) {
 	case <-sessionDone:
 	case <-time.After(3 * time.Second):
 		t.Fatal("runSession did not return after context cancellation")
+	}
+}
+
+// TestSessionDispatch runs the v1 request path against an in-process server:
+// the agent advertises its ops in hello, then answers get_inventory with the
+// handler's result, an unknown op with OP_UNSUPPORTED, and a failing handler
+// with EXEC_ERROR — each response correlated to its request id.
+func TestSessionDispatch(t *testing.T) {
+	disp := Dispatcher{
+		"get_inventory": func(_ context.Context, _ json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(`{"vm_count":3}`), nil
+		},
+		"failing_op": func(_ context.Context, _ json.RawMessage) (json.RawMessage, error) {
+			return nil, errors.New("kaboom")
+		},
+	}
+
+	gotOps := make(chan []string, 1)
+	done := make(chan struct{})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		c, err := websocket.Accept(w, req, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close(websocket.StatusNormalClosure, "test over")
+		ctx := req.Context()
+
+		// hello → capture advertised ops → hello_ack.
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			return
+		}
+		frame, _ := protocol.Decode(data)
+		hello, ok := frame.(*protocol.Hello)
+		if !ok {
+			t.Errorf("first frame %T, want *protocol.Hello", frame)
+			return
+		}
+		gotOps <- hello.Ops
+		ack, _ := protocol.Encode(&protocol.HelloAck{Type: protocol.TypeHelloAck, AgentID: "agent-1"})
+		if err := c.Write(ctx, websocket.MessageText, ack); err != nil {
+			return
+		}
+
+		// send writes a req and reads back the correlated res.
+		send := func(id, op string) *protocol.Res {
+			b, _ := protocol.Encode(&protocol.Req{Type: protocol.TypeReq, ID: id, Op: op})
+			if err := c.Write(ctx, websocket.MessageText, b); err != nil {
+				t.Errorf("server write req %q: %v", op, err)
+				return nil
+			}
+			_, data, err := c.Read(ctx)
+			if err != nil {
+				t.Errorf("server read res for %q: %v", op, err)
+				return nil
+			}
+			f, err := protocol.Decode(data)
+			if err != nil {
+				t.Errorf("server decode res for %q: %v", op, err)
+				return nil
+			}
+			res, ok := f.(*protocol.Res)
+			if !ok {
+				t.Errorf("response is %T, want *protocol.Res", f)
+				return nil
+			}
+			if res.ID != id {
+				t.Errorf("res id = %q, want %q (correlation broken)", res.ID, id)
+			}
+			return res
+		}
+
+		if res := send("id-ok", "get_inventory"); res != nil {
+			if !res.Ok || string(res.Result) != `{"vm_count":3}` {
+				t.Errorf("get_inventory res = %+v, want ok with result {\"vm_count\":3}", res)
+			}
+		}
+		if res := send("id-unknown", "no_such_op"); res != nil {
+			if res.Ok || res.Error == nil || res.Error.Code != protocol.ErrCodeOpUnsupported {
+				t.Errorf("unknown op res = %+v, want OP_UNSUPPORTED", res)
+			}
+		}
+		if res := send("id-fail", "failing_op"); res != nil {
+			if res.Ok || res.Error == nil || res.Error.Code != protocol.ErrCodeExecError {
+				t.Errorf("failing op res = %+v, want EXEC_ERROR", res)
+			}
+		}
+
+		close(done)
+		<-ctx.Done() // hold the conn open until the client disconnects
+	}))
+	defer srv.Close()
+
+	r := NewRunner(Config{
+		Endpoint:     "ws" + strings.TrimPrefix(srv.URL, "http"),
+		Token:        "dcagent_x",
+		Region:       "region-a",
+		Zone:         "zone-1",
+		Version:      "test",
+		Logger:       zerolog.Nop(),
+		PingInterval: time.Hour, // keep pings out of the req/res exchange
+		Dispatcher:   disp,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go r.runSession(ctx)
+
+	select {
+	case ops := <-gotOps:
+		want := []string{"failing_op", "get_inventory"} // sorted
+		if !reflect.DeepEqual(ops, want) {
+			t.Errorf("hello.ops = %v, want %v", ops, want)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for hello")
+	}
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for the request exchanges to complete")
 	}
 }
 

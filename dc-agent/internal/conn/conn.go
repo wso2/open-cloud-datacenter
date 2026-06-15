@@ -8,10 +8,13 @@ package conn
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -67,13 +70,43 @@ type Config struct {
 	// agent reconnects (default 120s, mirroring the server read deadline).
 	// Exposed for tests; production uses the default.
 	IdleLimit time.Duration
+
+	// Dispatcher maps the operation verbs this agent serves (protocol v1) to
+	// their handlers. Its keys are advertised in the hello frame. Empty (the
+	// zero value) keeps the agent presence-only — exactly v0 behaviour.
+	Dispatcher Dispatcher
+}
+
+// Handler runs one operation request: it receives the request's params and
+// returns the result payload, or an error (surfaced to the control plane as an
+// EXEC_ERROR response).
+type Handler func(ctx context.Context, params json.RawMessage) (json.RawMessage, error)
+
+// Dispatcher maps op names to their handlers.
+type Dispatcher map[string]Handler
+
+// ops returns the dispatcher's op names, sorted for a stable hello frame.
+func (d Dispatcher) ops() []string {
+	if len(d) == 0 {
+		return nil
+	}
+	ops := make([]string, 0, len(d))
+	for op := range d {
+		ops = append(ops, op)
+	}
+	sort.Strings(ops)
+	return ops
 }
 
 // Runner maintains the agent↔control-plane channel for the life of the
-// process. It is comms-only today: protocol v0 (hello/ping) keeps the channel
-// healthy; operation verbs arrive in a later protocol version.
+// process. v0 (hello/ping) keeps the channel healthy; v1 operation verbs are
+// served by the configured Dispatcher.
 type Runner struct {
 	cfg Config
+	// writeMu serializes all outbound writes on the current connection: the
+	// ping loop and the (concurrent) op-response goroutines must not interleave
+	// on the wire, because coder/websocket writes are not concurrency-safe.
+	writeMu sync.Mutex
 }
 
 // NewRunner builds a Runner from cfg. Validation of cfg happens in main
@@ -188,9 +221,13 @@ func (r *Runner) dial(ctx context.Context) (*websocket.Conn, error) {
 	return c, nil
 }
 
-// handshake sends hello and waits (bounded) for hello_ack.
+// handshake sends hello and waits (bounded) for hello_ack. The hello advertises
+// the agent's supported ops so the server can return OP_UNSUPPORTED cleanly
+// rather than timing out on a verb this agent lacks.
 func (r *Runner) handshake(ctx context.Context, c *websocket.Conn) (*protocol.HelloAck, error) {
-	if err := r.writeFrame(ctx, c, protocol.NewHello(r.cfg.Region, r.cfg.Zone, r.cfg.Version)); err != nil {
+	hello := protocol.NewHello(r.cfg.Region, r.cfg.Zone, r.cfg.Version)
+	hello.Ops = r.cfg.Dispatcher.ops()
+	if err := r.writeFrame(ctx, c, hello); err != nil {
 		return nil, fmt.Errorf("send hello: %w", err)
 	}
 
@@ -217,6 +254,12 @@ func (r *Runner) handshake(ctx context.Context, c *websocket.Conn) (*protocol.He
 // doesn't know yet). Returns when the connection breaks, the server goes
 // silent past serverIdleLimit, or ctx is cancelled.
 func (r *Runner) pingLoop(ctx context.Context, c *websocket.Conn) error {
+	// sessionCtx bounds the op-dispatch goroutines to this connection: when the
+	// session ends they are cancelled, so a slow op can't write to the next
+	// session's socket.
+	sessionCtx, cancelSession := context.WithCancel(ctx)
+	defer cancelSession()
+
 	type readResult struct {
 		data []byte
 		err  error
@@ -251,7 +294,7 @@ func (r *Runner) pingLoop(ctx context.Context, c *websocket.Conn) error {
 				return fmt.Errorf("read: %w", res.err)
 			}
 			lastRead = time.Now()
-			r.handleFrame(res.data)
+			r.handleFrame(sessionCtx, c, res.data)
 
 		case <-ticker.C:
 			if idle := time.Since(lastRead); idle > r.cfg.IdleLimit {
@@ -265,9 +308,10 @@ func (r *Runner) pingLoop(ctx context.Context, c *websocket.Conn) error {
 	}
 }
 
-// handleFrame processes one inbound steady-state frame. v0 expects only
-// pongs; everything else is logged and ignored.
-func (r *Runner) handleFrame(data []byte) {
+// handleFrame processes one inbound steady-state frame: pongs refresh liveness,
+// req frames are dispatched (each in its own goroutine), and unknown/unexpected
+// types are logged and ignored (forward compatibility).
+func (r *Runner) handleFrame(ctx context.Context, c *websocket.Conn, data []byte) {
 	frame, err := protocol.Decode(data)
 	if err != nil {
 		r.cfg.Logger.Warn().Err(err).Msg("dropping undecodable frame")
@@ -276,10 +320,40 @@ func (r *Runner) handleFrame(data []byte) {
 	switch f := frame.(type) {
 	case *protocol.Pong:
 		r.cfg.Logger.Debug().Str("ts", f.TS).Msg("pong received")
+	case *protocol.Req:
+		// Run in its own goroutine so a slow op never stalls the ping loop or
+		// the reader; bounded by the session ctx.
+		go r.dispatch(ctx, c, f)
 	case *protocol.Unknown:
 		r.cfg.Logger.Warn().Str("frame_type", f.Type).Msg("ignoring unknown frame type (newer protocol?)")
 	default:
 		r.cfg.Logger.Warn().Str("frame_type", fmt.Sprintf("%T", f)).Msg("ignoring unexpected frame")
+	}
+}
+
+// dispatch runs one request's handler and writes its response. An op with no
+// handler returns OP_UNSUPPORTED; a handler error returns EXEC_ERROR.
+func (r *Runner) dispatch(ctx context.Context, c *websocket.Conn, req *protocol.Req) {
+	handler, ok := r.cfg.Dispatcher[req.Op]
+	if !ok {
+		r.writeRes(ctx, c, protocol.NewErrRes(req.ID, protocol.ErrCodeOpUnsupported, "unsupported op: "+req.Op))
+		return
+	}
+	result, err := handler(ctx, req.Params)
+	if err != nil {
+		r.cfg.Logger.Warn().Err(err).Str("op", req.Op).Msg("op handler failed")
+		r.writeRes(ctx, c, protocol.NewErrRes(req.ID, protocol.ErrCodeExecError, err.Error()))
+		return
+	}
+	r.cfg.Logger.Debug().Str("op", req.Op).Str("id", req.ID).Msg("op handled")
+	r.writeRes(ctx, c, protocol.NewRes(req.ID, result))
+}
+
+// writeRes writes a response frame, logging (not returning) any error — the
+// caller is a fire-and-forget dispatch goroutine.
+func (r *Runner) writeRes(ctx context.Context, c *websocket.Conn, res *protocol.Res) {
+	if err := r.writeFrame(ctx, c, res); err != nil {
+		r.cfg.Logger.Warn().Err(err).Str("id", res.ID).Msg("send response failed")
 	}
 }
 
@@ -291,6 +365,8 @@ func (r *Runner) writeFrame(ctx context.Context, c *websocket.Conn, frame any) e
 	}
 	writeCtx, cancel := context.WithTimeout(ctx, writeTimeout)
 	defer cancel()
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
 	if err := c.Write(writeCtx, websocket.MessageText, b); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return err
