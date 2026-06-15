@@ -1,0 +1,4 @@
+# Populated by `flux_bootstrap_git` (the 06-flux-bootstrap-harvester TF layer)
+# on apply: gotk-components.yaml, gotk-sync.yaml, kustomization.yaml. Empty
+# until then — do not hand-edit. Must stay listed in ../kustomization.yaml or
+# the root prune deletes Flux's own components.

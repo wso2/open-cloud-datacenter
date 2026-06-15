@@ -1,0 +1,92 @@
+name: dc-agent
+
+# Build, test, and publish the dc-agent image. The agent runs IN each region's
+# host (Harvester) cluster, dials the control plane outbound over WSS, and serves
+# operations against the local cluster. Runs on GitHub-hosted runners — no
+# self-hosted infrastructure. Deployment is the consumer's concern: the host
+# cluster's Flux ImageUpdateAutomation watches ghcr.io/wso2/dc-agent and rolls
+# new tags in (see examples/consumer/flux-harvester/).
+
+on:
+  pull_request:
+    paths:
+      - 'dc-agent/**'
+      - '.github/workflows/dc-agent.yaml'
+  push:
+    branches: [controlplane]
+    paths:
+      - 'dc-agent/**'
+      - '.github/workflows/dc-agent.yaml'
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/wso2/dc-agent
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: dc-agent/go.mod
+          cache-dependency-path: dc-agent/go.sum
+
+      - name: Unit tests
+        run: cd dc-agent && go test ./...
+
+  build-and-push:
+    # Only publish on push to controlplane (i.e. after a merge). PRs from
+    # forks couldn't write to ghcr.io/wso2/* anyway — GITHUB_TOKEN's
+    # packages:write permission is denied for fork-triggered runs.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Sortable timestamp tag (UTC) for the consumer Flux ImagePolicy's
+      # numerical sort — bare-SHA tags sort alphabetically, which is
+      # meaningless for hex. Matches the dc-api workflow's tag scheme.
+      - name: Generate build timestamp
+        id: ts
+        run: echo "tag=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push dc-agent
+        uses: docker/build-push-action@v5
+        with:
+          context: ./dc-agent
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:${{ steps.ts.outputs.tag }}-${{ github.sha }}
+          cache-from: type=gha,scope=dc-agent
+          cache-to: type=gha,mode=max,scope=dc-agent
+
+      - name: Summary
+        run: |
+          {
+            echo "### dc-agent published"
+            echo
+            echo "- \`${{ env.IMAGE }}:latest\`"
+            echo "- \`${{ env.IMAGE }}:${{ github.sha }}\`"
+            echo "- \`${{ env.IMAGE }}:${{ steps.ts.outputs.tag }}-${{ github.sha }}\`"
+            echo
+            echo "A host-cluster Flux ImagePolicy auto-bumps the deployed pin."
+          } >> "$GITHUB_STEP_SUMMARY"

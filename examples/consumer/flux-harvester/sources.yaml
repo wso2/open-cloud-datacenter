@@ -1,0 +1,26 @@
+# Flux Sources for the host-cluster overlay:
+#   1. open-cloud-datacenter — the shared OCD library (operator bases),
+#      pinned to a ref. Bump to upgrade OCD across this env.
+#   2. flux-system — this consumer repo, auto-created by `flux_bootstrap_git`
+#      in the 06-flux-bootstrap-harvester layer (not declared here).
+#
+# This is a SEPARATE GitRepository from the one the control-plane Flux creates
+# — it lives in the host cluster's own flux-system namespace, isolated by
+# cluster, so the shared name does not conflict. Image-automation writes back
+# only to the consumer repo; OCD is read-only from the cluster's POV.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: open-cloud-datacenter
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://github.com/wso2/open-cloud-datacenter
+  ref:
+    # Track `controlplane` for tip-of-trunk; switch to a `controlplane/vX.Y.Z`
+    # tag once OCD cuts one. Keep in lock-step with ../flux/sources.yaml.
+    branch: controlplane
+  ignore: |
+    /*
+    !/flux

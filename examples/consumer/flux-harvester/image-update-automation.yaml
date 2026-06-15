@@ -1,0 +1,50 @@
+# Flux Image Update Automation — host-cluster operators.
+#
+# Watches the ImagePolicy resources from the OCD operator bases and commits
+# image-tag bumps back to this consumer repo as CI publishes newer tags. It
+# scans the platform-overlay path for `{"$imagepolicy": "..."}` markers (on the
+# kustomize images: newTag fields), mutates them inline, and pushes one commit
+# per round.
+#
+# This is a DIFFERENT object on a DIFFERENT cluster from the control-plane
+# overlay's automation. Both may push to the same branch, but they touch
+# disjoint files (this one only flux-harvester/, the control-plane one only
+# flux/), so their commits don't collide.
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageUpdateAutomation
+metadata:
+  name: harvester-operators
+  namespace: flux-system
+spec:
+  interval: 1m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  git:
+    checkout:
+      ref:
+        # CHANGE-ME: the branch your host-cluster Flux reconciles (commonly an
+        # unprotected `flux-deploy` branch so the bot can push tag bumps).
+        branch: CHANGE-ME-FLUX-BRANCH
+    commit:
+      author:
+        name: Flux Image Automation
+        email: flux@CHANGE-ME.example.com
+      messageTemplate: |
+        Auto-bump host-cluster operator image tags
+
+        Files:
+        {{ range $filename, $_ := .Updated.Files -}}
+        - {{ $filename }}
+        {{ end -}}
+
+        Images:
+        {{ range .Updated.Images -}}
+        - {{ . }}
+        {{ end -}}
+    push:
+      branch: CHANGE-ME-FLUX-BRANCH
+  update:
+    # CHANGE-ME: your env's path to platform-overlay/.
+    path: ./environments/CHANGE-ME-ENV/flux-harvester/platform-overlay
+    strategy: Setters

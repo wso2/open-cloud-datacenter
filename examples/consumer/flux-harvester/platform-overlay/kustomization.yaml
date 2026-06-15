@@ -1,0 +1,58 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Host-cluster operator overlay. Each OCD operator base is pulled as a remote
+# Kustomize base — ONE LINE PER OPERATOR. A new operator (dc-agent, a
+# database-operator) slots in by adding its base path here + a matching images:
+# entry below; nothing else in this file changes shape.
+resources:
+  # keyvault-operator (KVI): reconciles per-tenant OpenBao Raft clusters.
+  # Keep the ?ref= in lock-step with ../sources.yaml.
+  - https://github.com/wso2/open-cloud-datacenter//flux/platform/keyvault-operator/base?ref=controlplane
+  #
+  # dc-agent: the per-zone agent. Uncomment once ghcr.io/wso2/dc-agent is
+  # published and flux/platform/dc-agent/base exists. The agent needs its
+  # dcagent_ channel token — seal it via an infrastructure.yaml (sealed-secrets)
+  # and reference it from the base, OR patch a Secret in here.
+  # - https://github.com/wso2/open-cloud-datacenter//flux/platform/dc-agent/base?ref=controlplane
+
+# ── Host-cluster patches ─────────────────────────────────────────────────────
+# The OCD bases assume a sealed ghcr-pull-secret exists. On the host cluster
+# there is no sealed-secrets controller and the images are PUBLIC GHCR
+# packages, so strip the pull-secret references rather than provisioning one.
+patches:
+  - target: {kind: Deployment, name: keyvault-controller-manager}
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/imagePullSecrets
+  - target: {kind: ImageRepository, name: keyvault-operator}
+    patch: |-
+      - op: remove
+        path: /spec/secretRef
+  # ── Controller-only: leave cluster-scoped CRDs to Terraform ────────────────
+  # CRDs hold live CRs with cleanup finalizers; keep them TF-owned so Flux
+  # never prunes them. Delete the base's bundled CRDs from this build output.
+  - patch: |-
+      apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      metadata:
+        name: keyvaultbackends.keyvault.opencloud.wso2.com
+      $patch: delete
+  - patch: |-
+      apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      metadata:
+        name: keyvaultinstances.keyvault.opencloud.wso2.com
+      $patch: delete
+
+# ── Image pins + auto-bump markers ───────────────────────────────────────────
+# Swap each base Deployment's placeholder image for this env's pinned tag. The
+# `{"$imagepolicy": "...:tag"}` marker tells the host cluster's
+# ImageUpdateAutomation to bump ONLY this tag field. The initial tag MUST exist
+# in GHCR.
+images:
+  - name: ghcr.io/wso2/keyvault-operator
+    newName: ghcr.io/wso2/keyvault-operator
+    newTag: "CHANGE-ME-TAG" # {"$imagepolicy": "flux-system:keyvault-operator:tag"}
+  # - name: ghcr.io/wso2/dc-agent
+  #   newName: ghcr.io/wso2/dc-agent
+  #   newTag: "CHANGE-ME-TAG" # {"$imagepolicy": "flux-system:dc-agent:tag"}

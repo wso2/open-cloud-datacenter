@@ -1,0 +1,22 @@
+# Reconciles the host-cluster operator overlay in ./platform-overlay/, which
+# pulls OCD operator bases as remote Kustomize bases and patches them for the
+# host cluster.
+#
+# No dependsOn (unlike the control-plane overlay): the operator images are
+# public, so this needs no sealed-secrets controller first. Add a dependsOn on
+# an infrastructure Kustomization only if you introduce sealed secrets.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform
+  namespace: flux-system
+spec:
+  interval: 10m
+  # CHANGE-ME: your env's path to this overlay's platform-overlay/ dir.
+  path: ./environments/CHANGE-ME-ENV/flux-harvester/platform-overlay
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 10m

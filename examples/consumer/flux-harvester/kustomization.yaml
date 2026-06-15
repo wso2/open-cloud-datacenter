@@ -1,0 +1,23 @@
+# Root kustomization for the host cluster's Flux overlay. Sibling of
+# ../flux/kustomization.yaml but scoped to host-cluster operators.
+#
+# List each child explicitly so the root reconcile is a one-shot pass and never
+# falls into Flux's recursive fallback (which would drag platform-overlay/'s
+# Deployment into the root reconcile out of order).
+#
+# flux-system/ MUST be listed — it holds gotk-components.yaml, gotk-sync.yaml,
+# and the bootstrap kustomization.yaml that flux_bootstrap_git writes on apply.
+# Without it in the root inventory, the root Kustomization (prune: true) deletes
+# the gotk-* set on the next reconcile and the cluster's Flux silently goes
+# offline.
+#
+# NOTE: no infrastructure.yaml — the host cluster runs operators, not ingress
+# workloads (no cert-manager / ingress-nginx / sealed-secrets). Add one only if
+# a future operator needs a sealed secret (see README).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - flux-system
+  - sources.yaml
+  - platform.yaml
+  - image-update-automation.yaml
