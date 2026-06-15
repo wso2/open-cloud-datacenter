@@ -1,0 +1,34 @@
+# Mutating admission webhook: injects MAC-pinning + KubeOVN annotations on
+# KubeVirt VMs. failurePolicy: Ignore is intentional — if the webhook is down,
+# non-OVN VMs must not be blocked; OVN VMs just miss the MAC pinning (same as
+# before the webhook existed). The handler filters internally by NAD type and
+# no-ops on non-OVN VMs, so no namespaceSelector is needed.
+#
+# The caBundle is injected by cert-manager's cainjector from the serving
+# Certificate (the inject-ca-from annotation), so it is omitted here and kept in
+# lock-step with cert rotation.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: dc-api-ovn-mac-webhook
+  annotations:
+    cert-manager.io/inject-ca-from: dc-webhook-system/dc-api-webhook-serving-cert
+webhooks:
+  - name: virtualmachines.kubevirt.io.dc-api.opencloud.wso2.com
+    admissionReviewVersions: ["v1"]
+    clientConfig:
+      service:
+        name: dc-api-webhook
+        namespace: dc-webhook-system
+        path: /mutate
+        port: 443
+    rules:
+      - apiGroups: ["kubevirt.io"]
+        apiVersions: ["v1"]
+        resources: ["virtualmachines"]
+        operations: ["CREATE", "UPDATE"]
+        scope: Namespaced
+    failurePolicy: Ignore
+    sideEffects: None
+    timeoutSeconds: 5
+    reinvocationPolicy: Never

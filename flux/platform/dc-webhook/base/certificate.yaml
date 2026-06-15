@@ -1,0 +1,34 @@
+# TLS for the admission webhook, via cert-manager (replaces the Terraform `tls`
+# provider's self-signed CA). A namespaced self-signed Issuer mints the serving
+# cert; cert-manager writes it to the dc-api-webhook-tls Secret (mounted at /tls)
+# and populates ca.crt. The MutatingWebhookConfiguration's
+# `cert-manager.io/inject-ca-from` annotation then lets cainjector fill its
+# caBundle from this cert — so the cert + the apiserver's trust stay in lock-step
+# and rotate automatically. Requires cert-manager on the cluster (already present
+# on harvester-dev; otherwise the flux-harvester infrastructure layer installs it).
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: dc-api-webhook-selfsigned
+  namespace: dc-webhook-system
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: dc-api-webhook-serving-cert
+  namespace: dc-webhook-system
+spec:
+  secretName: dc-api-webhook-tls
+  duration: 8760h    # 1y
+  renewBefore: 720h  # 30d
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - dc-api-webhook.dc-webhook-system.svc
+    - dc-api-webhook.dc-webhook-system.svc.cluster.local
+  issuerRef:
+    name: dc-api-webhook-selfsigned
+    kind: Issuer

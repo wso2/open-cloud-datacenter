@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dc-api-webhook
+  namespace: dc-webhook-system
+  labels:
+    app: dc-api-webhook
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dc-api-webhook
+  template:
+    metadata:
+      labels:
+        app: dc-api-webhook
+    spec:
+      serviceAccountName: dc-api-webhook
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: webhook
+          # Public image; tag pinned + auto-bumped by the consumer overlay.
+          image: ghcr.io/wso2/dc-api-webhook:latest # {"$imagepolicy": "flux-system:dc-api-webhook"}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: https
+              containerPort: 9443
+          env:
+            - name: DCWEBHOOK_LISTEN_ADDR
+              value: ":9443"
+            - name: DCWEBHOOK_CERT_FILE
+              value: /tls/tls.crt
+            - name: DCWEBHOOK_KEY_FILE
+              value: /tls/tls.key
+            - name: DCWEBHOOK_LOG_LEVEL
+              value: info
+            # No DCWEBHOOK_KUBECONFIG — the webhook uses in-cluster config + the
+            # ServiceAccount above. Set it only for out-of-cluster/local runs.
+          volumeMounts:
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9443
+              scheme: HTTPS
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tls
+          secret:
+            secretName: dc-api-webhook-tls
