@@ -7,10 +7,11 @@
 //   - The router is where the wires connect.
 //
 // Why keep this separate from main.go?
-//   main.go handles OS concerns (signals, exit codes, env loading).
-//   router.go handles HTTP concerns (routes, middleware order).
-//   Testing router.go is easy: call NewRouter() with mock deps, send test requests.
-//   You don't need to spin up the actual server process.
+//
+//	main.go handles OS concerns (signals, exit codes, env loading).
+//	router.go handles HTTP concerns (routes, middleware order).
+//	Testing router.go is easy: call NewRouter() with mock deps, send test requests.
+//	You don't need to spin up the actual server process.
 package api
 
 import (
@@ -43,10 +44,10 @@ type RouterDeps struct {
 	// NATProvisioner is optional (nil if the network provider doesn't support VPC NAT,
 	// e.g. in integration tests that don't have the external network configured).
 	// When non-nil, the VNet handler uses it to provision SNAT for every new VPC.
-	NATProvisioner  providers.VPCNATProvisioner
+	NATProvisioner providers.VPCNATProvisioner
 	// DNSProvisioner is optional (nil if F20 DNS is not configured).
 	// When non-nil, the subnet handler uses it to provision per-VPC CoreDNS.
-	DNSProvisioner  providers.VPCDNSProvisioner
+	DNSProvisioner providers.VPCDNSProvisioner
 	// DNSSearchDomain is the optional search domain injected into VPC VMs (F20).
 	// Sourced from DCAPI_VPC_DNS_SEARCH_DOMAIN. Empty = no extra search domain.
 	DNSSearchDomain string
@@ -175,7 +176,11 @@ func NewRouter(deps RouterDeps) http.Handler {
 	// WSS/443. It authenticates with a "dcagent_" token from agent_tokens — not
 	// an Asgardeo JWT — so it is mounted OUTSIDE the /v1 OIDC group (like
 	// /healthz). The handler validates the bearer before upgrading.
-	agentWSHandler := handlers.NewAgentWSHandler(deps.Repo, deps.Log)
+	// The Registry holds the live agent Sessions. It is shared between the WS
+	// handler (which registers a session per connected agent) and the v1 HTTP
+	// handlers that Call those agents (e.g. zone inventory).
+	agentRegistry := handlers.NewRegistry()
+	agentWSHandler := handlers.NewAgentWSHandler(deps.Repo, agentRegistry, deps.Log)
 	r.Get("/v1/agent/ws", agentWSHandler.ServeHTTP)
 
 	// ── API v1 (authenticated) ────────────────────────────────────────────────
@@ -311,22 +316,22 @@ func NewRouter(deps RouterDeps) http.Handler {
 			// POST /projects is tenant-owner-only; GET /projects is any member.
 			r.Route("/projects", func(r chi.Router) {
 				r.Method(http.MethodPost, "/", gate(rbac.ActionProjectWrite, projectHandler.Create)) // POST /v1/tenants/{tenant_id}/projects
-				r.Get("/", projectHandler.List)                                                     // GET  /v1/tenants/{tenant_id}/projects (navigation list; tenant-membership-gated)
+				r.Get("/", projectHandler.List)                                                      // GET  /v1/tenants/{tenant_id}/projects (navigation list; tenant-membership-gated)
 
 				// ── Project-scoped subroutes ────────────────────────────────
 				// ProjectContext validates access and injects project_id / project_uuid.
 				r.Route("/{project_id}", func(r chi.Router) {
 					r.Use(projectCtx.Validate)
 
-					r.Get("/", projectHandler.Get)                                                       // GET    /v1/tenants/{tid}/projects/{pid} (navigation; project-context-gated)
-					r.Method(http.MethodPatch, "/", gate(rbac.ActionProjectWrite, projectHandler.Patch))   // PATCH  /v1/tenants/{tid}/projects/{pid}
+					r.Get("/", projectHandler.Get)                                                          // GET    /v1/tenants/{tid}/projects/{pid} (navigation; project-context-gated)
+					r.Method(http.MethodPatch, "/", gate(rbac.ActionProjectWrite, projectHandler.Patch))    // PATCH  /v1/tenants/{tid}/projects/{pid}
 					r.Method(http.MethodDelete, "/", gate(rbac.ActionProjectDelete, projectHandler.Delete)) // DELETE /v1/tenants/{tid}/projects/{pid}
 
 					// ── M1.5 Chunk 7 — Service accounts (project-scoped) ────
 					r.Route("/service-accounts", func(r chi.Router) {
-						r.Method(http.MethodPost, "/", gate(rbac.ActionServiceAccountWrite, serviceAccountHandler.Create))          // POST   .../service-accounts
-						r.Method(http.MethodGet, "/", gate(rbac.ActionServiceAccountRead, serviceAccountHandler.List))             // GET    .../service-accounts
-						r.Method(http.MethodGet, "/{sa_id}", gate(rbac.ActionServiceAccountRead, serviceAccountHandler.Get))       // GET    .../service-accounts/{sa_id}
+						r.Method(http.MethodPost, "/", gate(rbac.ActionServiceAccountWrite, serviceAccountHandler.Create))           // POST   .../service-accounts
+						r.Method(http.MethodGet, "/", gate(rbac.ActionServiceAccountRead, serviceAccountHandler.List))               // GET    .../service-accounts
+						r.Method(http.MethodGet, "/{sa_id}", gate(rbac.ActionServiceAccountRead, serviceAccountHandler.Get))         // GET    .../service-accounts/{sa_id}
 						r.Method(http.MethodDelete, "/{sa_id}", gate(rbac.ActionServiceAccountDelete, serviceAccountHandler.Delete)) // DELETE .../service-accounts/{sa_id}
 					})
 
@@ -351,8 +356,8 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 					// ── Virtual Machines ────────────────────────────────────
 					r.Route("/virtual-machines", func(r chi.Router) {
-						r.Method(http.MethodPost, "/", gate(rbac.ActionVMWrite, vmHandler.Create))       // POST   .../virtual-machines
-						r.Method(http.MethodGet, "/", gate(rbac.ActionVMRead, vmHandler.List))          // GET    .../virtual-machines
+						r.Method(http.MethodPost, "/", gate(rbac.ActionVMWrite, vmHandler.Create)) // POST   .../virtual-machines
+						r.Method(http.MethodGet, "/", gate(rbac.ActionVMRead, vmHandler.List))     // GET    .../virtual-machines
 
 						// Per-VM routes — ResourceScope injects {resource, vm uuid} into the
 						// scope chain, so a role granted on THIS VM authorizes actions on it
@@ -374,22 +379,22 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 					// ── Bastions (F10) ──────────────────────────────────────
 					r.Route("/bastions", func(r chi.Router) {
-						r.Method(http.MethodPost, "/", gate(rbac.ActionBastionWrite, bastionHandler.Create))       // POST   .../bastions
-						r.Method(http.MethodGet, "/", gate(rbac.ActionBastionRead, bastionHandler.List))          // GET    .../bastions
-						r.Method(http.MethodGet, "/{id}", gate(rbac.ActionBastionRead, bastionHandler.Get))       // GET    .../bastions/{id}
+						r.Method(http.MethodPost, "/", gate(rbac.ActionBastionWrite, bastionHandler.Create))        // POST   .../bastions
+						r.Method(http.MethodGet, "/", gate(rbac.ActionBastionRead, bastionHandler.List))            // GET    .../bastions
+						r.Method(http.MethodGet, "/{id}", gate(rbac.ActionBastionRead, bastionHandler.Get))         // GET    .../bastions/{id}
 						r.Method(http.MethodDelete, "/{id}", gate(rbac.ActionBastionDelete, bastionHandler.Delete)) // DELETE .../bastions/{id}
 					})
 
 					// ── Clusters ────────────────────────────────────────────
 					r.Route("/clusters", func(r chi.Router) {
 						r.Method(http.MethodPost, "/", gate(rbac.ActionClusterWrite, clusterHandler.Create)) // POST   .../clusters
-						r.Method(http.MethodGet, "/", gate(rbac.ActionClusterRead, clusterHandler.List))    // GET    .../clusters
+						r.Method(http.MethodGet, "/", gate(rbac.ActionClusterRead, clusterHandler.List))     // GET    .../clusters
 
 						r.Route("/{id}", func(r chi.Router) {
-							r.Use(middleware.ResourceScope("id")) // resource-scope grants authorize actions on this cluster
-							r.Method(http.MethodGet, "/", gate(rbac.ActionClusterRead, clusterHandler.Get))                      // GET    .../clusters/{id}
-							r.Method(http.MethodDelete, "/", gate(rbac.ActionClusterDelete, clusterHandler.Delete))                // DELETE .../clusters/{id}
-							r.Method(http.MethodGet, "/kubeconfig", gate(rbac.ActionClusterKubeconfigRead, clusterHandler.GetKubeconfig))  // GET    .../clusters/{id}/kubeconfig
+							r.Use(middleware.ResourceScope("id"))                                                                         // resource-scope grants authorize actions on this cluster
+							r.Method(http.MethodGet, "/", gate(rbac.ActionClusterRead, clusterHandler.Get))                               // GET    .../clusters/{id}
+							r.Method(http.MethodDelete, "/", gate(rbac.ActionClusterDelete, clusterHandler.Delete))                       // DELETE .../clusters/{id}
+							r.Method(http.MethodGet, "/kubeconfig", gate(rbac.ActionClusterKubeconfigRead, clusterHandler.GetKubeconfig)) // GET    .../clusters/{id}/kubeconfig
 
 							// M5b: resource-scope role assignments + capability probe.
 							r.Route("/role-assignments", func(r chi.Router) {
@@ -401,11 +406,11 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 							// ── AKS-style node pool management (R5) ────────────
 							r.Route("/node-pools", func(r chi.Router) {
-								r.Method(http.MethodGet, "/", gate(rbac.ActionClusterRead, clusterHandler.ListNodePools))    // GET    .../node-pools
-								r.Method(http.MethodPost, "/", gate(rbac.ActionClusterWrite, clusterHandler.AddNodePool))     // POST   .../node-pools
+								r.Method(http.MethodGet, "/", gate(rbac.ActionClusterRead, clusterHandler.ListNodePools)) // GET    .../node-pools
+								r.Method(http.MethodPost, "/", gate(rbac.ActionClusterWrite, clusterHandler.AddNodePool)) // POST   .../node-pools
 
 								r.Route("/{pool_name}", func(r chi.Router) {
-									r.Method(http.MethodGet, "/", gate(rbac.ActionClusterRead, clusterHandler.GetNodePool))             // GET    .../node-pools/{pool_name}
+									r.Method(http.MethodGet, "/", gate(rbac.ActionClusterRead, clusterHandler.GetNodePool))              // GET    .../node-pools/{pool_name}
 									r.Method(http.MethodPatch, "/", gate(rbac.ActionClusterWrite, clusterHandler.ScaleOrUpdateNodePool)) // PATCH  .../node-pools/{pool_name}
 									r.Method(http.MethodDelete, "/", gate(rbac.ActionClusterWrite, clusterHandler.RemoveNodePool))       // DELETE .../node-pools/{pool_name}
 								})
@@ -416,55 +421,55 @@ func NewRouter(deps RouterDeps) http.Handler {
 					// ── M2 Networking — VNets ────────────────────────────────
 					r.Route("/vnets", func(r chi.Router) {
 						r.Method(http.MethodPost, "/", gate(rbac.ActionVNetWrite, vnetHandler.Create)) // POST   .../vnets
-						r.Method(http.MethodGet, "/", gate(rbac.ActionVNetRead, vnetHandler.List))    // GET    .../vnets
+						r.Method(http.MethodGet, "/", gate(rbac.ActionVNetRead, vnetHandler.List))     // GET    .../vnets
 
 						r.Route("/{vnet_id}", func(r chi.Router) {
-							r.Method(http.MethodGet, "/", gate(rbac.ActionVNetRead, vnetHandler.Get))       // GET    .../vnets/{vnet_id}
+							r.Method(http.MethodGet, "/", gate(rbac.ActionVNetRead, vnetHandler.Get))         // GET    .../vnets/{vnet_id}
 							r.Method(http.MethodDelete, "/", gate(rbac.ActionVNetDelete, vnetHandler.Delete)) // DELETE .../vnets/{vnet_id}
 
 							// Subnets
 							r.Route("/subnets", func(r chi.Router) {
-								r.Method(http.MethodPost, "/", gate(rbac.ActionSubnetWrite, subnetHandler.Create))              // POST   .../subnets
-								r.Method(http.MethodGet, "/", gate(rbac.ActionSubnetRead, subnetHandler.List))                 // GET    .../subnets
-								r.Method(http.MethodGet, "/{subnet_id}", gate(rbac.ActionSubnetRead, subnetHandler.Get))       // GET    .../subnets/{subnet_id}
+								r.Method(http.MethodPost, "/", gate(rbac.ActionSubnetWrite, subnetHandler.Create))               // POST   .../subnets
+								r.Method(http.MethodGet, "/", gate(rbac.ActionSubnetRead, subnetHandler.List))                   // GET    .../subnets
+								r.Method(http.MethodGet, "/{subnet_id}", gate(rbac.ActionSubnetRead, subnetHandler.Get))         // GET    .../subnets/{subnet_id}
 								r.Method(http.MethodDelete, "/{subnet_id}", gate(rbac.ActionSubnetDelete, subnetHandler.Delete)) // DELETE .../subnets/{subnet_id}
 							})
 
 							// Route Tables
 							r.Route("/route-tables", func(r chi.Router) {
 								r.Method(http.MethodPost, "/", gate(rbac.ActionRouteTableWrite, rtHandler.Create)) // POST   .../route-tables
-								r.Method(http.MethodGet, "/", gate(rbac.ActionRouteTableRead, rtHandler.List))    // GET    .../route-tables
+								r.Method(http.MethodGet, "/", gate(rbac.ActionRouteTableRead, rtHandler.List))     // GET    .../route-tables
 
 								r.Route("/{rt_id}", func(r chi.Router) {
-									r.Method(http.MethodGet, "/", gate(rbac.ActionRouteTableRead, rtHandler.Get))          // GET    .../route-tables/{rt_id}
+									r.Method(http.MethodGet, "/", gate(rbac.ActionRouteTableRead, rtHandler.Get))           // GET    .../route-tables/{rt_id}
 									r.Method(http.MethodPut, "/", gate(rbac.ActionRouteTableWrite, rtHandler.UpdateRoutes)) // PUT    .../route-tables/{rt_id}
-									r.Method(http.MethodDelete, "/", gate(rbac.ActionRouteTableDelete, rtHandler.Delete))    // DELETE .../route-tables/{rt_id}
+									r.Method(http.MethodDelete, "/", gate(rbac.ActionRouteTableDelete, rtHandler.Delete))   // DELETE .../route-tables/{rt_id}
 
-									r.Method(http.MethodPost, "/associations", gate(rbac.ActionRouteTableWrite, rtHandler.Associate))                  // POST   .../associations
+									r.Method(http.MethodPost, "/associations", gate(rbac.ActionRouteTableWrite, rtHandler.Associate))                 // POST   .../associations
 									r.Method(http.MethodDelete, "/associations/{assoc_id}", gate(rbac.ActionRouteTableWrite, rtHandler.Disassociate)) // DELETE .../associations/{assoc_id}
 								})
 							})
 
 							// VNet Peerings
 							r.Route("/peerings", func(r chi.Router) {
-								r.Method(http.MethodPost, "/", gate(rbac.ActionPeeringWrite, peeringHandler.Create))               // POST   .../peerings
-								r.Method(http.MethodGet, "/", gate(rbac.ActionPeeringRead, peeringHandler.List))                  // GET    .../peerings
-								r.Method(http.MethodGet, "/{peering_id}", gate(rbac.ActionPeeringRead, peeringHandler.Get))       // GET    .../peerings/{peering_id}
+								r.Method(http.MethodPost, "/", gate(rbac.ActionPeeringWrite, peeringHandler.Create))                // POST   .../peerings
+								r.Method(http.MethodGet, "/", gate(rbac.ActionPeeringRead, peeringHandler.List))                    // GET    .../peerings
+								r.Method(http.MethodGet, "/{peering_id}", gate(rbac.ActionPeeringRead, peeringHandler.Get))         // GET    .../peerings/{peering_id}
 								r.Method(http.MethodDelete, "/{peering_id}", gate(rbac.ActionPeeringDelete, peeringHandler.Delete)) // DELETE .../peerings/{peering_id}
 							})
 
 							// Private DNS Zones
 							r.Route("/dns-zones", func(r chi.Router) {
 								r.Method(http.MethodPost, "/", gate(rbac.ActionDNSZoneWrite, dnsHandler.CreateZone)) // POST   .../dns-zones
-								r.Method(http.MethodGet, "/", gate(rbac.ActionDNSZoneRead, dnsHandler.ListZones))   // GET    .../dns-zones
+								r.Method(http.MethodGet, "/", gate(rbac.ActionDNSZoneRead, dnsHandler.ListZones))    // GET    .../dns-zones
 
 								r.Route("/{zone_id}", func(r chi.Router) {
-									r.Method(http.MethodGet, "/", gate(rbac.ActionDNSZoneRead, dnsHandler.GetZone))       // GET    .../dns-zones/{zone_id}
+									r.Method(http.MethodGet, "/", gate(rbac.ActionDNSZoneRead, dnsHandler.GetZone))         // GET    .../dns-zones/{zone_id}
 									r.Method(http.MethodDelete, "/", gate(rbac.ActionDNSZoneDelete, dnsHandler.DeleteZone)) // DELETE .../dns-zones/{zone_id}
 
 									r.Method(http.MethodPost, "/records", gate(rbac.ActionDNSZoneWrite, dnsHandler.UpsertRecord))               // POST   .../records
-									r.Method(http.MethodGet, "/records", gate(rbac.ActionDNSZoneRead, dnsHandler.ListRecords))                 // GET    .../records
-									r.Method(http.MethodGet, "/records/{record_id}", gate(rbac.ActionDNSZoneRead, dnsHandler.GetRecord))       // GET    .../records/{record_id}
+									r.Method(http.MethodGet, "/records", gate(rbac.ActionDNSZoneRead, dnsHandler.ListRecords))                  // GET    .../records
+									r.Method(http.MethodGet, "/records/{record_id}", gate(rbac.ActionDNSZoneRead, dnsHandler.GetRecord))        // GET    .../records/{record_id}
 									r.Method(http.MethodPut, "/records/{record_id}", gate(rbac.ActionDNSZoneWrite, dnsHandler.UpdateRecord))    // PUT    .../records/{record_id}
 									r.Method(http.MethodDelete, "/records/{record_id}", gate(rbac.ActionDNSZoneWrite, dnsHandler.DeleteRecord)) // DELETE .../records/{record_id}
 								})
@@ -475,10 +480,10 @@ func NewRouter(deps RouterDeps) http.Handler {
 					// ── M2 Networking — NSGs ─────────────────────────────────
 					r.Route("/security-groups", func(r chi.Router) {
 						r.Method(http.MethodPost, "/", gate(rbac.ActionNSGWrite, nsgHandler.Create)) // POST   .../security-groups
-						r.Method(http.MethodGet, "/", gate(rbac.ActionNSGRead, nsgHandler.List))    // GET    .../security-groups
+						r.Method(http.MethodGet, "/", gate(rbac.ActionNSGRead, nsgHandler.List))     // GET    .../security-groups
 
 						r.Route("/{sg_id}", func(r chi.Router) {
-							r.Method(http.MethodGet, "/", gate(rbac.ActionNSGRead, nsgHandler.Get))       // GET    .../security-groups/{sg_id}
+							r.Method(http.MethodGet, "/", gate(rbac.ActionNSGRead, nsgHandler.Get))         // GET    .../security-groups/{sg_id}
 							r.Method(http.MethodDelete, "/", gate(rbac.ActionNSGDelete, nsgHandler.Delete)) // DELETE .../security-groups/{sg_id}
 
 							r.Method(http.MethodPut, "/rules", gate(rbac.ActionNSGWrite, nsgHandler.UpdateRules)) // PUT    .../security-groups/{sg_id}/rules
@@ -490,12 +495,12 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 					// ── M3 Key Vaults ───────────────────────────────────────
 					r.Route("/keyvaults", func(r chi.Router) {
-						r.Use(middleware.ResourceScope("id")) // resource-scope grants authorize actions on a vault; no-op for the {id}-less collection routes
-						r.Method(http.MethodPost, "/", gate(rbac.ActionVaultWrite, kvHandler.Create))                       // POST   .../keyvaults
-						r.Method(http.MethodGet, "/", gate(rbac.ActionVaultRead, kvHandler.List))                          // GET    .../keyvaults
-						r.Method(http.MethodGet, "/{id}", gate(rbac.ActionVaultRead, kvHandler.Get))                       // GET    .../keyvaults/{id}
-						r.Method(http.MethodDelete, "/{id}", gate(rbac.ActionVaultDelete, kvHandler.Delete))                 // DELETE .../keyvaults/{id}
-						r.Method(http.MethodGet, "/{id}/credentials", gate(rbac.ActionVaultCredentialsRead, kvHandler.Credentials))            // GET    .../keyvaults/{id}/credentials (shown-once)
+						r.Use(middleware.ResourceScope("id"))                                                                           // resource-scope grants authorize actions on a vault; no-op for the {id}-less collection routes
+						r.Method(http.MethodPost, "/", gate(rbac.ActionVaultWrite, kvHandler.Create))                                   // POST   .../keyvaults
+						r.Method(http.MethodGet, "/", gate(rbac.ActionVaultRead, kvHandler.List))                                       // GET    .../keyvaults
+						r.Method(http.MethodGet, "/{id}", gate(rbac.ActionVaultRead, kvHandler.Get))                                    // GET    .../keyvaults/{id}
+						r.Method(http.MethodDelete, "/{id}", gate(rbac.ActionVaultDelete, kvHandler.Delete))                            // DELETE .../keyvaults/{id}
+						r.Method(http.MethodGet, "/{id}/credentials", gate(rbac.ActionVaultCredentialsRead, kvHandler.Credentials))     // GET    .../keyvaults/{id}/credentials (shown-once)
 						r.Method(http.MethodPost, "/{id}/credentials/rotate", gate(rbac.ActionVaultWrite, kvHandler.RotateCredentials)) // POST   .../keyvaults/{id}/credentials/rotate (atomic rotate, shown-once)
 
 						// ── M3 chunk 3 — Secret CRUD (proxy to OpenBao) ─────
@@ -505,9 +510,9 @@ func NewRouter(deps RouterDeps) http.Handler {
 						if deps.KVIProvisioner != nil {
 							kvSecretsHandler := handlers.NewKeyVaultSecretsHandler(deps.Repo, deps.KVIProvisioner, deps.Log)
 							r.Method(http.MethodGet, "/{id}/secrets", gate(rbac.ActionSecretReadMetadata, kvSecretsHandler.ListKeyVaultSecrets))           // GET    .../secrets
-							r.Method(http.MethodGet, "/{id}/secrets/{key}", gate(rbac.ActionSecretRead, kvSecretsHandler.GetKeyVaultSecret))       // GET    .../secrets/{key}
-							r.Method(http.MethodPut, "/{id}/secrets/{key}", gate(rbac.ActionSecretWrite, kvSecretsHandler.PutKeyVaultSecret))       // PUT    .../secrets/{key}
-							r.Method(http.MethodDelete, "/{id}/secrets/{key}", gate(rbac.ActionSecretDelete, kvSecretsHandler.DeleteKeyVaultSecret))         // DELETE .../secrets/{key}
+							r.Method(http.MethodGet, "/{id}/secrets/{key}", gate(rbac.ActionSecretRead, kvSecretsHandler.GetKeyVaultSecret))               // GET    .../secrets/{key}
+							r.Method(http.MethodPut, "/{id}/secrets/{key}", gate(rbac.ActionSecretWrite, kvSecretsHandler.PutKeyVaultSecret))              // PUT    .../secrets/{key}
+							r.Method(http.MethodDelete, "/{id}/secrets/{key}", gate(rbac.ActionSecretDelete, kvSecretsHandler.DeleteKeyVaultSecret))       // DELETE .../secrets/{key}
 							r.Method(http.MethodPost, "/{id}/secrets/{key}/restore", gate(rbac.ActionSecretWrite, kvSecretsHandler.RestoreKeyVaultSecret)) // POST   .../secrets/{key}/restore
 						}
 
@@ -532,11 +537,11 @@ func NewRouter(deps RouterDeps) http.Handler {
 					// ── Task 1 — DBaaS Databases ────────────────────────────
 					dbHandler := handlers.NewDatabaseHandler(deps.Repo, deps.DatabaseProvisioner, deps.DBaaSOSImage, deps.Log)
 					r.Route("/databases", func(r chi.Router) {
-						r.Use(middleware.ResourceScope("id")) // resource-scope grants authorize actions on a database; no-op for the {id}-less collection routes
-						r.Method(http.MethodPost, "/", gate(rbac.ActionDBServerWrite, dbHandler.Create))                     // POST   .../databases
-						r.Method(http.MethodGet, "/", gate(rbac.ActionDBServerRead, dbHandler.List))                        // GET    .../databases
-						r.Method(http.MethodGet, "/{id}", gate(rbac.ActionDBServerRead, dbHandler.Get))                     // GET    .../databases/{id}
-						r.Method(http.MethodDelete, "/{id}", gate(rbac.ActionDBServerDelete, dbHandler.Delete))               // DELETE .../databases/{id}
+						r.Use(middleware.ResourceScope("id"))                                                                    // resource-scope grants authorize actions on a database; no-op for the {id}-less collection routes
+						r.Method(http.MethodPost, "/", gate(rbac.ActionDBServerWrite, dbHandler.Create))                         // POST   .../databases
+						r.Method(http.MethodGet, "/", gate(rbac.ActionDBServerRead, dbHandler.List))                             // GET    .../databases
+						r.Method(http.MethodGet, "/{id}", gate(rbac.ActionDBServerRead, dbHandler.Get))                          // GET    .../databases/{id}
+						r.Method(http.MethodDelete, "/{id}", gate(rbac.ActionDBServerDelete, dbHandler.Delete))                  // DELETE .../databases/{id}
 						r.Method(http.MethodGet, "/{id}/credentials", gate(rbac.ActionDBCredentialsRead, dbHandler.Credentials)) // GET    .../databases/{id}/credentials (shown-once)
 
 						// M5b: resource-scope role assignments + capability probe.
@@ -574,9 +579,9 @@ func NewRouter(deps RouterDeps) http.Handler {
 			// project-scoped service account, needs the catalog to provision — so they
 			// sit on the router completeness-test allowlist rather than an action gate.
 			// The privileged image upload IS action-gated.
-			r.Get("/images", vmHandler.ListImages)                                                  // GET  /v1/tenants/{tenant_id}/images
+			r.Get("/images", vmHandler.ListImages)                                                   // GET  /v1/tenants/{tenant_id}/images
 			r.Method(http.MethodPost, "/images", gate(rbac.ActionImageWrite, vmHandler.CreateImage)) // POST /v1/tenants/{tenant_id}/images
-			r.Get("/networks", vmHandler.ListNetworks)                                              // GET /v1/tenants/{tenant_id}/networks
+			r.Get("/networks", vmHandler.ListNetworks)                                               // GET /v1/tenants/{tenant_id}/networks
 
 			// Capacity cap + current allocation across projects, in one shot.
 			// Used by the RegisterProjectDialog to show "X cpu available" inline

@@ -33,7 +33,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/wso2/dc-api/internal/db"
 )
@@ -83,15 +82,18 @@ type wsPong struct {
 	TS   string `json:"ts"`
 }
 
-// AgentWSHandler upgrades agent connections and runs the protocol-v0 loop.
+// AgentWSHandler upgrades agent connections, runs the handshake, and hands the
+// live socket to a Session in the Registry for the v1 command channel.
 type AgentWSHandler struct {
-	repo *db.Repository
-	log  zerolog.Logger
+	repo     *db.Repository
+	registry *Registry
+	log      zerolog.Logger
 }
 
-// NewAgentWSHandler constructs the handler with injected dependencies.
-func NewAgentWSHandler(repo *db.Repository, log zerolog.Logger) *AgentWSHandler {
-	return &AgentWSHandler{repo: repo, log: log}
+// NewAgentWSHandler constructs the handler with injected dependencies. The
+// registry is shared with the HTTP handlers that Call connected agents.
+func NewAgentWSHandler(repo *db.Repository, registry *Registry, log zerolog.Logger) *AgentWSHandler {
+	return &AgentWSHandler{repo: repo, registry: registry, log: log}
 }
 
 // ServeHTTP authenticates the bearer token, upgrades to WebSocket, and runs
@@ -162,7 +164,8 @@ func (h *AgentWSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := writeFrame(sessCtx, c, wsHelloAck{Type: wsTypeHelloAck, AgentID: agentID.String()}); err != nil {
+	sess := newSession(c, region, zone, h.log)
+	if err := sess.writeFrame(sessCtx, wsHelloAck{Type: wsTypeHelloAck, AgentID: agentID.String()}); err != nil {
 		h.log.Warn().Err(err).Msg("send hello_ack failed")
 		return
 	}
@@ -172,8 +175,20 @@ func (h *AgentWSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Str("version", hello.Version).Str("remote", r.RemoteAddr).
 		Msg("agent connected")
 
-	// ── Steady state: read frames, bump liveness, reply to pings ────────────
-	h.serve(sessCtx, c, agentID)
+	// Publish the session so HTTP handlers can Call this agent, then run the
+	// steady-state loop until the agent disconnects. Unregister + fail any
+	// in-flight Calls on the way out.
+	h.registry.register(sess)
+	defer func() {
+		h.registry.unregister(sess)
+		sess.close()
+	}()
+
+	sess.Serve(sessCtx, func() {
+		if err := h.repo.TouchAgent(sessCtx, agentID); err != nil {
+			h.log.Warn().Err(err).Msg("touch agent failed (non-fatal)")
+		}
+	})
 
 	_ = c.Close(websocket.StatusNormalClosure, "")
 	h.log.Info().Str("agent_id", agentID.String()).Msg("agent disconnected")
@@ -203,45 +218,6 @@ func (h *AgentWSHandler) readHello(ctx context.Context, c *websocket.Conn) (*wsH
 	return &hello, nil
 }
 
-// serve is the steady-state loop: every inbound frame refreshes the agent's
-// last_seen; pings are answered with a pong. The 120s read deadline tears the
-// channel down if the agent goes silent (the agent reconnects on its side).
-func (h *AgentWSHandler) serve(ctx context.Context, c *websocket.Conn, agentID uuid.UUID) {
-	for {
-		readCtx, cancel := context.WithTimeout(ctx, serverReadDeadline)
-		_, data, err := c.Read(readCtx)
-		cancel()
-		if err != nil {
-			// Normal close, deadline, or transport error — end the session.
-			return
-		}
-
-		// Bump liveness on every frame so derived health stays fresh.
-		if err := h.repo.TouchAgent(ctx, agentID); err != nil {
-			h.log.Warn().Err(err).Msg("touch agent failed (non-fatal)")
-		}
-
-		var env struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(data, &env); err != nil {
-			h.log.Warn().Err(err).Msg("dropping undecodable agent frame")
-			continue
-		}
-		switch env.Type {
-		case wsTypePing:
-			pong := wsPong{Type: wsTypePong, TS: time.Now().UTC().Format(time.RFC3339)}
-			if err := writeFrame(ctx, c, pong); err != nil {
-				h.log.Warn().Err(err).Msg("send pong failed")
-				return
-			}
-		default:
-			// Forward compatibility: tolerate unknown / future frame types.
-			h.log.Debug().Str("frame_type", env.Type).Msg("ignoring non-ping agent frame")
-		}
-	}
-}
-
 // bearerAgentToken extracts a "dcagent_"-prefixed token from the Authorization
 // header. ok is false for a missing header, a non-Bearer scheme, or a token
 // without the agent prefix.
@@ -256,18 +232,6 @@ func bearerAgentToken(r *http.Request) (string, bool) {
 		return "", false
 	}
 	return token, true
-}
-
-// writeFrame marshals a frame and writes it as a text message with a bounded
-// deadline.
-func writeFrame(ctx context.Context, c *websocket.Conn, frame any) error {
-	b, err := json.Marshal(frame)
-	if err != nil {
-		return err
-	}
-	writeCtx, cancel := context.WithTimeout(ctx, writeDeadline)
-	defer cancel()
-	return c.Write(writeCtx, websocket.MessageText, b)
 }
 
 // protocolError reports an unexpected frame type during the handshake.
