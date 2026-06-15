@@ -20,11 +20,18 @@ import {
   Apps24Regular,
 } from '@fluentui/react-icons';
 import { useQuery } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../api/useApi';
 import { ACTIVITY_RESOURCE_ROUTES, useActivityQuery } from '../api/activity';
-import { regionDotVariant, useRegionsQuery, zoneSummary } from '../api/regions';
+import {
+  inventorySummary,
+  regionDotVariant,
+  useRegionsQuery,
+  useZoneInventoryQuery,
+  zoneSummary,
+} from '../api/regions';
+import { useAuth } from '../auth/useAuth';
 import { useActiveProject } from '../hooks/useActiveProject';
 import { fmtDate } from '../lib/date';
 
@@ -210,8 +217,27 @@ function Gauge({ label, used, total, unit }: { label: string; used: number; tota
   );
 }
 
+/**
+ * Admin-only inventory sub-line for an `up` zone: fetches live capacity from the
+ * zone's agent and renders a compact summary. Renders nothing while loading or
+ * if the agent is momentarily unreachable, so it never clutters the card.
+ */
+function ZoneInventoryLine({ region, zone }: { region: string; zone: string }) {
+  const styles = useStyles();
+  const inv = useZoneInventoryQuery(region, zone, true);
+  if (!inv.data) return null;
+  return (
+    <div className={mergeClasses(styles.listRow, styles.listRowStatic)}>
+      <span className={styles.listMeta}>↳ {zone}</span>
+      <span className={styles.listMeta}>{inventorySummary(inv.data)}</span>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const styles = useStyles();
+  const { user } = useAuth();
+  const isAdmin = user?.isAdmin ?? false;
   const api = useApi();
   const navigate = useNavigate();
   const { tenantId } = useParams<{ tenantId: string }>();
@@ -440,16 +466,22 @@ export default function DashboardPage() {
                   unknown: styles.dotUnknown,
                 }[regionDotVariant(region.status)];
                 return (
-                  <div
-                    key={region.name}
-                    className={mergeClasses(styles.listRow, styles.listRowStatic)}
-                  >
-                    <span className={styles.listName}>
-                      <span className={dotClass}>● </span>
-                      {region.display_name ?? region.name}
-                    </span>
-                    <span className={styles.listMeta}>{zoneSummary(region.zones)}</span>
-                  </div>
+                  <Fragment key={region.name}>
+                    <div className={mergeClasses(styles.listRow, styles.listRowStatic)}>
+                      <span className={styles.listName}>
+                        <span className={dotClass}>● </span>
+                        {region.display_name ?? region.name}
+                      </span>
+                      <span className={styles.listMeta}>{zoneSummary(region.zones)}</span>
+                    </div>
+                    {/* Admins see live per-zone capacity; up zones only (others have no agent). */}
+                    {isAdmin &&
+                      region.zones
+                        .filter((z) => z.status === 'up')
+                        .map((z) => (
+                          <ZoneInventoryLine key={z.name} region={region.name} zone={z.name} />
+                        ))}
+                  </Fragment>
                 );
               })
             ))}
