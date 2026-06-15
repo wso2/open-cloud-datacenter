@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -163,7 +164,7 @@ func TestSessionHandshakeAndPing(t *testing.T) {
 	select {
 	case hello := <-gotHello:
 		want := protocol.Hello{Type: protocol.TypeHello, Region: "region-a", Zone: "zone-1", Version: "test"}
-		if *hello != want {
+		if !reflect.DeepEqual(*hello, want) {
 			t.Errorf("hello = %+v, want %+v", hello, want)
 		}
 	case <-ctx.Done():
