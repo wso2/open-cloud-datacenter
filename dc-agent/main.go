@@ -6,20 +6,21 @@
 // kubeconfig, Rancher token) stay local; the only credential that travels is
 // the agent's own bearer token.
 //
-// This binary is comms-only today: it establishes and maintains the channel
-// (protocol v0: hello/hello_ack + ping/pong keepalive, reconnect with
-// backoff). Executing desired-state operations against local
-// Harvester/Rancher/KubeOVN — and therefore a Kubernetes client dependency —
-// is a later phase; see docs/multi-region.md and the protocol package doc.
+// The binary maintains the channel (protocol v0: hello/hello_ack + ping/pong
+// keepalive, reconnect with backoff) and serves protocol v1 operation verbs
+// against the local cluster when it has access to one. Today that is the
+// read-only get_inventory; the mutating verbs (apply/delete) follow. When the
+// agent has no local-cluster access it still runs — presence-only.
 //
 // main.go has ONE responsibility: start the program.
 //  1. Load configuration from DCAGENT_* environment variables (fail fast).
-//  2. Set up logging and signal handling.
+//  2. Set up logging, the local-cluster executor, and signal handling.
 //  3. Run the connection loop until SIGINT/SIGTERM.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -30,6 +31,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/wso2/dc-agent/internal/conn"
+	"github.com/wso2/dc-agent/internal/executor"
 )
 
 // version is the agent build version, reported to the control plane in the
@@ -51,17 +53,23 @@ type config struct {
 	region   string // DCAGENT_REGION    region identifier, e.g. "lk"
 	zone     string // DCAGENT_ZONE      zone within the region, e.g. "zone-1"
 	logLevel string // DCAGENT_LOG_LEVEL trace|debug|info|warn|error (default info)
+	// kubeconfig (DCAGENT_KUBECONFIG) is optional: empty uses the in-cluster
+	// ServiceAccount (production); a path loads that kubeconfig (local dev, e.g.
+	// the agent on a laptop pointed at Harvester). No cluster access → the agent
+	// runs presence-only (no get_inventory).
+	kubeconfig string
 }
 
 // loadConfig reads and validates all DCAGENT_* variables, returning every
 // problem at once so a misconfigured deployment is fixed in one iteration.
 func loadConfig() (config, error) {
 	cfg := config{
-		endpoint: os.Getenv("DCAGENT_ENDPOINT"),
-		token:    os.Getenv("DCAGENT_TOKEN"),
-		region:   os.Getenv("DCAGENT_REGION"),
-		zone:     os.Getenv("DCAGENT_ZONE"),
-		logLevel: os.Getenv("DCAGENT_LOG_LEVEL"),
+		endpoint:   os.Getenv("DCAGENT_ENDPOINT"),
+		token:      os.Getenv("DCAGENT_TOKEN"),
+		region:     os.Getenv("DCAGENT_REGION"),
+		zone:       os.Getenv("DCAGENT_ZONE"),
+		logLevel:   os.Getenv("DCAGENT_LOG_LEVEL"),
+		kubeconfig: os.Getenv("DCAGENT_KUBECONFIG"),
 	}
 	if cfg.logLevel == "" {
 		cfg.logLevel = "info"
@@ -134,15 +142,37 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// ── Local-cluster executor (optional) ─────────────────────────────────────
+	// The executor reads the zone's own cluster. Building it lazily creates the
+	// clients; a real call happens only when the control plane requests an op.
+	// No cluster access is not fatal — the agent runs presence-only, exactly as
+	// before v1, and advertises no ops (the server returns OP_UNSUPPORTED).
+	var dispatcher conn.Dispatcher
+	if exec, err := executor.NewKubeExecutorFromConfig(cfg.kubeconfig); err != nil {
+		logger.Warn().Err(err).Msg("no local-cluster access; running presence-only (set DCAGENT_KUBECONFIG for local dev)")
+	} else {
+		dispatcher = conn.Dispatcher{
+			executor.OpGetInventory: func(ctx context.Context, _ json.RawMessage) (json.RawMessage, error) {
+				inv, err := exec.GetInventory(ctx)
+				if err != nil {
+					return nil, err
+				}
+				return json.Marshal(inv)
+			},
+		}
+		logger.Info().Strs("ops", []string{executor.OpGetInventory}).Msg("local-cluster executor ready")
+	}
+
 	// ── Connection loop ───────────────────────────────────────────────────────
 	// Runs until the context is cancelled, reconnecting on any failure.
 	runner := conn.NewRunner(conn.Config{
-		Endpoint: cfg.endpoint,
-		Token:    cfg.token,
-		Region:   cfg.region,
-		Zone:     cfg.zone,
-		Version:  version,
-		Logger:   logger,
+		Endpoint:   cfg.endpoint,
+		Token:      cfg.token,
+		Region:     cfg.region,
+		Zone:       cfg.zone,
+		Version:    version,
+		Logger:     logger,
+		Dispatcher: dispatcher,
 	})
 	runner.Run(ctx)
 

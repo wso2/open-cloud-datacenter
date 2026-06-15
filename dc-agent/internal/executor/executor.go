@@ -9,6 +9,9 @@ package executor
 
 import "context"
 
+// OpGetInventory is the protocol op name for the read-only inventory request.
+const OpGetInventory = "get_inventory"
+
 // Inventory is a snapshot of the zone cluster's capacity, returned by
 // get_inventory. These node/capacity figures are operator-facing — dc-api
 // exposes them only on its admin-gated endpoint (design doc §11).
