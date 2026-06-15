@@ -36,6 +36,17 @@ const (
 	wsTypeProgress = "progress"
 )
 
+// Agent error codes an agent may return in a res, and the op names dc-api
+// issues. These mirror dc-agent's protocol/executor packages — the JSON strings
+// are the shared contract (the two are separate Go modules).
+const (
+	errCodeOpUnsupported = "OP_UNSUPPORTED"
+	errCodeBadRequest    = "BAD_REQUEST"
+	errCodeExecError     = "EXEC_ERROR"
+
+	opGetInventory = "get_inventory"
+)
+
 // wsReq / wsRes / wsProgress are the server-side mirror of dc-agent's v1 frames
 // (the two codebases share the JSON wire contract, not a Go package).
 type wsReq struct {
@@ -140,7 +151,7 @@ func (s *Session) Call(ctx context.Context, op string, params json.RawMessage) (
 			return nil, ErrAgentUnavailable
 		}
 		if !res.Ok {
-			code, msg := "EXEC_ERROR", ""
+			code, msg := errCodeExecError, ""
 			if res.Error != nil {
 				code, msg = res.Error.Code, res.Error.Message
 			}

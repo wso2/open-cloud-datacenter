@@ -255,6 +255,70 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/admin/regions/{region}/zones/{zone}/inventory:
+    parameters:
+      - name: region
+        in: path
+        required: true
+        description: Region name
+        schema:
+          type: string
+          example: lk
+      - name: zone
+        in: path
+        required: true
+        description: Zone name within the region
+        schema:
+          type: string
+          example: zone-1
+    get:
+      operationId: getZoneInventory
+      tags: [regions]
+      summary: Live node/capacity inventory for a zone
+      description: |
+        Returns the zone cluster's node readiness and capacity (allocatable vs.
+        allocated CPU and memory) and a VM count, fetched live from the zone's
+        dc-agent over the command channel. Platform-admin only — these are
+        infrastructure-internal figures and are never exposed to tenants. The
+        response is best-effort and reflects the moment of the call.
+      responses:
+        "200":
+          description: Live inventory for the zone
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ZoneInventory"
+        "403":
+          description: Caller is not a platform admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "501":
+          description: The zone's agent does not support inventory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: The agent failed to read inventory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: No agent is currently connected for the zone
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "504":
+          description: The agent did not respond in time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   # ── dc-agent channel ────────────────────────────────────────────────────────
 
   /v1/agent/ws:
@@ -5928,6 +5992,46 @@ components:
         zone:
           type: string
           example: zone-1
+
+    ZoneInventory:
+      type: object
+      required: [nodes, vm_count]
+      description: |
+        Live capacity snapshot of a zone cluster, read from the zone's dc-agent.
+        Admin-only; infrastructure-internal and never exposed to tenants.
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/InventoryNode"
+        vm_count:
+          type: integer
+          description: Number of KubeVirt VirtualMachines in the cluster.
+          example: 12
+
+    InventoryNode:
+      type: object
+      required: [name, ready, cpu_allocatable_m, cpu_used_m, mem_allocatable_mb, mem_used_mb]
+      description: One cluster node's readiness and capacity. CPU is in milli-cores, memory in MiB; "used" is summed from pod requests.
+      properties:
+        name:
+          type: string
+          example: harvester-node-1
+        ready:
+          type: boolean
+          example: true
+        cpu_allocatable_m:
+          type: integer
+          example: 64000
+        cpu_used_m:
+          type: integer
+          example: 18000
+        mem_allocatable_mb:
+          type: integer
+          example: 257000
+        mem_used_mb:
+          type: integer
+          example: 96000
 
     ResourceStatus:
       type: string

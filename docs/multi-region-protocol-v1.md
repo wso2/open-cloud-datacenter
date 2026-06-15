@@ -158,11 +158,11 @@ A read-only verb proves the whole channel before anything mutates a cluster.
 
 - **Agent**: the executor reads nodes from the local Kubernetes API and counts
   KubeVirt `VirtualMachine`s. No mutation, no provider coupling.
-- **dc-api**: `GET /v1/regions/{region}/zones/{zone}/inventory` →
+- **dc-api**: `GET /v1/admin/regions/{region}/zones/{zone}/inventory` →
   `registry.Call("get_inventory")` → returns the result (or maps the error per
-  §7). **Admin-only** — node and capacity figures are Harvester-internal and
-  must never reach a tenant (see §11). Kept off `GET /v1/regions` so listing
-  never blocks on a live RPC.
+  §7). **Admin-only** (under `/admin/`, like the token-mint route) — node and
+  capacity figures are Harvester-internal and must never reach a tenant (see
+  §11). Kept off `GET /v1/regions` so listing never blocks on a live RPC.
 - **cloud-ui**: the *admin* region card upgrades from "up" to "up · 3 nodes ·
   48 vCPU free" when inventory is available; falls back to plain health when it
   isn't. Tenants never see this card — §11 covers what they do see.

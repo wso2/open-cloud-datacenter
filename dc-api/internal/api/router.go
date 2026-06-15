@@ -260,6 +260,12 @@ func NewRouter(deps RouterDeps) http.Handler {
 		r.Get("/regions", regionsHandler.List) // GET /v1/regions
 		r.Post("/admin/regions/{region}/zones/{zone}/agent-token", regionsHandler.MintAgentToken)
 
+		// Admin-only live zone inventory, fetched from the zone's dc-agent over
+		// the command channel (shares the agentRegistry the WS handler populates).
+		// Node/capacity figures are Harvester-internal — admin-gated in the handler.
+		inventoryHandler := handlers.NewInventoryHandler(agentRegistry, deps.Log)
+		r.Get("/admin/regions/{region}/zones/{zone}/inventory", inventoryHandler.Get)
+
 		// Admin tenant registry — pre-register empty tenants so they're
 		// visible to GET /v1/tenants before any member has logged in.
 		// Platform-admin-only (enforced in the handler itself).

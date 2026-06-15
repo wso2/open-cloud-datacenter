@@ -29,8 +29,8 @@ var allowlistedV1Routes = map[string]bool{
 	"GET /v1/role-definitions/{key}":                 true,
 	"POST /v1/admin/tenants":                         true,
 	"PATCH /v1/admin/tenants/{tenant_id}/":           true,
-	"POST /v1/tenants/{tenant_id}/permissions:check":                     true,
-	"POST /v1/tenants/{tenant_id}/projects/{project_id}/permissions:check": true,
+	"POST /v1/tenants/{tenant_id}/permissions:check": true,
+	"POST /v1/tenants/{tenant_id}/projects/{project_id}/permissions:check":                       true,
 	"POST /v1/tenants/{tenant_id}/projects/{project_id}/virtual-machines/{id}/permissions:check": true,
 	"POST /v1/tenants/{tenant_id}/projects/{project_id}/clusters/{id}/permissions:check":         true,
 	"POST /v1/tenants/{tenant_id}/projects/{project_id}/keyvaults/{id}/permissions:check":        true,
@@ -50,18 +50,19 @@ var allowlistedV1Routes = map[string]bool{
 	// (list) and ProjectContext (detail), so no per-action gate — otherwise a
 	// per-resource-type role couldn't navigate into a project at all. Project
 	// writes (create/patch/delete) ARE gated.
-	"GET /v1/tenants/{tenant_id}/projects/":               true,
-	"GET /v1/tenants/{tenant_id}/projects/{project_id}/":  true,
+	"GET /v1/tenants/{tenant_id}/projects/":              true,
+	"GET /v1/tenants/{tenant_id}/projects/{project_id}/": true,
 	// Multi-region foundation (phase 0): platform-wide, not tenant/project-
 	// scoped, so there's no resource gate to apply.
 	//   - GET /v1/regions — region/zone health; any authenticated caller (read).
-	//   - the agent-token mint self-enforces platform-admin in the handler,
-	//     exactly like POST /v1/admin/tenants.
+	//   - the agent-token mint and the zone-inventory read both self-enforce
+	//     platform-admin in the handler, exactly like POST /v1/admin/tenants.
 	//   - GET /v1/agent/ws authenticates with a dcagent_ bearer token, not an
 	//     OIDC JWT; it is mounted outside the /v1 OIDC group and validates the
 	//     credential itself before upgrading.
 	"GET /v1/regions": true,
 	"POST /v1/admin/regions/{region}/zones/{zone}/agent-token": true,
+	"GET /v1/admin/regions/{region}/zones/{zone}/inventory":    true,
 	"GET /v1/agent/ws": true,
 }
 
