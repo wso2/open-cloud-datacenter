@@ -40,6 +40,26 @@ variable "skip_consent" {
   default     = true
 }
 
+variable "use_existing_app" {
+  type        = bool
+  description = "When true, skip creating an Asgardeo application and pass existing_client_id/existing_client_secret through as outputs. The Asgardeo provider must still be configured by the caller."
+  default     = false
+}
+
+variable "existing_client_id" {
+  type        = string
+  description = "OAuth2 client ID of a pre-existing Asgardeo application. Used when use_existing_app = true."
+  sensitive   = true
+  default     = ""
+}
+
+variable "existing_client_secret" {
+  type        = string
+  description = "OAuth2 client secret of a pre-existing Asgardeo application. Used when use_existing_app = true."
+  sensitive   = true
+  default     = ""
+}
+
 variable "requested_claims" {
   type = list(object({
     uri       = string
