@@ -8,6 +8,8 @@ locals {
 }
 
 resource "asgardeo_application" "this" {
+  count = var.use_existing_app ? 0 : 1
+
   name        = var.app_name
   description = var.description
   access_url  = var.access_url

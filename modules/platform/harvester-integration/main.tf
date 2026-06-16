@@ -271,7 +271,7 @@ resource "null_resource" "apply_harvester_registration" {
       tmpkubeconfig=$(mktemp)
       trap "rm -f $tmpkubeconfig" EXIT
       printf '%s' "$KUBECONFIG_CONTENT" > "$tmpkubeconfig"
-      ${rancher2_cluster.harvester_hci.cluster_registration_token[0].command} --kubeconfig "$tmpkubeconfig"
+      ${var.insecure_registration ? "curl -sk" : "curl -s"} "${rancher2_cluster.harvester_hci.cluster_registration_token[0].manifest_url}" | kubectl apply -f - --kubeconfig "$tmpkubeconfig" ${var.insecure_registration ? "--insecure-skip-tls-verify" : ""}
     EOT
 
     environment = {
