@@ -1,25 +1,30 @@
-name: dc-api
+name: dc-webhook
 
-# Build, test, and publish the dc-api control-plane server image. Runs on
-# GitHub-hosted runners —
-# no self-hosted infrastructure needed. Deployment to a cluster is the
-# consumer's concern: their Flux ImageUpdateAutomation watches
-# ghcr.io/wso2/dc-api and rolls new tags into the cluster.
+# Build, test, and publish the dc-api admission-webhook image. The webhook code
+# lives in the dc-api module (cmd/webhook + internal/webhook) but ships as its
+# own image and is deployed independently via Flux (flux/platform/dc-webhook),
+# so it gets its own workflow — triggered only on webhook changes, not every
+# dc-api change. Deployment is the consumer's concern: the host cluster's Flux
+# ImageUpdateAutomation watches ghcr.io/wso2/dc-api-webhook and rolls new tags.
 
 on:
   pull_request:
     paths:
-      - 'dc-api/**'
-      - '.github/workflows/dc-api.yaml'
+      - 'dc-api/cmd/webhook/**'
+      - 'dc-api/internal/webhook/**'
+      - 'dc-api/Dockerfile.webhook'
+      - '.github/workflows/dc-webhook.yaml'
   push:
     branches: [controlplane]
     paths:
-      - 'dc-api/**'
-      - '.github/workflows/dc-api.yaml'
+      - 'dc-api/cmd/webhook/**'
+      - 'dc-api/internal/webhook/**'
+      - 'dc-api/Dockerfile.webhook'
+      - '.github/workflows/dc-webhook.yaml'
   workflow_dispatch:
 
 env:
-  IMAGE: ghcr.io/wso2/dc-api
+  IMAGE: ghcr.io/wso2/dc-api-webhook
 
 jobs:
   test:
@@ -33,12 +38,9 @@ jobs:
           cache-dependency-path: dc-api/go.sum
 
       - name: Unit tests
-        run: cd dc-api && go test ./...
+        run: cd dc-api && go test ./cmd/webhook/ ./internal/webhook/
 
   build-and-push:
-    # Only publish on push to controlplane (i.e. after a merge). PRs from
-    # forks couldn't write to ghcr.io/wso2/* anyway — GITHUB_TOKEN's
-    # packages:write permission is denied for fork-triggered runs.
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: test
     runs-on: ubuntu-latest
@@ -59,33 +61,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Generate a sortable timestamp tag (UTC) for Flux ImagePolicy's
-      # numerical sort. See OCD's flux/platform/dc-api/base/image-automation.yaml
-      # for the matching filter pattern. Bare-SHA tags sort alphabetically
-      # which is meaningless for hex — picks "ff..." over every "fe...".
+      # Sortable timestamp tag (UTC) for the consumer Flux ImagePolicy's
+      # numerical sort — same scheme as dc-api / dc-agent.
       - name: Generate build timestamp
         id: ts
         run: echo "tag=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push dc-api
+      - name: Build and push dc-api-webhook
         uses: docker/build-push-action@v5
         with:
           context: ./dc-api
+          file: ./dc-api/Dockerfile.webhook
           push: true
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
             ${{ env.IMAGE }}:${{ steps.ts.outputs.tag }}-${{ github.sha }}
-          cache-from: type=gha,scope=dc-api
-          cache-to: type=gha,mode=max,scope=dc-api
+          cache-from: type=gha,scope=dc-api-webhook
+          cache-to: type=gha,mode=max,scope=dc-api-webhook
 
       - name: Summary
         run: |
           {
-            echo "### dc-api published"
+            echo "### dc-api-webhook published"
             echo
             echo "- \`${{ env.IMAGE }}:latest\`"
             echo "- \`${{ env.IMAGE }}:${{ github.sha }}\`"
+            echo "- \`${{ env.IMAGE }}:${{ steps.ts.outputs.tag }}-${{ github.sha }}\`"
             echo
-            echo "Consumer Flux ImagePolicy auto-bumps the deployed pin."
+            echo "The host-cluster Flux ImagePolicy auto-bumps the deployed pin."
           } >> "$GITHUB_STEP_SUMMARY"
