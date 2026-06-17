@@ -1,0 +1,112 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# KubeOVN — self-managed upstream install, Multus SECONDARY CNI
+#
+# This is the SDN dc-api drives for tenant VPC networking (Vpc / Subnet /
+# VpcNatGateway / NAD CRDs created at runtime). It runs as a Multus SECONDARY
+# CNI: the cluster's primary CNI (Canal) keeps cluster pod/service networking;
+# kube-ovn is referenced explicitly via per-subnet NetworkAttachmentDefinitions
+# that dc-api creates. Tenant VMs attach to kube-ovn via those NADs.
+#
+# IMPORTANT — single owner. KubeOVN's CRDs are cluster-scoped and the OVN
+# central DB is a singleton. Two installs (e.g. Harvester's bundled
+# `kubeovn-operator` Addon + this chart) FIGHT regardless of namespace. The
+# host cluster MUST have the bundled add-on disabled before this reconciles —
+# see this directory's README.
+#
+# Workloads land in kube-system (chart-hardcoded, standard for a CNI); the
+# `kube-ovn` namespace below only holds the Helm release metadata.
+#
+# ── Values = the PROVEN upstream v1.15.4 install, reproduced ──────────────────
+# These values reproduce the *effective* config of the manual `helm install
+# kube-ovn` v1.15.4 that dc-api was developed and verified against on lk-dev in
+# May 2026 (before Harvester's experimental v1.14.10 operator was switched on
+# and shadowed it). They are intentionally NOT "improved" — the goal is zero
+# functional change when this replaces that install. Two consequences:
+#   * ipv4 CIDRs are left at chart defaults (ovn-default 10.16.0.0/16, svc
+#     10.96.0.0/12). The original install's POD_CIDR/SVC_CIDR were placed under
+#     `networking:`, which the v1.15.4 chart ignores (CIDRs live under `ipv4:`),
+#     so it ran on these defaults. Correcting them (e.g. svc → the real
+#     10.53.0.0/16) is a deliberate follow-up, NOT part of this parity move.
+#   * Site-specific values (MASTER_NODES, networking.IFACE) are set by the
+#     consumer overlay, not here.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kube-ovn
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-ovn
+  namespace: kube-ovn
+spec:
+  interval: 30m
+  releaseName: kube-ovn
+  chart:
+    spec:
+      chart: kube-ovn
+      version: "v1.15.4"
+      sourceRef:
+        kind: HelmRepository
+        name: kubeovn
+        namespace: flux-system
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  values:
+    # ovn-central: single replica on the control-plane node. RKE2 labels it
+    # `node-role.kubernetes.io/control-plane=true` (value "true", unlike
+    # kubeadm's empty value); the chart does an exact-match selection. The
+    # consumer overlay sets MASTER_NODES (the CP node IP(s) ovn-central expects).
+    replicaCount: 1
+    MASTER_NODES_LABEL: "node-role.kubernetes.io/control-plane=true"
+    MASTER_NODES: ""
+
+    image:
+      registry: docker.io
+      repository: kubeovn/kube-ovn
+      tag: v1.15.4
+      pullPolicy: IfNotPresent
+
+    # Multus secondary CNI — priority "90" keeps the primary CNI's conflist
+    # (Canal's 10-canal) the cluster default; the chart default "01" would make
+    # kube-ovn primary. RKE2 CNI conf/bin paths (NOT vanilla /etc/cni/net.d).
+    cni_conf:
+      CNI_CONF_DIR: "/var/lib/rancher/rke2/agent/etc/cni/net.d"
+      CNI_BIN_DIR: "/opt/cni/bin"
+      MOUNT_LOCAL_BIN_DIR: "true"
+      CNI_CONFIG_PRIORITY: "90"
+
+    func:
+      # Tenant (custom) VPCs — REQUIRED by dc-api (chart default false).
+      ENABLE_EXTERNAL_VPC: "true"
+      # Live-migration IP persistence — M2 hard requirement.
+      ENABLE_KEEP_VM_IP: "true"
+      # OFF: dc-api's per-VPC DNS is its own CoreDNS+ConfigMap (never kube-ovn
+      # VpcDns), and LB on would clash with Harvester's kube-vip. ENABLE_NP off
+      # because Canal owns k8s NetworkPolicy; dc-api NSGs are subnet OVN ACLs.
+      ENABLE_LB: "false"
+      ENABLE_LB_SVC: "false"
+      ENABLE_NP: "false"
+      ENABLE_BIND_LOCAL_IP: "true"
+      ENABLE_METRICS: "true"
+      # NOTE: the proven install also carried `func.ENABLE_EIP_SNAT: "false"`,
+      # but that key lives under `networking:` in the chart, so it was a no-op —
+      # the install ran with the default ENABLE_EIP_SNAT=true. Omitted here to
+      # avoid reproducing a misleading no-op; effective behaviour is unchanged.
+
+    networking:
+      NET_STACK: ipv4
+      NETWORK_TYPE: geneve
+      TUNNEL_TYPE: geneve
+      ENABLE_SSL: "false"
+      # Geneve tunnel interface. Consumer overlay sets it (lk-dev: mgmt-br).
+      IFACE: ""
+
+    # ipv4 block intentionally omitted → chart defaults (POD 10.16.0.0/16,
+    # SVC 10.96.0.0/12, JOIN 100.64.0.0/16), matching the proven install. The
+    # cleanup phase introduces the corrected ipv4.SVC_CIDR (10.53.0.0/16) etc.

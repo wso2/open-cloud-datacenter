@@ -1,0 +1,16 @@
+# Upstream KubeOVN Helm chart source.
+#
+# Self-contained in this base (NOT in flux/infrastructure/sources/) because
+# kube-ovn is HOST-cluster infrastructure: a host-cluster Flux overlay pulls
+# this directory directly and would not otherwise get the HelmRepository. The
+# control-plane cluster never installs kube-ovn, so its infrastructure
+# kustomization does not reference this base.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: kubeovn
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://kubeovn.github.io/kube-ovn
