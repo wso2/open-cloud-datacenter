@@ -8,7 +8,10 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h
-  url: https://bitnami-labs.github.io/sealed-secrets
+  # Chart repo moved from bitnami-labs.github.io (retired, now 404) to
+  # bitnami.github.io/sealed-secrets. The old URL fails the index fetch and
+  # blocks the infrastructure Kustomization's health check.
+  url: https://bitnami.github.io/sealed-secrets
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
