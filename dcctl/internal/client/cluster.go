@@ -154,6 +154,7 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body interface{
 	// Simplest pragmatic fix: pass the token as a header directly using the
 	// token stored on the struct (requires adding the field — see below).
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", userAgent)
 	// Auth header is injected via c.token (set in New — see updated New func).
 	req.Header.Set("Authorization", "Bearer "+c.token)
 

@@ -17,6 +17,15 @@ import (
 	dcapi "github.com/wso2/dcctl/internal/client/generated"
 )
 
+// Version is the dcctl build version, surfaced in the User-Agent header on
+// every outbound DC-API request so the platform can identify CLI traffic.
+// dcctl has no release-versioning pipeline yet, so this is a single
+// package-level constant; wire it to a real build var here if one is added.
+const Version = "dev"
+
+// userAgent is the value sent in the User-Agent header on every API request.
+const userAgent = "dcctl/" + Version
+
 // Client carries the typed DC-API client plus the small bit of
 // dcctl-specific state needed to build it (base URL, access token,
 // TLS preference). The typed client is exposed directly as Typed.
@@ -42,8 +51,12 @@ func New(accessToken string) *Client {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // dev/self-signed support
 	}
 	httpClient := &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: transport,
+		Timeout: 30 * time.Second,
+		// guardTransport wraps the real transport so an edge bot-protection
+		// challenge (HTML, not JSON) is turned into an actionable error before
+		// the generated client tries to decode it. This covers both the typed
+		// client and the hand-written doJSON calls, which share this httpClient.
+		Transport: &guardTransport{next: transport},
 	}
 
 	typed, err := dcapi.NewClientWithResponses(
@@ -52,6 +65,7 @@ func New(accessToken string) *Client {
 		dcapi.WithRequestEditorFn(func(_ context.Context, req *http.Request) error {
 			req.Header.Set("Authorization", "Bearer "+accessToken)
 			req.Header.Set("Accept", "application/json")
+			req.Header.Set("User-Agent", userAgent)
 			return nil
 		}),
 	)
