@@ -1,0 +1,26 @@
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: dc-agent
+  namespace: flux-system
+spec:
+  image: ghcr.io/wso2/dc-agent
+  interval: 5m
+  # Public image — no secretRef. (The host overlay would strip one anyway.)
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: dc-agent
+  namespace: flux-system
+spec:
+  imageRepositoryRef: { name: dc-agent }
+  # Same timestamp-prefixed tag scheme as dc-api / dc-webhook / keyvault-operator:
+  # <YYYYMMDD>-<HHMMSS>-<git-sha>, sorted numerically to pick the newest build.
+  filterTags:
+    pattern: '^(?P<ts>\d{8})-(?P<tm>\d{6})-[a-f0-9]+$'
+    extract: '$ts$tm'
+  policy:
+    numerical:
+      order: asc

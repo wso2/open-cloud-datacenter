@@ -1,0 +1,17 @@
+# Non-secret dc-agent config. Per-env values (endpoint host, region, zone) are
+# patched by the consumer overlay; the token is NOT here — it is the
+# dc-agent-token Secret referenced via secretKeyRef in the Deployment. The
+# placeholders below intentionally fail loadConfig (a non-wss endpoint / region
+# "placeholder") until an overlay patches them, so a half-configured agent never
+# silently dials the wrong control plane.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dc-agent-config
+  namespace: dc-agent-system
+data:
+  DCAGENT_ENDPOINT: "wss://connect.placeholder.example.com/v1/agent/ws"
+  DCAGENT_REGION: "placeholder"
+  DCAGENT_ZONE: "placeholder"
+  DCAGENT_LOG_LEVEL: "info"
+  # DCAGENT_KUBECONFIG intentionally unset → in-cluster ServiceAccount.

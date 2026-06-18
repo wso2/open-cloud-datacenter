@@ -208,6 +208,10 @@ func (r *Runner) dial(ctx context.Context) (*websocket.Conn, error) {
 
 	header := http.Header{}
 	header.Set("Authorization", "Bearer "+r.cfg.Token)
+	// A stable, identifiable User-Agent (dc-agent/<version>) so the connect
+	// traffic is recognizable in edge/CDN logs and rules rather than appearing
+	// as a generic Go WebSocket client — mirrors dcctl's User-Agent.
+	header.Set("User-Agent", "dc-agent/"+r.cfg.Version)
 
 	c, resp, err := websocket.Dial(dialCtx, r.cfg.Endpoint, &websocket.DialOptions{
 		HTTPHeader: header,

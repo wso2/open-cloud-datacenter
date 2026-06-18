@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dc-agent
+  namespace: dc-agent-system
+  labels:
+    app: dc-agent
+spec:
+  replicas: 1   # one agent per (region,zone); the agents table is unique on it.
+  selector:
+    matchLabels:
+      app: dc-agent
+  template:
+    metadata:
+      labels:
+        app: dc-agent
+    spec:
+      serviceAccountName: dc-agent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          # Public image; tag pinned + auto-bumped by the consumer overlay.
+          image: ghcr.io/wso2/dc-agent:latest # {"$imagepolicy": "flux-system:dc-agent"}
+          imagePullPolicy: IfNotPresent
+          # No ports and no probes: dc-agent runs no server — it only dials OUT
+          # to DCAGENT_ENDPOINT over WSS. Liveness is observed control-plane-side
+          # via the agents table (last_seen, bumped on the 30s ping).
+          envFrom:
+            - configMapRef:
+                name: dc-agent-config
+          env:
+            - name: DCAGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: dc-agent-token
+                  key: DCAGENT_TOKEN
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
