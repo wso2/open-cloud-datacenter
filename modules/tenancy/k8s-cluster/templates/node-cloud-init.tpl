@@ -47,6 +47,7 @@ write_files:
             dhcp4: true
             dhcp4-overrides:
               use-routes: false
+              route-metric: 500
 %{~ endif }
 runcmd:
   - - systemctl
