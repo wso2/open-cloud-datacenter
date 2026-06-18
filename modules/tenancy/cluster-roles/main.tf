@@ -499,6 +499,111 @@ resource "rancher2_role_template" "project_member_restricted" {
 # Grants read-only visibility into VM status and metrics for the Harvester
 # dashboard. Intentionally excludes all mutating verbs (update, patch, delete)
 # and subresources that control VM power state (start, stop, restart, migrate).
+# Read-only cluster membership for downstream RKE2/K8s clusters.
+# Mirrors the built-in cluster-member role template exactly, minus the
+# `management.cattle.io/projects: create` rule — preventing users from
+# spinning up new projects while retaining full cluster observability.
+#
+# Intended for users or groups that need visibility into a downstream cluster
+# (nodes, events, metrics, machine objects) without any write access.
+# Assign via rancher2_cluster_role_template_binding at the cluster scope.
+resource "rancher2_role_template" "cluster_reader" {
+  name        = "cluster-reader"
+  description = "Read-only view of a downstream cluster. Mirrors the built-in cluster-member role without the ability to create projects."
+  context     = "cluster"
+
+  rules {
+    api_groups = ["ui.cattle.io"]
+    resources  = ["navlinks"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["management.cattle.io"]
+    resources  = ["clusterroletemplatebindings"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["management.cattle.io"]
+    resources  = ["nodes", "nodepools"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = [""]
+    resources  = ["nodes"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = [""]
+    resources  = ["persistentvolumes"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["storage.k8s.io"]
+    resources  = ["storageclasses"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["apiregistration.k8s.io"]
+    resources  = ["apiservices"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["management.cattle.io"]
+    resources  = ["clusterevents"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["catalog.cattle.io"]
+    resources  = ["clusterrepos"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups     = ["management.cattle.io"]
+    resources      = ["clusters"]
+    resource_names = ["local"]
+    verbs          = ["get"]
+  }
+
+  rules {
+    api_groups = ["cluster.x-k8s.io"]
+    resources  = ["machines"]
+    verbs      = ["get", "watch"]
+  }
+
+  rules {
+    api_groups = ["cluster.x-k8s.io"]
+    resources  = ["machinedeployments"]
+    verbs      = ["get", "watch"]
+  }
+
+  rules {
+    api_groups = ["rke-machine-config.cattle.io"]
+    resources  = ["*"]
+    verbs      = ["get", "watch"]
+  }
+
+  rules {
+    api_groups = ["rke-machine.cattle.io"]
+    resources  = ["*"]
+    verbs      = ["get", "watch"]
+  }
+
+  rules {
+    api_groups = ["metrics.k8s.io"]
+    resources  = ["nodemetrics", "nodes"]
+    verbs      = ["get", "list", "watch"]
+  }
+}
+
 resource "rancher2_role_template" "vm_metrics_observer" {
   name        = "vm-metrics-observer"
   description = "Read-only access to VM status and metrics. Allows Harvester dashboard graphs without any control-plane permissions."
