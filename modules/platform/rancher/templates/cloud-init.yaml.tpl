@@ -129,6 +129,8 @@ runcmd:
           --set replicas=${cp_node_count} \
           --set global.cattle.psp.enabled=false \
           --set ingress.tls.source=${tls_source} \
+          --set extraEnv[0].name=GODEBUG \
+          --set extraEnv[0].value=x509negativeserial=1 \
           --wait --timeout 15m && break
         sleep 30
       done
