@@ -118,6 +118,13 @@ func NewRunner(cfg Config) *Runner {
 	if cfg.IdleLimit <= 0 {
 		cfg.IdleLimit = defaultIdleLimit
 	}
+	// Bind region/zone once so EVERY connection-loop line is attributable —
+	// not just the "connected to control plane" line. The reconnect Warn and
+	// shutdown lines inherit these fields from here.
+	cfg.Logger = cfg.Logger.With().
+		Str("region", cfg.Region).
+		Str("zone", cfg.Zone).
+		Logger()
 	return &Runner{cfg: cfg}
 }
 
@@ -190,13 +197,13 @@ func (r *Runner) runSession(ctx context.Context) (established bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	r.cfg.Logger.Info().
-		Str("agent_id", ack.AgentID).
-		Str("region", r.cfg.Region).
-		Str("zone", r.cfg.Zone).
-		Msg("connected to control plane")
+	// Per-session logger: region/zone are already bound on r.cfg.Logger; add
+	// agent_id so every line for this session (connected, ping/pong, op
+	// dispatch) carries it. Scoped to the session — a reconnect gets a new id.
+	sessionLog := r.cfg.Logger.With().Str("agent_id", ack.AgentID).Logger()
+	sessionLog.Info().Msg("connected to control plane")
 
-	return true, r.pingLoop(ctx, c)
+	return true, r.pingLoop(ctx, c, sessionLog)
 }
 
 // dial opens the WebSocket with the bearer token. The token is the only
@@ -257,7 +264,7 @@ func (r *Runner) handshake(ctx context.Context, c *websocket.Conn) (*protocol.He
 // (forward compatibility — a newer control plane may speak verbs this agent
 // doesn't know yet). Returns when the connection breaks, the server goes
 // silent past serverIdleLimit, or ctx is cancelled.
-func (r *Runner) pingLoop(ctx context.Context, c *websocket.Conn) error {
+func (r *Runner) pingLoop(ctx context.Context, c *websocket.Conn, log zerolog.Logger) error {
 	// sessionCtx bounds the op-dispatch goroutines to this connection: when the
 	// session ends they are cancelled, so a slow op can't write to the next
 	// session's socket.
@@ -298,7 +305,7 @@ func (r *Runner) pingLoop(ctx context.Context, c *websocket.Conn) error {
 				return fmt.Errorf("read: %w", res.err)
 			}
 			lastRead = time.Now()
-			r.handleFrame(sessionCtx, c, res.data)
+			r.handleFrame(sessionCtx, c, res.data, log)
 
 		case <-ticker.C:
 			if idle := time.Since(lastRead); idle > r.cfg.IdleLimit {
@@ -307,57 +314,61 @@ func (r *Runner) pingLoop(ctx context.Context, c *websocket.Conn) error {
 			if err := r.writeFrame(ctx, c, protocol.NewPing(time.Now())); err != nil {
 				return fmt.Errorf("send ping: %w", err)
 			}
-			r.cfg.Logger.Debug().Msg("ping sent")
+			log.Debug().Msg("ping sent")
 		}
 	}
 }
 
 // handleFrame processes one inbound steady-state frame: pongs refresh liveness,
 // req frames are dispatched (each in its own goroutine), and unknown/unexpected
-// types are logged and ignored (forward compatibility).
-func (r *Runner) handleFrame(ctx context.Context, c *websocket.Conn, data []byte) {
+// types are logged and ignored (forward compatibility). log is the per-session
+// logger (carries agent_id) — every line here fires inside an established
+// session.
+func (r *Runner) handleFrame(ctx context.Context, c *websocket.Conn, data []byte, log zerolog.Logger) {
 	frame, err := protocol.Decode(data)
 	if err != nil {
-		r.cfg.Logger.Warn().Err(err).Msg("dropping undecodable frame")
+		log.Warn().Err(err).Msg("dropping undecodable frame")
 		return
 	}
 	switch f := frame.(type) {
 	case *protocol.Pong:
-		r.cfg.Logger.Debug().Str("ts", f.TS).Msg("pong received")
+		log.Debug().Str("ts", f.TS).Msg("pong received")
 	case *protocol.Req:
 		// Run in its own goroutine so a slow op never stalls the ping loop or
 		// the reader; bounded by the session ctx.
-		go r.dispatch(ctx, c, f)
+		go r.dispatch(ctx, c, f, log)
 	case *protocol.Unknown:
-		r.cfg.Logger.Warn().Str("frame_type", f.Type).Msg("ignoring unknown frame type (newer protocol?)")
+		log.Warn().Str("frame_type", f.Type).Msg("ignoring unknown frame type (newer protocol?)")
 	default:
-		r.cfg.Logger.Warn().Str("frame_type", fmt.Sprintf("%T", f)).Msg("ignoring unexpected frame")
+		log.Warn().Str("frame_type", fmt.Sprintf("%T", f)).Msg("ignoring unexpected frame")
 	}
 }
 
 // dispatch runs one request's handler and writes its response. An op with no
-// handler returns OP_UNSUPPORTED; a handler error returns EXEC_ERROR.
-func (r *Runner) dispatch(ctx context.Context, c *websocket.Conn, req *protocol.Req) {
+// handler returns OP_UNSUPPORTED; a handler error returns EXEC_ERROR. log is the
+// per-session logger (carries agent_id).
+func (r *Runner) dispatch(ctx context.Context, c *websocket.Conn, req *protocol.Req, log zerolog.Logger) {
 	handler, ok := r.cfg.Dispatcher[req.Op]
 	if !ok {
-		r.writeRes(ctx, c, protocol.NewErrRes(req.ID, protocol.ErrCodeOpUnsupported, "unsupported op: "+req.Op))
+		r.writeRes(ctx, c, protocol.NewErrRes(req.ID, protocol.ErrCodeOpUnsupported, "unsupported op: "+req.Op), log)
 		return
 	}
 	result, err := handler(ctx, req.Params)
 	if err != nil {
-		r.cfg.Logger.Warn().Err(err).Str("op", req.Op).Msg("op handler failed")
-		r.writeRes(ctx, c, protocol.NewErrRes(req.ID, protocol.ErrCodeExecError, err.Error()))
+		log.Warn().Err(err).Str("op", req.Op).Msg("op handler failed")
+		r.writeRes(ctx, c, protocol.NewErrRes(req.ID, protocol.ErrCodeExecError, err.Error()), log)
 		return
 	}
-	r.cfg.Logger.Debug().Str("op", req.Op).Str("id", req.ID).Msg("op handled")
-	r.writeRes(ctx, c, protocol.NewRes(req.ID, result))
+	log.Debug().Str("op", req.Op).Str("id", req.ID).Msg("op handled")
+	r.writeRes(ctx, c, protocol.NewRes(req.ID, result), log)
 }
 
 // writeRes writes a response frame, logging (not returning) any error — the
-// caller is a fire-and-forget dispatch goroutine.
-func (r *Runner) writeRes(ctx context.Context, c *websocket.Conn, res *protocol.Res) {
+// caller is a fire-and-forget dispatch goroutine. log is the per-session logger
+// (carries agent_id).
+func (r *Runner) writeRes(ctx context.Context, c *websocket.Conn, res *protocol.Res, log zerolog.Logger) {
 	if err := r.writeFrame(ctx, c, res); err != nil {
-		r.cfg.Logger.Warn().Err(err).Str("id", res.ID).Msg("send response failed")
+		log.Warn().Err(err).Str("id", res.ID).Msg("send response failed")
 	}
 }
 

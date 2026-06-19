@@ -242,6 +242,39 @@ func TestSessionCall_SessionClosed(t *testing.T) {
 	tc.srv.Close()
 }
 
+// TestDisconnectReason verifies the read-loop teardown is categorized correctly
+// so the "agent disconnected" log attributes the cause: a cancelled session ctx
+// is a server shutdown (regardless of the read error), a per-read deadline with a
+// live ctx is an idle timeout, a WebSocket close frame is a clean close, and
+// anything else is a transport error.
+func TestDisconnectReason(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tests := []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want string
+	}{
+		{"server shutdown beats read error", cancelled, errors.New("read: connection reset"), "server shutdown"},
+		{"server shutdown beats deadline", cancelled, context.DeadlineExceeded, "server shutdown"},
+		{"idle timeout", context.Background(), context.DeadlineExceeded, "idle timeout"},
+		{"clean normal closure", context.Background(), websocket.CloseError{Code: websocket.StatusNormalClosure}, "clean close"},
+		{"clean going away", context.Background(), websocket.CloseError{Code: websocket.StatusGoingAway}, "clean close"},
+		{"clean no status received", context.Background(), websocket.CloseError{Code: websocket.StatusNoStatusRcvd}, "clean close"},
+		{"abnormal close is transport error", context.Background(), websocket.CloseError{Code: websocket.StatusAbnormalClosure}, "transport error"},
+		{"plain read error is transport error", context.Background(), errors.New("read: connection reset"), "transport error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := disconnectReason(tt.ctx, tt.err); got != tt.want {
+				t.Errorf("disconnectReason() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRegistry(t *testing.T) {
 	r := NewRegistry()
 	if _, ok := r.Session("lk", "zone-1"); ok {

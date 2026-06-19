@@ -166,14 +166,18 @@ func (s *Session) Call(ctx context.Context, op string, params json.RawMessage) (
 // answered with pongs, res frames are routed to the waiting Call, progress is
 // advisory (ignored in M-A), and unknown types are tolerated. onActivity (may be
 // nil) fires on every inbound frame so the caller can refresh liveness.
-func (s *Session) Serve(ctx context.Context, onActivity func()) {
+//
+// It returns a short, human-readable reason for the disconnect (clean close,
+// idle timeout, server shutdown, or transport error) so the caller can attribute
+// the teardown in its disconnect log.
+func (s *Session) Serve(ctx context.Context, onActivity func()) string {
 	defer s.close()
 	for {
 		readCtx, cancel := context.WithTimeout(ctx, serverReadDeadline)
 		_, data, err := s.conn.Read(readCtx)
 		cancel()
 		if err != nil {
-			return // normal close, deadline, or transport error
+			return disconnectReason(ctx, err)
 		}
 		if onActivity != nil {
 			onActivity()
@@ -191,7 +195,7 @@ func (s *Session) Serve(ctx context.Context, onActivity func()) {
 			pong := wsPong{Type: wsTypePong, TS: time.Now().UTC().Format(time.RFC3339)}
 			if err := s.writeFrame(ctx, pong); err != nil {
 				s.log.Warn().Err(err).Msg("send pong failed")
-				return
+				return "transport error"
 			}
 		case wsTypeRes:
 			var res wsRes
@@ -206,6 +210,30 @@ func (s *Session) Serve(ctx context.Context, onActivity func()) {
 		default:
 			// Forward compatibility: tolerate unknown / future frame types.
 			s.log.Debug().Str("frame_type", env.Type).Msg("ignoring unhandled agent frame")
+		}
+	}
+}
+
+// disconnectReason classifies why the read loop ended, for the disconnect log.
+// It distinguishes a server-initiated shutdown (outer ctx cancelled), the agent
+// closing cleanly (a WebSocket close frame), the agent going silent past
+// serverReadDeadline (the per-read deadline fired while the outer ctx is live),
+// and any other transport-level failure.
+func disconnectReason(ctx context.Context, err error) string {
+	switch {
+	case ctx.Err() != nil:
+		// The session context was cancelled — dc-api is shutting the channel down.
+		return "server shutdown"
+	case errors.Is(err, context.DeadlineExceeded):
+		// Only the per-read deadline could have fired (outer ctx is live): the
+		// agent stopped sending frames/pings.
+		return "idle timeout"
+	default:
+		switch websocket.CloseStatus(err) {
+		case websocket.StatusNormalClosure, websocket.StatusGoingAway, websocket.StatusNoStatusRcvd:
+			return "clean close"
+		default:
+			return "transport error"
 		}
 	}
 }
@@ -275,6 +303,11 @@ func (r *Registry) register(s *Session) {
 	r.sessions[key] = s
 	r.mu.Unlock()
 	if old != nil && old != s {
+		// A new connection superseded a still-registered session for this zone
+		// (a redeployed agent, or a stale socket the old reader hasn't noticed
+		// yet). Surface it: a flapping agent shows up as repeated replacements.
+		s.log.Warn().Str("region", s.region).Str("zone", s.zone).
+			Msg("replaced existing agent session for zone")
 		old.close()
 	}
 }

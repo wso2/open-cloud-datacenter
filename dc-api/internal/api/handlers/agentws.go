@@ -184,14 +184,18 @@ func (h *AgentWSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		sess.close()
 	}()
 
-	sess.Serve(sessCtx, func() {
+	reason := sess.Serve(sessCtx, func() {
 		if err := h.repo.TouchAgent(sessCtx, agentID); err != nil {
 			h.log.Warn().Err(err).Msg("touch agent failed (non-fatal)")
 		}
 	})
 
 	_ = c.Close(websocket.StatusNormalClosure, "")
-	h.log.Info().Str("agent_id", agentID.String()).Msg("agent disconnected")
+	h.log.Info().
+		Str("agent_id", agentID.String()).
+		Str("region", region).Str("zone", zone).
+		Str("reason", reason).
+		Msg("agent disconnected")
 }
 
 // readHello reads and decodes the first frame, which must be a hello.

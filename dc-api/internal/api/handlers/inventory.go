@@ -48,6 +48,8 @@ func (h *InventoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 	sess, ok := h.registry.Session(region, zone)
 	if !ok {
 		// No agent is currently connected for this zone — transient.
+		h.log.Info().Str("region", region).Str("zone", zone).
+			Msg("inventory requested but no agent connected for zone")
 		writeError(w, http.StatusServiceUnavailable, "no agent connected for this zone")
 		return
 	}
@@ -72,8 +74,12 @@ func (h *InventoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *InventoryHandler) writeCallError(w http.ResponseWriter, region, zone string, err error) {
 	switch {
 	case errors.Is(err, ErrAgentUnavailable):
+		h.log.Warn().Str("region", region).Str("zone", zone).
+			Msg("inventory call failed: agent channel unavailable")
 		writeError(w, http.StatusServiceUnavailable, "agent channel unavailable")
 	case errors.Is(err, context.DeadlineExceeded):
+		h.log.Warn().Str("region", region).Str("zone", zone).
+			Msg("inventory call failed: agent did not respond in time")
 		writeError(w, http.StatusGatewayTimeout, "agent did not respond in time")
 	default:
 		var ae *AgentError
