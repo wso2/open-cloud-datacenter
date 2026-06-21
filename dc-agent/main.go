@@ -147,34 +147,136 @@ func main() {
 	// clients; a real call happens only when the control plane requests an op.
 	// No cluster access is not fatal — the agent runs presence-only, exactly as
 	// before v1, and advertises no ops (the server returns OP_UNSUPPORTED).
-	var dispatcher conn.Dispatcher
+	var (
+		dispatcher       conn.Dispatcher
+		streamDispatcher conn.StreamDispatcher
+	)
 	if exec, err := executor.NewKubeExecutorFromConfig(cfg.kubeconfig); err != nil {
 		logger.Warn().Err(err).Msg("no local-cluster access; running presence-only (set DCAGENT_KUBECONFIG for local dev)")
 	} else {
-		dispatcher = conn.Dispatcher{
-			executor.OpGetInventory: func(ctx context.Context, _ json.RawMessage) (json.RawMessage, error) {
-				inv, err := exec.GetInventory(ctx)
-				if err != nil {
-					return nil, err
-				}
-				return json.Marshal(inv)
-			},
-		}
-		logger.Info().Strs("ops", []string{executor.OpGetInventory}).Msg("local-cluster executor ready")
+		dispatcher, streamDispatcher = buildDispatchers(exec, logger)
+		logger.Info().
+			Strs("ops", []string{executor.OpGetInventory, executor.OpApply, executor.OpDelete, executor.OpGetStatus, executor.OpWatchStatus}).
+			Msg("local-cluster executor ready")
 	}
 
 	// ── Connection loop ───────────────────────────────────────────────────────
 	// Runs until the context is cancelled, reconnecting on any failure.
 	runner := conn.NewRunner(conn.Config{
-		Endpoint:   cfg.endpoint,
-		Token:      cfg.token,
-		Region:     cfg.region,
-		Zone:       cfg.zone,
-		Version:    version,
-		Logger:     logger,
-		Dispatcher: dispatcher,
+		Endpoint:         cfg.endpoint,
+		Token:            cfg.token,
+		Region:           cfg.region,
+		Zone:             cfg.zone,
+		Version:          version,
+		Logger:           logger,
+		Dispatcher:       dispatcher,
+		StreamDispatcher: streamDispatcher,
 	})
 	runner.Run(ctx)
 
 	logger.Info().Msg("dc-agent stopped")
+}
+
+// buildDispatchers wires the protocol-v1 op handlers onto exec. Each
+// request/response handler unmarshals its params, calls the matching executor
+// method, and marshals the result: a returned error becomes an EXEC_ERROR res,
+// while a conn.BadRequest-wrapped error (params-unmarshal failure) or an executor
+// BAD_REQUEST fault becomes a BAD_REQUEST res. The streaming watch_status handler
+// emits one progress frame per observed event before its terminal summary.
+//
+// It is a package-level function (not inline in main) so the wire path — params
+// field names, result shapes, error mapping — is unit-testable against an
+// executor.Stub driven through the real conn loop.
+func buildDispatchers(exec executor.Executor, logger zerolog.Logger) (conn.Dispatcher, conn.StreamDispatcher) {
+	dispatcher := conn.Dispatcher{
+		executor.OpGetInventory: func(ctx context.Context, _ json.RawMessage) (json.RawMessage, error) {
+			inv, err := exec.GetInventory(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(inv)
+		},
+		executor.OpApply: func(ctx context.Context, params json.RawMessage) (json.RawMessage, error) {
+			var p struct {
+				Manifest     json.RawMessage `json:"manifest"`
+				FieldManager string          `json:"field_manager"`
+				Force        bool            `json:"force"`
+			}
+			if err := json.Unmarshal(params, &p); err != nil {
+				return nil, conn.BadRequest(fmt.Errorf("apply params: %w", err))
+			}
+			res, err := exec.Apply(ctx, p.Manifest, p.FieldManager, p.Force)
+			if err != nil {
+				return nil, err
+			}
+			logger.Info().
+				Str("op", executor.OpApply).
+				Str("gvk", res.APIVersion+"/"+res.Kind).
+				Str("object", res.Namespace+"/"+res.Name).
+				Str("resource_version", res.ResourceVersion).
+				Msg("applied object")
+			return json.Marshal(res)
+		},
+		executor.OpDelete: func(ctx context.Context, params json.RawMessage) (json.RawMessage, error) {
+			var p struct {
+				executor.ResourceRef
+				PropagationPolicy string `json:"propagation_policy"`
+			}
+			if err := json.Unmarshal(params, &p); err != nil {
+				return nil, conn.BadRequest(fmt.Errorf("delete params: %w", err))
+			}
+			res, err := exec.Delete(ctx, p.ResourceRef, p.PropagationPolicy)
+			if err != nil {
+				return nil, err
+			}
+			logger.Info().
+				Str("op", executor.OpDelete).
+				Str("gvk", p.APIVersion+"/"+p.Kind).
+				Str("object", p.Namespace+"/"+p.Name).
+				Bool("existed", res.Existed).
+				Msg("deleted object")
+			return json.Marshal(res)
+		},
+		executor.OpGetStatus: func(ctx context.Context, params json.RawMessage) (json.RawMessage, error) {
+			var ref executor.ResourceRef
+			if err := json.Unmarshal(params, &ref); err != nil {
+				return nil, conn.BadRequest(fmt.Errorf("get_status params: %w", err))
+			}
+			res, err := exec.GetStatus(ctx, ref)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(res)
+		},
+	}
+	streamDispatcher := conn.StreamDispatcher{
+		executor.OpWatchStatus: func(ctx context.Context, params json.RawMessage, emit conn.Emitter) (json.RawMessage, error) {
+			var p struct {
+				executor.ResourceRef
+				MaxSnapshots int `json:"max_snapshots"`
+			}
+			if err := json.Unmarshal(params, &p); err != nil {
+				return nil, conn.BadRequest(fmt.Errorf("watch_status params: %w", err))
+			}
+			res, err := exec.WatchStatus(ctx, p.ResourceRef, p.MaxSnapshots, func(stage string, snap executor.StatusSnapshot) {
+				b, err := json.Marshal(snap)
+				if err != nil {
+					return // a snapshot that won't marshal is dropped, not fatal
+				}
+				emit(stage, b)
+			})
+			if err != nil {
+				return nil, err
+			}
+			logger.Info().
+				Str("op", executor.OpWatchStatus).
+				Str("gvk", p.APIVersion+"/"+p.Kind).
+				Str("object", p.Namespace+"/"+p.Name).
+				Int("snapshots_sent", res.SnapshotsSent).
+				Str("reason", res.Reason).
+				Msg("watch_status stream ended")
+			return json.Marshal(res)
+		},
+	}
+	return dispatcher, streamDispatcher
 }

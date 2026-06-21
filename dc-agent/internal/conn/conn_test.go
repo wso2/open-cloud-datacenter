@@ -314,6 +314,284 @@ func TestSessionDispatch(t *testing.T) {
 	}
 }
 
+// TestAdvertisedOps verifies the hello advertisement merges the request/response
+// and streaming dispatchers: sorted, de-duplicated, and nil when both are empty.
+func TestAdvertisedOps(t *testing.T) {
+	noop := func(context.Context, json.RawMessage) (json.RawMessage, error) { return nil, nil }
+	noopStream := func(context.Context, json.RawMessage, Emitter) (json.RawMessage, error) { return nil, nil }
+
+	cases := []struct {
+		name   string
+		disp   Dispatcher
+		stream StreamDispatcher
+		want   []string
+	}{
+		{
+			name: "both empty",
+			want: nil,
+		},
+		{
+			name: "request/response only",
+			disp: Dispatcher{"get_inventory": noop, "apply": noop},
+			want: []string{"apply", "get_inventory"},
+		},
+		{
+			name:   "streaming only",
+			stream: StreamDispatcher{"watch_status": noopStream},
+			want:   []string{"watch_status"},
+		},
+		{
+			name:   "union sorted",
+			disp:   Dispatcher{"get_inventory": noop, "delete": noop, "apply": noop, "get_status": noop},
+			stream: StreamDispatcher{"watch_status": noopStream},
+			want:   []string{"apply", "delete", "get_inventory", "get_status", "watch_status"},
+		},
+		{
+			name:   "name in both maps listed once",
+			disp:   Dispatcher{"shared": noop},
+			stream: StreamDispatcher{"shared": noopStream},
+			want:   []string{"shared"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Config{Dispatcher: tc.disp, StreamDispatcher: tc.stream}.advertisedOps()
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("advertisedOps() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSessionStreamDispatch runs the v1 streaming path against an in-process
+// server: a StreamHandler emits two progress frames, then returns its terminal
+// res. The test asserts (1) the streaming op is advertised in hello alongside the
+// request/response op, (2) the two progress frames arrive before the terminal res,
+// in order, all correlated to the request id, and (3) the terminal res carries the
+// handler's result. This pins the single-writer ordering guarantee: progress
+// frames never land after the res that ends the request.
+func TestSessionStreamDispatch(t *testing.T) {
+	stream := StreamDispatcher{
+		"watch_status": func(_ context.Context, _ json.RawMessage, emit Emitter) (json.RawMessage, error) {
+			emit("added", json.RawMessage(`{"found":true,"resource_version":"1"}`))
+			emit("modified", json.RawMessage(`{"found":true,"resource_version":"2"}`))
+			return json.RawMessage(`{"snapshots_sent":2,"reason":"max_snapshots"}`), nil
+		},
+	}
+	disp := Dispatcher{
+		"get_inventory": func(context.Context, json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(`{"vm_count":0}`), nil
+		},
+	}
+
+	gotOps := make(chan []string, 1)
+	done := make(chan struct{})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		c, err := websocket.Accept(w, req, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close(websocket.StatusNormalClosure, "test over")
+		ctx := req.Context()
+
+		// hello → capture ops → hello_ack.
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			return
+		}
+		frame, _ := protocol.Decode(data)
+		hello, ok := frame.(*protocol.Hello)
+		if !ok {
+			t.Errorf("first frame %T, want *protocol.Hello", frame)
+			return
+		}
+		gotOps <- hello.Ops
+		ack, _ := protocol.Encode(&protocol.HelloAck{Type: protocol.TypeHelloAck, AgentID: "agent-1"})
+		if err := c.Write(ctx, websocket.MessageText, ack); err != nil {
+			return
+		}
+
+		// Issue the watch_status req and read frames until the terminal res.
+		reqBytes, _ := protocol.Encode(&protocol.Req{Type: protocol.TypeReq, ID: "watch-1", Op: "watch_status"})
+		if err := c.Write(ctx, websocket.MessageText, reqBytes); err != nil {
+			t.Errorf("server write watch req: %v", err)
+			return
+		}
+
+		var progresses []*protocol.Progress
+		for {
+			_, data, err := c.Read(ctx)
+			if err != nil {
+				t.Errorf("server read stream frame: %v", err)
+				return
+			}
+			f, err := protocol.Decode(data)
+			if err != nil {
+				t.Errorf("server decode stream frame: %v", err)
+				return
+			}
+			switch fr := f.(type) {
+			case *protocol.Progress:
+				progresses = append(progresses, fr)
+			case *protocol.Res:
+				// Terminal res: validate ordering and contents, then finish.
+				if fr.ID != "watch-1" {
+					t.Errorf("res id = %q, want watch-1", fr.ID)
+				}
+				if !fr.Ok || string(fr.Result) != `{"snapshots_sent":2,"reason":"max_snapshots"}` {
+					t.Errorf("terminal res = %+v, want ok with the watch summary", fr)
+				}
+				if len(progresses) != 2 {
+					t.Fatalf("got %d progress frames before res, want 2", len(progresses))
+				}
+				if progresses[0].Stage != "added" || string(progresses[0].Data) != `{"found":true,"resource_version":"1"}` {
+					t.Errorf("progress[0] = %+v, want added/rv-1", progresses[0])
+				}
+				if progresses[1].Stage != "modified" || string(progresses[1].Data) != `{"found":true,"resource_version":"2"}` {
+					t.Errorf("progress[1] = %+v, want modified/rv-2", progresses[1])
+				}
+				for i, p := range progresses {
+					if p.ID != "watch-1" {
+						t.Errorf("progress[%d] id = %q, want watch-1 (correlation broken)", i, p.ID)
+					}
+				}
+				close(done)
+				<-ctx.Done()
+				return
+			default:
+				t.Errorf("unexpected frame %T in stream", fr)
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	r := NewRunner(Config{
+		Endpoint:         "ws" + strings.TrimPrefix(srv.URL, "http"),
+		Token:            "dcagent_x",
+		Region:           "region-a",
+		Zone:             "zone-1",
+		Version:          "test",
+		Logger:           zerolog.Nop(),
+		PingInterval:     time.Hour, // keep pings out of the stream exchange
+		Dispatcher:       disp,
+		StreamDispatcher: stream,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go r.runSession(ctx)
+
+	select {
+	case ops := <-gotOps:
+		want := []string{"get_inventory", "watch_status"} // merged + sorted
+		if !reflect.DeepEqual(ops, want) {
+			t.Errorf("hello.ops = %v, want %v", ops, want)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for hello")
+	}
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for the streaming exchange to complete")
+	}
+}
+
+// TestSessionDispatchBadRequest verifies a handler error wrapped with BadRequest
+// (the path main.go uses for params-unmarshal failures) surfaces as a BAD_REQUEST
+// res — distinct from the EXEC_ERROR a plain handler error yields — for both a
+// request/response handler and a streaming handler.
+func TestSessionDispatchBadRequest(t *testing.T) {
+	disp := Dispatcher{
+		"bad_params": func(context.Context, json.RawMessage) (json.RawMessage, error) {
+			return nil, BadRequest(errors.New("unparseable params"))
+		},
+	}
+	stream := StreamDispatcher{
+		"bad_stream_params": func(context.Context, json.RawMessage, Emitter) (json.RawMessage, error) {
+			return nil, BadRequest(errors.New("unparseable stream params"))
+		},
+	}
+
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		c, err := websocket.Accept(w, req, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close(websocket.StatusNormalClosure, "test over")
+		ctx := req.Context()
+
+		if _, _, err := c.Read(ctx); err != nil { // hello
+			return
+		}
+		ack, _ := protocol.Encode(&protocol.HelloAck{Type: protocol.TypeHelloAck, AgentID: "agent-1"})
+		if err := c.Write(ctx, websocket.MessageText, ack); err != nil {
+			return
+		}
+
+		send := func(id, op string) *protocol.Res {
+			b, _ := protocol.Encode(&protocol.Req{Type: protocol.TypeReq, ID: id, Op: op})
+			if err := c.Write(ctx, websocket.MessageText, b); err != nil {
+				t.Errorf("server write req %q: %v", op, err)
+				return nil
+			}
+			_, data, err := c.Read(ctx)
+			if err != nil {
+				t.Errorf("server read res for %q: %v", op, err)
+				return nil
+			}
+			f, _ := protocol.Decode(data)
+			res, ok := f.(*protocol.Res)
+			if !ok {
+				t.Errorf("response is %T, want *protocol.Res", f)
+				return nil
+			}
+			return res
+		}
+
+		if res := send("id-rr", "bad_params"); res != nil {
+			if res.Ok || res.Error == nil || res.Error.Code != protocol.ErrCodeBadRequest {
+				t.Errorf("request/response bad-params res = %+v, want BAD_REQUEST", res)
+			}
+		}
+		if res := send("id-stream", "bad_stream_params"); res != nil {
+			if res.Ok || res.Error == nil || res.Error.Code != protocol.ErrCodeBadRequest {
+				t.Errorf("streaming bad-params res = %+v, want BAD_REQUEST", res)
+			}
+		}
+
+		close(done)
+		<-ctx.Done()
+	}))
+	defer srv.Close()
+
+	r := NewRunner(Config{
+		Endpoint:         "ws" + strings.TrimPrefix(srv.URL, "http"),
+		Token:            "dcagent_x",
+		Region:           "region-a",
+		Zone:             "zone-1",
+		Version:          "test",
+		Logger:           zerolog.Nop(),
+		PingInterval:     time.Hour,
+		Dispatcher:       disp,
+		StreamDispatcher: stream,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go r.runSession(ctx)
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for the bad-request exchanges to complete")
+	}
+}
+
 // TestRunSessionRejectsBadAck verifies the agent treats a non-hello_ack
 // first frame as a handshake failure (and reports established=false so the
 // backoff schedule keeps escalating).

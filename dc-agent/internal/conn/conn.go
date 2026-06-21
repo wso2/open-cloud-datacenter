@@ -71,19 +71,42 @@ type Config struct {
 	// Exposed for tests; production uses the default.
 	IdleLimit time.Duration
 
-	// Dispatcher maps the operation verbs this agent serves (protocol v1) to
-	// their handlers. Its keys are advertised in the hello frame. Empty (the
-	// zero value) keeps the agent presence-only — exactly v0 behaviour.
+	// Dispatcher maps the request/response operation verbs this agent serves
+	// (protocol v1) to their handlers. Its keys are advertised in the hello
+	// frame. Empty (the zero value) keeps the agent presence-only — exactly v0
+	// behaviour.
 	Dispatcher Dispatcher
+
+	// StreamDispatcher maps the streaming operation verbs (those that emit
+	// progress frames before their terminal res, e.g. watch_status) to their
+	// handlers. Its keys are advertised in the hello frame alongside Dispatcher's.
+	// A streaming and a non-streaming op must not share a name.
+	StreamDispatcher StreamDispatcher
 }
 
 // Handler runs one operation request: it receives the request's params and
 // returns the result payload, or an error (surfaced to the control plane as an
-// EXEC_ERROR response).
+// EXEC_ERROR response — or BAD_REQUEST if the error reports itself as a client
+// fault, see BadRequest).
 type Handler func(ctx context.Context, params json.RawMessage) (json.RawMessage, error)
 
 // Dispatcher maps op names to their handlers.
 type Dispatcher map[string]Handler
+
+// Emitter sends one advisory progress frame for an in-flight op, correlated by
+// the request's id. It is wired to writeFrame, so it is serialized against the
+// ping loop and every other op by the single-writer mutex — progress frames
+// never interleave on the wire. Safe for concurrent use; best-effort (a write
+// error is dropped, like any progress frame).
+type Emitter func(stage string, data json.RawMessage)
+
+// StreamHandler runs one streaming operation request: it may call emit zero or
+// more times to send progress frames before returning its terminal result (or
+// an error). Registered in a StreamDispatcher.
+type StreamHandler func(ctx context.Context, params json.RawMessage, emit Emitter) (json.RawMessage, error)
+
+// StreamDispatcher maps op names to their streaming handlers.
+type StreamDispatcher map[string]StreamHandler
 
 // ops returns the dispatcher's op names, sorted for a stable hello frame.
 func (d Dispatcher) ops() []string {
@@ -96,6 +119,53 @@ func (d Dispatcher) ops() []string {
 	}
 	sort.Strings(ops)
 	return ops
+}
+
+// advertisedOps returns the union of the request/response and streaming op
+// names, sorted and de-duplicated, for the hello frame. A name appearing in both
+// maps is listed once.
+func (c Config) advertisedOps() []string {
+	if len(c.Dispatcher) == 0 && len(c.StreamDispatcher) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(c.Dispatcher)+len(c.StreamDispatcher))
+	for op := range c.Dispatcher {
+		set[op] = struct{}{}
+	}
+	for op := range c.StreamDispatcher {
+		set[op] = struct{}{}
+	}
+	ops := make([]string, 0, len(set))
+	for op := range set {
+		ops = append(ops, op)
+	}
+	sort.Strings(ops)
+	return ops
+}
+
+// badRequester is implemented by handler (or executor) errors that are a
+// client/params fault — reported as BAD_REQUEST rather than EXEC_ERROR. The
+// executor package returns errors with this method (no import edge between the
+// two packages); conn also wraps params-unmarshal failures via BadRequest.
+type badRequester interface{ BadRequest() bool }
+
+// badRequestError marks a conn-side error (e.g. a params-unmarshal failure) as a
+// client fault. It satisfies badRequester.
+type badRequestError struct{ err error }
+
+func (e badRequestError) Error() string    { return e.err.Error() }
+func (e badRequestError) Unwrap() error    { return e.err }
+func (e badRequestError) BadRequest() bool { return true }
+
+// BadRequest wraps err so dispatch reports it as BAD_REQUEST instead of
+// EXEC_ERROR. Handlers use it for malformed params.
+func BadRequest(err error) error { return badRequestError{err: err} }
+
+// isBadRequest reports whether err (or anything it wraps) marks itself a
+// client/params fault via the badRequester interface.
+func isBadRequest(err error) bool {
+	var br badRequester
+	return errors.As(err, &br) && br.BadRequest()
 }
 
 // Runner maintains the agent↔control-plane channel for the life of the
@@ -237,7 +307,7 @@ func (r *Runner) dial(ctx context.Context) (*websocket.Conn, error) {
 // rather than timing out on a verb this agent lacks.
 func (r *Runner) handshake(ctx context.Context, c *websocket.Conn) (*protocol.HelloAck, error) {
 	hello := protocol.NewHello(r.cfg.Region, r.cfg.Zone, r.cfg.Version)
-	hello.Ops = r.cfg.Dispatcher.ops()
+	hello.Ops = r.cfg.advertisedOps()
 	if err := r.writeFrame(ctx, c, hello); err != nil {
 		return nil, fmt.Errorf("send hello: %w", err)
 	}
@@ -344,17 +414,42 @@ func (r *Runner) handleFrame(ctx context.Context, c *websocket.Conn, data []byte
 	}
 }
 
-// dispatch runs one request's handler and writes its response. An op with no
-// handler returns OP_UNSUPPORTED; a handler error returns EXEC_ERROR. log is the
-// per-session logger (carries agent_id).
+// dispatch runs one request's handler and writes its terminal response. A
+// request/response op is looked up in Dispatcher first; a streaming op (which may
+// emit progress frames before its res) in StreamDispatcher; an op in neither
+// returns OP_UNSUPPORTED. A handler error returns BAD_REQUEST if it reports
+// itself a client fault (see badRequester/BadRequest), else EXEC_ERROR. log is
+// the per-session logger (carries agent_id).
 func (r *Runner) dispatch(ctx context.Context, c *websocket.Conn, req *protocol.Req, log zerolog.Logger) {
-	handler, ok := r.cfg.Dispatcher[req.Op]
-	if !ok {
-		r.writeRes(ctx, c, protocol.NewErrRes(req.ID, protocol.ErrCodeOpUnsupported, "unsupported op: "+req.Op), log)
+	if handler, ok := r.cfg.Dispatcher[req.Op]; ok {
+		result, err := handler(ctx, req.Params)
+		r.finishDispatch(ctx, c, req, result, err, log)
 		return
 	}
-	result, err := handler(ctx, req.Params)
+	if handler, ok := r.cfg.StreamDispatcher[req.Op]; ok {
+		// The emitter is bound to this req's id and the current connection, and
+		// goes through the mutex-guarded writeFrame so progress frames never
+		// interleave with pongs or other ops' frames.
+		emit := func(stage string, data json.RawMessage) {
+			_ = r.writeFrame(ctx, c, protocol.NewProgressData(req.ID, stage, data))
+		}
+		result, err := handler(ctx, req.Params, emit)
+		r.finishDispatch(ctx, c, req, result, err, log)
+		return
+	}
+	r.writeRes(ctx, c, protocol.NewErrRes(req.ID, protocol.ErrCodeOpUnsupported, "unsupported op: "+req.Op), log)
+}
+
+// finishDispatch writes the single terminal res for a (streaming or
+// request/response) op: a client-fault error → BAD_REQUEST, any other error →
+// EXEC_ERROR, success → the result. Exactly one res ends every request.
+func (r *Runner) finishDispatch(ctx context.Context, c *websocket.Conn, req *protocol.Req, result json.RawMessage, err error, log zerolog.Logger) {
 	if err != nil {
+		if isBadRequest(err) {
+			log.Warn().Err(err).Str("op", req.Op).Msg("op rejected (bad request)")
+			r.writeRes(ctx, c, protocol.NewErrRes(req.ID, protocol.ErrCodeBadRequest, err.Error()), log)
+			return
+		}
 		log.Warn().Err(err).Str("op", req.Op).Msg("op handler failed")
 		r.writeRes(ctx, c, protocol.NewErrRes(req.ID, protocol.ErrCodeExecError, err.Error()), log)
 		return

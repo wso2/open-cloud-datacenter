@@ -172,10 +172,84 @@ func TestV1FrameRoundTrip(t *testing.T) {
 		if !ok {
 			t.Fatalf("Decode returned %T, want *Progress", got)
 		}
-		if *p != *want {
+		// Progress carries a json.RawMessage (Data) and so is not comparable with
+		// ==; compare the scalar fields, and assert Data is absent for a
+		// detail-only NewProgress (omitempty keeps it off the wire).
+		if p.Type != want.Type || p.ID != want.ID || p.Stage != want.Stage || p.Detail != want.Detail {
 			t.Errorf("progress round-trip mismatch: got %+v, want %+v", p, want)
 		}
+		if p.Data != nil {
+			t.Errorf("progress Data = %s, want nil for a detail-only frame", p.Data)
+		}
 	})
+}
+
+// TestProgressDataRoundTrip verifies the M-B addition to the Progress frame:
+// NewProgressData carries a structured Data payload that survives a round-trip,
+// and the constructor leaves Detail empty (the streaming case uses Data, not the
+// human-readable Detail string).
+func TestProgressDataRoundTrip(t *testing.T) {
+	snapshot := json.RawMessage(`{"found":true,"resource_version":"12346","generation":7,"status":{"phase":"Running"}}`)
+	want := NewProgressData("watch-1", "modified", snapshot)
+
+	got := roundTrip(t, want)
+	p, ok := got.(*Progress)
+	if !ok {
+		t.Fatalf("Decode returned %T, want *Progress", got)
+	}
+	if p.Type != TypeProgress || p.ID != "watch-1" || p.Stage != "modified" {
+		t.Errorf("progress envelope mismatch: got %+v", p)
+	}
+	if p.Detail != "" {
+		t.Errorf("NewProgressData Detail = %q, want empty (streaming uses Data)", p.Detail)
+	}
+	// Data must round-trip byte-for-byte as raw JSON.
+	if string(p.Data) != string(snapshot) {
+		t.Errorf("progress Data = %s, want %s", p.Data, snapshot)
+	}
+}
+
+// TestProgressDataWireFormat pins the JSON the streaming path puts on the wire:
+// when Data is set it appears as the "data" key; when it is empty (the M-A
+// detail-only constructor) the key is omitted, so a v0/M-A receiver decoding into
+// a Progress without the field sees no change. This is the backward-compat
+// guarantee for the additive field.
+func TestProgressDataWireFormat(t *testing.T) {
+	// With Data set: the "data" key is present and "detail" is omitted.
+	b, err := Encode(NewProgressData("id-1", "added", json.RawMessage(`{"found":true}`)))
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if m["type"] != "progress" || m["id"] != "id-1" || m["stage"] != "added" {
+		t.Errorf("progress wire envelope wrong: %s", b)
+	}
+	data, ok := m["data"].(map[string]any)
+	if !ok || data["found"] != true {
+		t.Errorf("progress data key missing/wrong: %s", b)
+	}
+	if _, has := m["detail"]; has {
+		t.Errorf("NewProgressData must omit empty detail: %s", b)
+	}
+
+	// Detail-only (M-A) constructor: no "data" key on the wire at all.
+	b, err = Encode(NewProgress("id-2", "applying", "step 1/2"))
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	m = nil
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if _, has := m["data"]; has {
+		t.Errorf("detail-only NewProgress must omit data (backward compat): %s", b)
+	}
+	if m["detail"] != "step 1/2" {
+		t.Errorf("detail-only progress detail wrong: %s", b)
+	}
 }
 
 // TestReqResWireFormat pins the v1 frame JSON — the wire format is the contract

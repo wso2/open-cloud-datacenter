@@ -112,11 +112,17 @@ type FrameError struct {
 
 // Progress is an optional, advisory in-flight update emitted zero or more times
 // before the terminal Res, correlated by ID. Receivers may ignore it.
+//
+// Data (added in M-B) carries a structured payload — e.g. a status snapshot for
+// watch_status. It is additive and omitempty: v0/M-A receivers decode Progress
+// into a struct without the field and encoding/json silently drops the unknown
+// key, so the wire stays backward compatible.
 type Progress struct {
-	Type   string `json:"type"`
-	ID     string `json:"id"`
-	Stage  string `json:"stage"`
-	Detail string `json:"detail,omitempty"`
+	Type   string          `json:"type"`
+	ID     string          `json:"id"`
+	Stage  string          `json:"stage"`
+	Detail string          `json:"detail,omitempty"`
+	Data   json.RawMessage `json:"data,omitempty"`
 }
 
 // Unknown is returned by Decode for frame types this agent version does not
@@ -152,9 +158,16 @@ func NewErrRes(id, code, message string) *Res {
 	return &Res{Type: TypeRes, ID: id, Ok: false, Error: &FrameError{Code: code, Message: message}}
 }
 
-// NewProgress builds an advisory progress frame.
+// NewProgress builds an advisory progress frame with a human-readable detail
+// string. Unchanged from M-A for existing callers.
 func NewProgress(id, stage, detail string) *Progress {
 	return &Progress{Type: TypeProgress, ID: id, Stage: stage, Detail: detail}
+}
+
+// NewProgressData builds an advisory progress frame carrying a structured Data
+// payload (M-B) — e.g. a watch_status status snapshot. Detail is left empty.
+func NewProgressData(id, stage string, data json.RawMessage) *Progress {
+	return &Progress{Type: TypeProgress, ID: id, Stage: stage, Data: data}
 }
 
 // Encode marshals a frame to its JSON wire representation.

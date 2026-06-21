@@ -45,6 +45,13 @@ const (
 	errCodeExecError     = "EXEC_ERROR"
 
 	opGetInventory = "get_inventory"
+
+	// M-B mutating/status verbs (protocol v1). These exact strings are the wire
+	// contract with dc-agent; the two are separate Go modules.
+	opApply       = "apply"
+	opDelete      = "delete"
+	opGetStatus   = "get_status"
+	opWatchStatus = "watch_status"
 )
 
 // wsReq / wsRes / wsProgress are the server-side mirror of dc-agent's v1 frames
@@ -67,6 +74,89 @@ type wsRes struct {
 type wsFrameError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+// wsProgress is an advisory, mid-flight frame an agent emits for a streaming op
+// (watch_status), correlated to the in-flight req by ID. Data carries an
+// op-specific structured payload (a status snapshot for watch_status); it is an
+// additive, omitempty field — an older receiver ignores the unknown key.
+type wsProgress struct {
+	Type   string          `json:"type"`
+	ID     string          `json:"id"`
+	Stage  string          `json:"stage"`
+	Detail string          `json:"detail,omitempty"`
+	Data   json.RawMessage `json:"data,omitempty"`
+}
+
+// ── M-B op param/result shapes ───────────────────────────────────────────────
+//
+// These mirror dc-agent's executor structs by JSON tag only (no shared Go
+// package): the field names below ARE the wire contract. dc-api builds the
+// reference from objects it already holds, so it addresses by GVK
+// (api_version + kind), not GVR — the agent owns the GVK→GVR mapping.
+
+// ResourceRef identifies one Kubernetes object by GVK + namespace/name. It is
+// embedded inline (not nested) in delete/get_status/watch_status params.
+type ResourceRef struct {
+	APIVersion string `json:"api_version"`
+	Kind       string `json:"kind"`
+	Namespace  string `json:"namespace,omitempty"`
+	Name       string `json:"name"`
+}
+
+// applyParams is the request body for the apply op: a full manifest plus the SSA
+// field manager and force-conflicts flag.
+type applyParams struct {
+	Manifest     json.RawMessage `json:"manifest"`
+	FieldManager string          `json:"field_manager,omitempty"`
+	Force        bool            `json:"force,omitempty"`
+}
+
+// ApplyResult is the apply op's result: the applied object's identity and its
+// post-apply version.
+type ApplyResult struct {
+	APIVersion      string `json:"api_version"`
+	Kind            string `json:"kind"`
+	Namespace       string `json:"namespace,omitempty"`
+	Name            string `json:"name"`
+	UID             string `json:"uid"`
+	ResourceVersion string `json:"resource_version"`
+}
+
+// deleteParams is the request body for the delete op: a ResourceRef plus an
+// optional propagation policy.
+type deleteParams struct {
+	ResourceRef
+	PropagationPolicy string `json:"propagation_policy,omitempty"`
+}
+
+// DeleteResult is the delete op's result. Existed is false when the object was
+// already absent (a 404 is a successful, idempotent delete — not an error).
+type DeleteResult struct {
+	Existed bool `json:"existed"`
+}
+
+// StatusSnapshot is the result of get_status AND the payload of each
+// watch_status progress frame — one shape for both the single read and the
+// stream. Found is false when the object is absent (not an error).
+type StatusSnapshot struct {
+	Found           bool            `json:"found"`
+	ResourceVersion string          `json:"resource_version,omitempty"`
+	Generation      int64           `json:"generation,omitempty"`
+	Status          json.RawMessage `json:"status,omitempty"`
+}
+
+// watchStatusParams is the request body for the watch_status op: a ResourceRef
+// plus the stream's snapshot cap.
+type watchStatusParams struct {
+	ResourceRef
+	MaxSnapshots int `json:"max_snapshots,omitempty"`
+}
+
+// WatchResult is the terminal summary of a watch_status stream.
+type WatchResult struct {
+	SnapshotsSent int    `json:"snapshots_sent"`
+	Reason        string `json:"reason"`
 }
 
 // ErrAgentUnavailable is returned when no live agent session exists for a zone,
@@ -98,11 +188,28 @@ type Session struct {
 	// interleave on the wire.
 	writeMu sync.Mutex
 
-	// mu guards pending and closed.
+	// mu guards pending, streams, and closed.
 	mu      sync.Mutex
 	pending map[string]chan *wsRes
+	// streams routes progress frames to an in-flight WatchStatus, keyed by req
+	// id. It is separate from pending (which is single-shot, terminal-only):
+	// progress is multi-shot, the terminal res still flows through pending.
+	//
+	// Each value is a per-watch buffered channel. deliverProgress (on the Serve
+	// read goroutine) does a NON-BLOCKING send onto it; WatchStatus (on the
+	// caller's goroutine) drains it and runs onSnapshot. Routing progress through
+	// a channel — rather than calling a sink inline on the Serve goroutine — means
+	// a slow onSnapshot can never head-of-line-block the single reader, and
+	// onSnapshot can never fire after WatchStatus has returned.
+	streams map[string]chan *wsProgress
 	closed  bool
 }
+
+// watchProgressBuffer is the per-watch progress channel's buffer. A watch that
+// can't keep up drops the oldest-beyond-buffer snapshots (deliverProgress's
+// non-blocking send) rather than stalling the Serve reader — snapshots are
+// advisory and the terminal res is authoritative.
+const watchProgressBuffer = 16
 
 func newSession(conn *websocket.Conn, region, zone string, log zerolog.Logger) *Session {
 	return &Session{
@@ -111,6 +218,7 @@ func newSession(conn *websocket.Conn, region, zone string, log zerolog.Logger) *
 		zone:    zone,
 		log:     log,
 		pending: make(map[string]chan *wsRes),
+		streams: make(map[string]chan *wsProgress),
 	}
 }
 
@@ -161,11 +269,172 @@ func (s *Session) Call(ctx context.Context, op string, params json.RawMessage) (
 	}
 }
 
+// ── M-B op drivers ───────────────────────────────────────────────────────────
+//
+// Apply / Delete / GetStatus are thin wrappers over Call (marshal params →
+// Call → unmarshal result), mirroring how inventory.go drives get_inventory.
+// Errors from Call (*AgentError, ErrAgentUnavailable, ctx.Err()) pass through
+// unchanged for the caller to map to an HTTP status.
+
+// Apply server-side-applies manifest in the agent's zone cluster. fieldManager
+// defaults to "dc-api" on the agent when empty; force toggles SSA
+// force-conflicts. It returns the applied object's identity and version.
+func (s *Session) Apply(ctx context.Context, manifest json.RawMessage, fieldManager string, force bool) (ApplyResult, error) {
+	var res ApplyResult
+	params, err := json.Marshal(applyParams{Manifest: manifest, FieldManager: fieldManager, Force: force})
+	if err != nil {
+		return res, err
+	}
+	raw, err := s.Call(ctx, opApply, params)
+	if err != nil {
+		return res, err
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return ApplyResult{}, err
+	}
+	return res, nil
+}
+
+// Delete removes the referenced object. A missing object is a successful,
+// idempotent delete (DeleteResult.Existed == false), not an error.
+// propagationPolicy, when non-empty, is one of Foreground/Background/Orphan.
+func (s *Session) Delete(ctx context.Context, ref ResourceRef, propagationPolicy string) (DeleteResult, error) {
+	var res DeleteResult
+	params, err := json.Marshal(deleteParams{ResourceRef: ref, PropagationPolicy: propagationPolicy})
+	if err != nil {
+		return res, err
+	}
+	raw, err := s.Call(ctx, opDelete, params)
+	if err != nil {
+		return res, err
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return DeleteResult{}, err
+	}
+	return res, nil
+}
+
+// GetStatus reads the referenced object's status once. A missing object yields
+// StatusSnapshot{Found: false}, not an error — a reconciler can poll for "gone
+// yet?" without treating a 404 as a failure.
+func (s *Session) GetStatus(ctx context.Context, ref ResourceRef) (StatusSnapshot, error) {
+	var res StatusSnapshot
+	params, err := json.Marshal(ref)
+	if err != nil {
+		return res, err
+	}
+	raw, err := s.Call(ctx, opGetStatus, params)
+	if err != nil {
+		return res, err
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return StatusSnapshot{}, err
+	}
+	return res, nil
+}
+
+// WatchStatus drives the watch_status streaming op: it sends one req and invokes
+// onSnapshot for each progress frame the agent emits (correlated by id), then
+// returns the terminal summary. It blocks until the terminal res, ctx is done,
+// or the session dies (ErrAgentUnavailable).
+//
+// Unlike Call, it registers BOTH a terminal waiter (in pending) and a progress
+// channel (in streams) under one id, because Call's one-shot waiter has no
+// progress hook and deletes itself on return.
+//
+// onSnapshot is invoked ONLY from this function's own select loop, on the
+// caller's goroutine — never on the Serve read goroutine. deliverProgress just
+// does a non-blocking send onto the per-watch buffered channel drained here, so
+// (a) a slow onSnapshot cannot head-of-line-block the single Serve reader (it
+// would only fill this watch's buffer, then drop), and (b) onSnapshot can never
+// fire after WatchStatus has returned — once the select exits, the deferred
+// cleanup removes the channel and nothing else reads it.
+func (s *Session) WatchStatus(
+	ctx context.Context,
+	ref ResourceRef,
+	maxSnapshots int,
+	onSnapshot func(stage string, snap StatusSnapshot),
+) (WatchResult, error) {
+	var zero WatchResult
+
+	params, err := json.Marshal(watchStatusParams{ResourceRef: ref, MaxSnapshots: maxSnapshots})
+	if err != nil {
+		return zero, err
+	}
+
+	id := uuid.NewString()
+	ch := make(chan *wsRes, 1)
+	progressCh := make(chan *wsProgress, watchProgressBuffer)
+
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return zero, ErrAgentUnavailable
+	}
+	s.pending[id] = ch
+	s.streams[id] = progressCh
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		delete(s.pending, id)
+		delete(s.streams, id)
+		s.mu.Unlock()
+	}()
+
+	if err := s.writeFrame(ctx, wsReq{Type: wsTypeReq, ID: id, Op: opWatchStatus, Params: params}); err != nil {
+		return zero, err
+	}
+
+	// deliver a single progress frame to onSnapshot, on this (the caller's)
+	// goroutine. An undecodable snapshot is dropped, not fatal — the stream
+	// continues.
+	deliver := func(p *wsProgress) {
+		if onSnapshot == nil {
+			return
+		}
+		var snap StatusSnapshot
+		if len(p.Data) > 0 {
+			if err := json.Unmarshal(p.Data, &snap); err != nil {
+				s.log.Warn().Err(err).Str("id", p.ID).Msg("dropping undecodable watch_status snapshot")
+				return
+			}
+		}
+		onSnapshot(p.Stage, snap)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return zero, ctx.Err()
+		case p := <-progressCh:
+			deliver(p)
+		case res := <-ch:
+			if res == nil { // session closed under us
+				return zero, ErrAgentUnavailable
+			}
+			if !res.Ok {
+				code, msg := errCodeExecError, ""
+				if res.Error != nil {
+					code, msg = res.Error.Code, res.Error.Message
+				}
+				return zero, &AgentError{Code: code, Message: msg}
+			}
+			var out WatchResult
+			if err := json.Unmarshal(res.Result, &out); err != nil {
+				return zero, err
+			}
+			return out, nil
+		}
+	}
+}
+
 // Serve runs the steady-state read loop until the agent disconnects or goes
 // silent past serverReadDeadline. It is the only reader of the socket: pings are
-// answered with pongs, res frames are routed to the waiting Call, progress is
-// advisory (ignored in M-A), and unknown types are tolerated. onActivity (may be
-// nil) fires on every inbound frame so the caller can refresh liveness.
+// answered with pongs, res frames are routed to the waiting Call, progress
+// frames are routed to an in-flight WatchStatus stream (or dropped if none),
+// and unknown types are tolerated. onActivity (may be nil) fires on every
+// inbound frame so the caller can refresh liveness.
 //
 // It returns a short, human-readable reason for the disconnect (clean close,
 // idle timeout, server shutdown, or transport error) so the caller can attribute
@@ -205,8 +474,12 @@ func (s *Session) Serve(ctx context.Context, onActivity func()) string {
 			}
 			s.deliver(&res)
 		case wsTypeProgress:
-			// Advisory; no streaming consumer in M-A.
-			s.log.Debug().Msg("ignoring progress frame (no consumer in M-A)")
+			var p wsProgress
+			if err := json.Unmarshal(data, &p); err != nil {
+				s.log.Warn().Err(err).Msg("dropping undecodable progress frame")
+				continue
+			}
+			s.deliverProgress(&p)
 		default:
 			// Forward compatibility: tolerate unknown / future frame types.
 			s.log.Debug().Str("frame_type", env.Type).Msg("ignoring unhandled agent frame")
@@ -249,6 +522,30 @@ func (s *Session) deliver(res *wsRes) {
 	}
 }
 
+// deliverProgress routes a progress frame to its in-flight WatchStatus stream's
+// buffered channel. A frame whose id has no registered stream (a stray frame, or
+// one arriving after the watch ended or the session closed) is dropped. The send
+// is NON-BLOCKING by design: this runs on the single Serve read goroutine, so it
+// must never block on a slow consumer (which would head-of-line-block every other
+// Call's res frame). If the watch's buffer is full the snapshot is dropped —
+// snapshots are advisory; the terminal res, routed through pending, is
+// authoritative. onSnapshot is NOT run here; WatchStatus drains the channel on
+// the caller's goroutine.
+func (s *Session) deliverProgress(p *wsProgress) {
+	s.mu.Lock()
+	ch, ok := s.streams[p.ID]
+	s.mu.Unlock()
+	if !ok {
+		s.log.Debug().Str("id", p.ID).Msg("progress for unknown/closed stream; dropping")
+		return
+	}
+	select {
+	case ch <- p:
+	default:
+		s.log.Warn().Str("id", p.ID).Msg("watch buffer full; dropping snapshot")
+	}
+}
+
 // close marks the session dead and fails every in-flight Call so callers return
 // promptly instead of waiting out their own deadline. Idempotent.
 func (s *Session) close() {
@@ -259,8 +556,18 @@ func (s *Session) close() {
 	}
 	s.closed = true
 	for id, ch := range s.pending {
-		ch <- nil // signal "closed" to Call
+		ch <- nil // signal "closed" to Call (incl. a WatchStatus terminal waiter)
 		delete(s.pending, id)
+	}
+	// Drop every progress channel so no late progress is routed after close. The
+	// matching pending-terminal waiter above already unblocked any WatchStatus
+	// select with nil → ErrAgentUnavailable, so it returns without draining what
+	// remains. We delete (rather than close) the channels: deliverProgress holds
+	// s.mu while sending, so once a channel is unreachable here no further send
+	// can target it, and an un-closed buffered channel is simply garbage-collected
+	// — this avoids any send-on-closed-channel hazard.
+	for id := range s.streams {
+		delete(s.streams, id)
 	}
 }
 
