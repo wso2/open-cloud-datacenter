@@ -27,6 +27,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+
+	"github.com/wso2/dc-api/internal/agentgw"
 )
 
 // v1 frame type discriminators. Must match dc-agent's protocol package.
@@ -40,7 +42,10 @@ const (
 // issues. These mirror dc-agent's protocol/executor packages — the JSON strings
 // are the shared contract (the two are separate Go modules).
 const (
-	errCodeOpUnsupported = "OP_UNSUPPORTED"
+	// errCodeOpUnsupported aliases the canonical wire string in agentgw so the
+	// "OP_UNSUPPORTED" literal lives in exactly one place (clusteraccess matches
+	// on the same const). BAD_REQUEST/EXEC_ERROR are handler-only today.
+	errCodeOpUnsupported = agentgw.CodeOpUnsupported
 	errCodeBadRequest    = "BAD_REQUEST"
 	errCodeExecError     = "EXEC_ERROR"
 
@@ -95,14 +100,43 @@ type wsProgress struct {
 // reference from objects it already holds, so it addresses by GVK
 // (api_version + kind), not GVR — the agent owns the GVK→GVR mapping.
 
+// The five wire structs and two sentinels below are now defined canonically in
+// package agentgw (so provider-side code can name them without importing
+// handlers — see agentgw.go's package doc on the import cycle). They are
+// type-ALIASED here, not redefined: an alias is the SAME type, so the JSON wire
+// contract with dc-agent is byte-identical and every M-B call site
+// (Session.Apply/Delete/GetStatus/WatchStatus and the inventory handler's
+// *AgentError / ErrAgentUnavailable checks) compiles unchanged.
+
 // ResourceRef identifies one Kubernetes object by GVK + namespace/name. It is
 // embedded inline (not nested) in delete/get_status/watch_status params.
-type ResourceRef struct {
-	APIVersion string `json:"api_version"`
-	Kind       string `json:"kind"`
-	Namespace  string `json:"namespace,omitempty"`
-	Name       string `json:"name"`
-}
+type ResourceRef = agentgw.ResourceRef
+
+// ApplyResult is the apply op's result: the applied object's identity and its
+// post-apply version.
+type ApplyResult = agentgw.ApplyResult
+
+// DeleteResult is the delete op's result. Existed is false when the object was
+// already absent (a 404 is a successful, idempotent delete — not an error).
+type DeleteResult = agentgw.DeleteResult
+
+// StatusSnapshot is the result of get_status AND the payload of each
+// watch_status progress frame — one shape for both the single read and the
+// stream. Found is false when the object is absent (not an error).
+type StatusSnapshot = agentgw.StatusSnapshot
+
+// WatchResult is the terminal summary of a watch_status stream.
+type WatchResult = agentgw.WatchResult
+
+// AgentError is returned by Session.Call when the agent replies with a failure
+// (ok=false). Code is one of the protocol error codes (e.g. OP_UNSUPPORTED,
+// BAD_REQUEST, EXEC_ERROR); callers map it to an HTTP status.
+type AgentError = agentgw.AgentError
+
+// ErrAgentUnavailable is returned when no live agent session exists for a zone,
+// or the session dies with a request in flight. It is transient — the caller
+// may retry once an agent (re)connects.
+var ErrAgentUnavailable = agentgw.ErrAgentUnavailable
 
 // applyParams is the request body for the apply op: a full manifest plus the SSA
 // field manager and force-conflicts flag.
@@ -112,38 +146,11 @@ type applyParams struct {
 	Force        bool            `json:"force,omitempty"`
 }
 
-// ApplyResult is the apply op's result: the applied object's identity and its
-// post-apply version.
-type ApplyResult struct {
-	APIVersion      string `json:"api_version"`
-	Kind            string `json:"kind"`
-	Namespace       string `json:"namespace,omitempty"`
-	Name            string `json:"name"`
-	UID             string `json:"uid"`
-	ResourceVersion string `json:"resource_version"`
-}
-
 // deleteParams is the request body for the delete op: a ResourceRef plus an
 // optional propagation policy.
 type deleteParams struct {
 	ResourceRef
 	PropagationPolicy string `json:"propagation_policy,omitempty"`
-}
-
-// DeleteResult is the delete op's result. Existed is false when the object was
-// already absent (a 404 is a successful, idempotent delete — not an error).
-type DeleteResult struct {
-	Existed bool `json:"existed"`
-}
-
-// StatusSnapshot is the result of get_status AND the payload of each
-// watch_status progress frame — one shape for both the single read and the
-// stream. Found is false when the object is absent (not an error).
-type StatusSnapshot struct {
-	Found           bool            `json:"found"`
-	ResourceVersion string          `json:"resource_version,omitempty"`
-	Generation      int64           `json:"generation,omitempty"`
-	Status          json.RawMessage `json:"status,omitempty"`
 }
 
 // watchStatusParams is the request body for the watch_status op: a ResourceRef
@@ -152,27 +159,6 @@ type watchStatusParams struct {
 	ResourceRef
 	MaxSnapshots int `json:"max_snapshots,omitempty"`
 }
-
-// WatchResult is the terminal summary of a watch_status stream.
-type WatchResult struct {
-	SnapshotsSent int    `json:"snapshots_sent"`
-	Reason        string `json:"reason"`
-}
-
-// ErrAgentUnavailable is returned when no live agent session exists for a zone,
-// or the session dies with a request in flight. It is transient — the caller
-// may retry once an agent (re)connects.
-var ErrAgentUnavailable = errors.New("no live agent session for the zone")
-
-// AgentError is returned by Session.Call when the agent replies with a failure
-// (ok=false). Code is one of the protocol error codes (e.g. OP_UNSUPPORTED,
-// BAD_REQUEST, EXEC_ERROR); callers map it to an HTTP status.
-type AgentError struct {
-	Code    string
-	Message string
-}
-
-func (e *AgentError) Error() string { return e.Code + ": " + e.Message }
 
 // ── Session ─────────────────────────────────────────────────────────────────
 

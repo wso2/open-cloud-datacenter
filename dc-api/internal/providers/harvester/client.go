@@ -2,23 +2,26 @@
 // against the Harvester HCI platform.
 //
 // How Harvester works (important context for SREs):
-//   Harvester is built ON TOP OF Kubernetes. Every VM is a Kubernetes Custom
-//   Resource of kind VirtualMachine (from the KubeVirt API). To create a VM,
-//   you apply a VirtualMachine CRD manifest — exactly like applying a Deployment.
 //
-//   This means our Harvester driver is really a Kubernetes client that manages
-//   VirtualMachine CRDs. We use client-go for this.
+//	Harvester is built ON TOP OF Kubernetes. Every VM is a Kubernetes Custom
+//	Resource of kind VirtualMachine (from the KubeVirt API). To create a VM,
+//	you apply a VirtualMachine CRD manifest — exactly like applying a Deployment.
+//
+//	This means our Harvester driver is really a Kubernetes client that manages
+//	VirtualMachine CRDs. We use client-go for this.
 //
 // BackendUID format:
-//   We store BackendUID as "namespace:vmname" (e.g., "dc-teamalpha:web-01").
-//   This lets GetVM and DeleteVM do a direct O(1) lookup by namespace+name
-//   instead of a slow List+filter by Kubernetes UID. The name is deterministic
-//   (it comes from the spec), making this safe.
+//
+//	We store BackendUID as "namespace:vmname" (e.g., "dc-teamalpha:web-01").
+//	This lets GetVM and DeleteVM do a direct O(1) lookup by namespace+name
+//	instead of a slow List+filter by Kubernetes UID. The name is deterministic
+//	(it comes from the spec), making this safe.
 //
 // Namespace convention:
-//   One Kubernetes namespace per project: "dc-<tenantID>-<projectID>".
-//   The namespace must be created by the project handler (EnsureProjectNamespace)
-//   before any VM can be created. CreateVM does not create or ensure the namespace.
+//
+//	One Kubernetes namespace per project: "dc-<tenantID>-<projectID>".
+//	The namespace must be created by the project handler (EnsureProjectNamespace)
+//	before any VM can be created. CreateVM does not create or ensure the namespace.
 package harvester
 
 import (
@@ -33,6 +36,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"github.com/wso2/dc-api/internal/models"
+	"github.com/wso2/dc-api/internal/providers/clusteraccess"
 	"github.com/wso2/dc-api/internal/providers/common"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -88,6 +92,14 @@ type Client struct {
 	dynamic    dynamic.Interface // Kubernetes dynamic client (handles CRDs and core resources)
 	namespace  string            // fallback namespace (unused now — we derive from tenantID)
 	restConfig *rest.Config      // stored so we can expose server URL + CA for SA kubeconfigs (F32)
+
+	// access is the per-zone cluster-access seam (M-C). It defaults to a
+	// clusteraccess.Direct wrapping `dynamic` (today's behaviour, byte-identical)
+	// unless WithRoutedAccessor injects a routed accessor. Only GetVM's primary
+	// VirtualMachine read goes through it for the M-C read slice; every other
+	// method still calls c.dynamic directly. The seam never leaks an agent
+	// concept past the ComputeProvider interface.
+	access clusteraccess.Accessor
 }
 
 // NewClient creates a Harvester client from a base64-encoded kubeconfig string.
@@ -110,7 +122,40 @@ func NewClient(kubeconfigB64 string, namespace string) (*Client, error) {
 		return nil, fmt.Errorf("create harvester dynamic client: %w", err)
 	}
 
-	return &Client{dynamic: dynClient, namespace: namespace, restConfig: restConfig}, nil
+	return &Client{
+		dynamic:    dynClient,
+		namespace:  namespace,
+		restConfig: restConfig,
+		// Default seam: Direct on the same dynamic client → byte-identical to the
+		// pre-M-C behaviour. providers.NewRegistry replaces this with a Routed
+		// accessor via WithRoutedAccessor when the agent path is wired.
+		access: clusteraccess.NewDirect(dynClient),
+	}, nil
+}
+
+// Dynamic exposes the underlying dynamic client so the provider registry can
+// build the Direct fallback of a Routed accessor over the SAME client every
+// other method uses (no second connection, no kubeconfig re-parse). Mirrors
+// kubeovn.Client.Dynamic().
+func (c *Client) Dynamic() dynamic.Interface { return c.dynamic }
+
+// WithRoutedAccessor replaces the client's cluster-access seam with a routed
+// accessor produced from the client's own dynamic client. build receives a
+// clusteraccess.Direct over c.dynamic (the Direct fallback the routed accessor
+// must use so the off-path is byte-identical) and returns the Accessor to
+// install. Returns the same *Client for chaining.
+//
+// The registry uses this so the Direct fallback and every not-yet-routed method
+// share one dynamic client. A nil build (or a nil result) leaves the default
+// Direct seam in place.
+func (c *Client) WithRoutedAccessor(build func(direct clusteraccess.Accessor) clusteraccess.Accessor) *Client {
+	if build == nil {
+		return c
+	}
+	if a := build(clusteraccess.NewDirect(c.dynamic)); a != nil {
+		c.access = a
+	}
+	return c
 }
 
 // Name satisfies providers.ComputeProvider.
@@ -189,10 +234,13 @@ func (c *Client) GetVM(ctx context.Context, backendUID string) (*models.Resource
 		return nil, err
 	}
 
-	obj, err := c.dynamic.
-		Resource(harvesterVMResource).
-		Namespace(ns).
-		Get(ctx, name, metav1.GetOptions{})
+	// M-C read slice: the primary VirtualMachine read goes through the
+	// cluster-access seam (c.access). With the agent toggle OFF (default) this
+	// resolves to the exact c.dynamic.Resource(...).Get(...) call below; with it
+	// ON and a live agent for the zone, it routes to Session.GetStatus. We read
+	// only status.printableStatus from `obj`, which the agent's status snapshot
+	// fully supplies. The VMI read further down stays on c.dynamic for this slice.
+	obj, err := c.access.Get(ctx, harvesterVMResource, ns, name, metav1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			return nil, fmt.Errorf("VM %s not found in Harvester", backendUID)

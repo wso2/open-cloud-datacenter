@@ -24,6 +24,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/wso2/dc-api/internal/api"
 	"github.com/wso2/dc-api/internal/api/auth"
+	"github.com/wso2/dc-api/internal/api/handlers"
 	"github.com/wso2/dc-api/internal/api/middleware"
 	"github.com/wso2/dc-api/internal/config"
 	"github.com/wso2/dc-api/internal/db"
@@ -87,19 +88,34 @@ func main() {
 	// build on the same regions/zones catalog.
 	repo.SetLocalRegion(cfg.LocalRegion)
 
-	// ── Provider instantiation (Factory Pattern) ──────────────────────────────
-	// The factory reads cfg.VMProvider and returns the right implementation.
-	// If an unknown provider is configured, we exit here — not on first request.
-	computeProvider, err := providers.NewComputeProvider(cfg)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to initialise compute provider")
-	}
-	log.Info().Str("provider", computeProvider.Name()).Msg("compute provider ready")
+	// ── Agent registry (must exist BEFORE providers) ──────────────────────────
+	// The Registry holds the live per-zone dc-agent Sessions. M-C gives it a
+	// SECOND consumer beyond the WS/inventory handlers: provider read-routing.
+	// We build it here, wrap it once as an agentgw.SessionResolver, and feed that
+	// into providers.NewRegistry. The same *handlers.Registry is handed to
+	// NewRouter (via RouterDeps.AgentRegistry) so there is exactly ONE registry
+	// instance with two consumers — the M-B injection pattern, extended by one.
+	agentRegistry := handlers.NewRegistry()
+	agentGW := handlers.NewAgentGateway(agentRegistry)
 
-	clusterProvider, err := providers.NewClusterProvider(cfg)
+	// ── Provider instantiation (Factory + per-zone Registry) ──────────────────
+	// providers.NewRegistry builds the local-zone ProviderSet from cfg (the same
+	// Direct providers the three factories built pre-M-C) and decides, per call,
+	// whether that zone's READ ops go through the agent (only when
+	// DCAPI_AGENT_ROUTE_READS=true AND a live agent is connected for the zone).
+	// Default is the byte-identical direct path. The existing single-zone wiring
+	// below is unchanged — it just sources the trio from the local set.
+	provReg, err := providers.NewRegistry(cfg, agentGW, log.Logger)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to initialise cluster provider")
+		log.Fatal().Err(err).Msg("failed to initialise provider registry")
 	}
+	localSet, err := provReg.For(cfg.LocalRegion, cfg.LocalZone)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to resolve local provider set")
+	}
+	computeProvider := localSet.Compute
+	clusterProvider := localSet.Cluster
+	log.Info().Str("provider", computeProvider.Name()).Msg("compute provider ready")
 	log.Info().Str("provider", clusterProvider.Name()).Msg("cluster provider ready")
 
 	// ── F32: wire cloud-provider SA bootstrap into the cluster provisioner ─────
@@ -113,10 +129,7 @@ func main() {
 		}
 	}
 
-	networkProvider, err := providers.NewNetworkProvider(cfg)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to initialise network provider")
-	}
+	networkProvider := localSet.Network
 	log.Info().Str("provider", networkProvider.Name()).Msg("network provider ready")
 
 	// ── F15 VPC SNAT + F20 Per-VPC DNS bootstrap ────────────────────────────
@@ -391,7 +404,11 @@ func main() {
 		DirectoryProvider:   directoryProvider,
 		AuthMiddleware:      authMiddleware,
 		AuthService:         bffSvc,
-		Log:                 log.Logger,
+		// Same Registry that feeds provider read-routing (M-C) — so a connected
+		// agent's Session is visible to both the WS/inventory handlers and the
+		// routed compute provider.
+		AgentRegistry: agentRegistry,
+		Log:           log.Logger,
 	})
 
 	// ── HTTP Server ───────────────────────────────────────────────────────────
