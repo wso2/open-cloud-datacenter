@@ -100,7 +100,15 @@ type RouterDeps struct {
 	// auth path. When nil, those routes are not registered and the only
 	// auth surface is the Bearer-header /v1/* dcctl uses.
 	AuthService *auth.Service
-	Log         zerolog.Logger
+	// AgentRegistry holds the live per-zone dc-agent Sessions. It is OPTIONAL:
+	// when main.go supplies one (so the SAME registry also feeds provider
+	// read-routing via handlers.NewAgentGateway → providers.NewRegistry), the WS
+	// handler and inventory handler use it. When nil, NewRouter creates its own —
+	// preserving callers (tests, contract harness) that build a router without
+	// wiring providers. Either way it is the single source of agent Sessions for
+	// the routes built here.
+	AgentRegistry *handlers.Registry
+	Log           zerolog.Logger
 }
 
 // NewRouter creates and returns the fully configured Chi router.
@@ -177,9 +185,14 @@ func NewRouter(deps RouterDeps) http.Handler {
 	// an Asgardeo JWT — so it is mounted OUTSIDE the /v1 OIDC group (like
 	// /healthz). The handler validates the bearer before upgrading.
 	// The Registry holds the live agent Sessions. It is shared between the WS
-	// handler (which registers a session per connected agent) and the v1 HTTP
-	// handlers that Call those agents (e.g. zone inventory).
-	agentRegistry := handlers.NewRegistry()
+	// handler (which registers a session per connected agent), the v1 HTTP
+	// handlers that Call those agents (e.g. zone inventory), AND — when main.go
+	// supplies it via deps.AgentRegistry — provider read-routing (M-C). Falling
+	// back to a fresh Registry keeps router-only callers (tests) working.
+	agentRegistry := deps.AgentRegistry
+	if agentRegistry == nil {
+		agentRegistry = handlers.NewRegistry()
+	}
 	agentWSHandler := handlers.NewAgentWSHandler(deps.Repo, agentRegistry, deps.Log)
 	r.Get("/v1/agent/ws", agentWSHandler.ServeHTTP)
 

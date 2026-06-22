@@ -177,9 +177,9 @@ type Config struct {
 	//   deployment with a fallback to "coredns/coredns:1.11.3".
 	// VPCDNSSearchDomain: optional DNS search domain injected into every VPC VM
 	//   (e.g. "lk.dc.internal"). Empty means no extra search domain.
-	VPCDNSForwarders    string `envconfig:"VPC_DNS_FORWARDERS"     default:"1.1.1.1,8.8.8.8"`
-	VPCDNSImage         string `envconfig:"VPC_DNS_IMAGE"          default:""`
-	VPCDNSSearchDomain  string `envconfig:"VPC_DNS_SEARCH_DOMAIN"  default:""`
+	VPCDNSForwarders   string `envconfig:"VPC_DNS_FORWARDERS"     default:"1.1.1.1,8.8.8.8"`
+	VPCDNSImage        string `envconfig:"VPC_DNS_IMAGE"          default:""`
+	VPCDNSSearchDomain string `envconfig:"VPC_DNS_SEARCH_DOMAIN"  default:""`
 
 	// ── F7 BFF (Backend-for-Frontend) — cloud-ui Asgardeo session ────────────
 	// Set BFFClientID to a non-empty value to enable. When enabled, dc-api
@@ -277,6 +277,19 @@ type Config struct {
 	// (resources, key_vaults, databases, private_endpoints rows). It must name
 	// a row in the `regions` table (schema.sql seeds 'lk').
 	LocalRegion string `envconfig:"LOCAL_REGION" default:"lk"`
+
+	// LocalZone is the zone THIS control plane's local providers serve. Pairs
+	// with LocalRegion to key the local provider set in providers.Registry. Must
+	// name a row in the `zones` table (schema.sql seeds 'zone-1' for region 'lk').
+	LocalZone string `envconfig:"LOCAL_ZONE" default:"zone-1"`
+
+	// AgentRouteReads (M-C), when true AND a live agent is connected for a zone,
+	// routes that zone's provider READ ops (VM status reads first) through the
+	// dc-agent command channel instead of the direct dynamic client. Default
+	// false: the direct path is unchanged until an operator explicitly opts in
+	// per zone-with-connected-agent. Write toggles (AgentRouteVMWrites, …) land
+	// per phase as each resource family is cut over.
+	AgentRouteReads bool `envconfig:"AGENT_ROUTE_READS" default:"false"`
 
 	// ── Logging ───────────────────────────────────────────────────────────────
 	LogLevel string `envconfig:"LOG_LEVEL" default:"info"`
