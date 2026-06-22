@@ -42,18 +42,41 @@ func (stubSession) WatchStatus(context.Context, agentgw.ResourceRef, int, func(s
 
 // decisionRegistry builds a *Registry wired only with the fields agentDecision
 // reads (no kubeconfig parsing), so we can unit-test the gating logic directly.
+// It sets only the read toggle; tests that exercise write routing use
+// decisionRegistryToggles to set both.
 func decisionRegistry(routeReads bool, gw agentgw.SessionResolver) *Registry {
+	return decisionRegistryToggles(routeReads, false, gw)
+}
+
+// decisionRegistryToggles is decisionRegistry with both per-family toggles
+// (reads + writes) settable, so the write-routing cases can drive routeWrites
+// independently of routeReads.
+func decisionRegistryToggles(routeReads, routeWrites bool, gw agentgw.SessionResolver) *Registry {
 	return &Registry{
 		agentGateway: gw,
 		routeReads:   routeReads,
+		routeWrites:  routeWrites,
 		localRegion:  "lk",
 		localZone:    "zone-1",
 		log:          zerolog.Nop(),
 	}
 }
 
+// cfgWith builds a config with only the read toggle set (write toggle off).
 func cfgWith(routeReads bool) *config.Config {
-	return &config.Config{LocalRegion: "lk", LocalZone: "zone-1", AgentRouteReads: routeReads}
+	return cfgWithToggles(routeReads, false)
+}
+
+// cfgWithToggles builds a config with both per-family agent-routing toggles set.
+// agentDecision reads LocalRegion/LocalZone off cfg, so they are populated to
+// match decisionRegistry's zone.
+func cfgWithToggles(routeReads, routeWrites bool) *config.Config {
+	return &config.Config{
+		LocalRegion:      "lk",
+		LocalZone:        "zone-1",
+		AgentRouteReads:  routeReads,
+		AgentRouteWrites: routeWrites,
+	}
 }
 
 func TestAgentDecision_ToggleOff_AlwaysDirect(t *testing.T) {
@@ -81,17 +104,76 @@ func TestAgentDecision_ToggleOn_NoLiveAgent_Direct(t *testing.T) {
 }
 
 func TestAgentDecision_ToggleOn_LiveAgent_RoutesGetOnly(t *testing.T) {
-	r := decisionRegistry(true, fakeResolver{connected: true})
-	decide := r.agentDecision(cfgWith(true))
+	// Reads-only configuration: read toggle on, WRITE toggle off.
+	r := decisionRegistryToggles(true, false, fakeResolver{connected: true})
+	decide := r.agentDecision(cfgWithToggles(true, false))
 
 	if _, ok := decide(clusteraccess.VerbGet); !ok {
 		t.Error("toggle on + live agent must route Get through the agent")
 	}
-	// Write verbs are NOT in the M-C allow-set — must stay Direct even with a
-	// live agent and the read toggle on.
+	// With ONLY the read toggle on, no write verb may route — Create/Delete are
+	// gated by the (off) write toggle; List/Apply/Update are not in any allow-set.
 	for _, v := range []clusteraccess.Verb{clusteraccess.VerbList, clusteraccess.VerbCreate, clusteraccess.VerbApply, clusteraccess.VerbUpdate, clusteraccess.VerbDelete} {
 		if _, ok := decide(v); ok {
-			t.Errorf("verb %v must NOT route in M-C (read-only allow-set)", v)
+			t.Errorf("verb %v must NOT route with only the read toggle on", v)
+		}
+	}
+}
+
+// TestAgentDecision_WritesOn_LiveAgent_RoutesCreateAndDelete asserts the write
+// allow-set: with the write toggle on + a live agent, VerbCreate AND VerbDelete
+// route to the agent. Get follows the read toggle (off here → Direct), and the
+// non-allow-set verbs (List/Apply/Update) never route.
+func TestAgentDecision_WritesOn_LiveAgent_RoutesCreateAndDelete(t *testing.T) {
+	// writes on, reads off — proves the toggles are independent.
+	r := decisionRegistryToggles(false, true, fakeResolver{connected: true})
+	decide := r.agentDecision(cfgWithToggles(false, true))
+
+	for _, v := range []clusteraccess.Verb{clusteraccess.VerbCreate, clusteraccess.VerbDelete} {
+		if _, ok := decide(v); !ok {
+			t.Errorf("write toggle on + live agent must route verb %v through the agent", v)
+		}
+	}
+	// Read toggle is OFF here → Get must stay Direct.
+	if _, ok := decide(clusteraccess.VerbGet); ok {
+		t.Error("read toggle off must keep Get on Direct even when writes route")
+	}
+	// VerbApply/VerbUpdate are NOT in the write allow-set (create is VerbCreate, a
+	// POST on Direct); they must never route. VerbList has no agent op.
+	for _, v := range []clusteraccess.Verb{clusteraccess.VerbList, clusteraccess.VerbApply, clusteraccess.VerbUpdate} {
+		if _, ok := decide(v); ok {
+			t.Errorf("verb %v is not in the write allow-set and must NOT route", v)
+		}
+	}
+}
+
+// TestAgentDecision_WritesOff_CreateDeleteStayDirect asserts that with the write
+// toggle OFF, VerbCreate and VerbDelete fall through to Direct — even with a live
+// agent and the read toggle on. This is the load-bearing guard for "toggle-OFF
+// create stays the byte-identical POST on Direct".
+func TestAgentDecision_WritesOff_CreateDeleteStayDirect(t *testing.T) {
+	// reads on, writes off.
+	r := decisionRegistryToggles(true, false, fakeResolver{connected: true})
+	decide := r.agentDecision(cfgWithToggles(true, false))
+
+	for _, v := range []clusteraccess.Verb{clusteraccess.VerbCreate, clusteraccess.VerbDelete} {
+		if _, ok := decide(v); ok {
+			t.Errorf("write toggle off must keep verb %v on Direct", v)
+		}
+	}
+}
+
+// TestAgentDecision_WritesOn_NoLiveAgent_StayDirect asserts the safety belt for
+// writes: even with the write toggle on, a zone with no connected agent never
+// routes a write — Create/Delete fall through to Direct. Flipping the env var can
+// never strand the zone when the agent is down.
+func TestAgentDecision_WritesOn_NoLiveAgent_StayDirect(t *testing.T) {
+	r := decisionRegistryToggles(true, true, fakeResolver{connected: false})
+	decide := r.agentDecision(cfgWithToggles(true, true))
+
+	for _, v := range []clusteraccess.Verb{clusteraccess.VerbGet, clusteraccess.VerbCreate, clusteraccess.VerbDelete} {
+		if _, ok := decide(v); ok {
+			t.Errorf("no connected agent must keep verb %v on Direct even with the toggle on", v)
 		}
 	}
 }

@@ -287,9 +287,17 @@ type Config struct {
 	// routes that zone's provider READ ops (VM status reads first) through the
 	// dc-agent command channel instead of the direct dynamic client. Default
 	// false: the direct path is unchanged until an operator explicitly opts in
-	// per zone-with-connected-agent. Write toggles (AgentRouteVMWrites, …) land
-	// per phase as each resource family is cut over.
+	// per zone-with-connected-agent. Write toggles (AgentRouteWrites) land per
+	// phase as each resource family is cut over.
 	AgentRouteReads bool `envconfig:"AGENT_ROUTE_READS" default:"false"`
+
+	// AgentRouteWrites, when true AND a live agent is connected for a zone, routes
+	// that zone's provider WRITE ops in the routed allow-set (VM create/delete
+	// first) through the dc-agent command channel. Independent of AgentRouteReads:
+	// reads can be on while writes stay off. Default false so writes stay on the
+	// direct path even after the write seam merges, until an operator opts in for a
+	// zone with a connected agent whose RBAC already permits the op.
+	AgentRouteWrites bool `envconfig:"AGENT_ROUTE_WRITES" default:"false"`
 
 	// ── Logging ───────────────────────────────────────────────────────────────
 	LogLevel string `envconfig:"LOG_LEVEL" default:"info"`

@@ -69,6 +69,14 @@ func (r *Routed) List(ctx context.Context, gvr schema.GroupVersionResource, ns s
 
 func (r *Routed) Create(ctx context.Context, gvr schema.GroupVersionResource, ns string, obj *unstructured.Unstructured, opts metav1.CreateOptions) (*unstructured.Unstructured, error) {
 	if a, ok := r.agent(VerbCreate); ok {
+		// TERMINAL on activation: once the agent is chosen its result — success OR
+		// error — is returned directly; there is NO re-check and NO retry on
+		// r.direct. This is the no-double-execution boundary for the routed VM
+		// create: an activated create that fails (RBAC 403, timeout, dropped
+		// channel) propagates as an error and must NOT also run on Direct. NOTE the
+		// asymmetry: the agent path is a server-side apply (the agent's only create
+		// mechanism), while the Direct fallback below is a plain dynamic POST — see
+		// agent.go for why that is safe and intended.
 		return a.Create(ctx, gvr, ns, obj, opts)
 	}
 	return r.direct.Create(ctx, gvr, ns, obj, opts)
@@ -76,6 +84,12 @@ func (r *Routed) Create(ctx context.Context, gvr schema.GroupVersionResource, ns
 
 func (r *Routed) Apply(ctx context.Context, gvr schema.GroupVersionResource, ns string, obj *unstructured.Unstructured, fieldManager string, force bool) (*unstructured.Unstructured, error) {
 	if a, ok := r.agent(VerbApply); ok {
+		// TERMINAL on activation: once the agent is chosen, its result — success OR
+		// error — is returned directly. There is NO errors.Is(err, ErrOpNotRoutable)
+		// re-check and NO retry on r.direct here. This is the no-double-execution
+		// boundary: an activated apply that fails (RBAC 403, timeout, dropped
+		// channel) propagates as an error and must NOT also run on Direct. Do not
+		// add a fallback here — see agent.go for the invariant that keeps it safe.
 		return a.Apply(ctx, gvr, ns, obj, fieldManager, force)
 	}
 	return r.direct.Apply(ctx, gvr, ns, obj, fieldManager, force)
@@ -90,6 +104,10 @@ func (r *Routed) Update(ctx context.Context, gvr schema.GroupVersionResource, ns
 
 func (r *Routed) Delete(ctx context.Context, gvr schema.GroupVersionResource, ns, name string, opts metav1.DeleteOptions) error {
 	if a, ok := r.agent(VerbDelete); ok {
+		// TERMINAL on activation: the agent's result is returned directly — no
+		// re-check, no retry on r.direct. The no-double-execution boundary: an
+		// activated delete that fails must NOT also run on Direct. Do not add a
+		// fallback here — see agent.go for the invariant that keeps it safe.
 		return a.Delete(ctx, gvr, ns, name, opts)
 	}
 	return r.direct.Delete(ctx, gvr, ns, name, opts)

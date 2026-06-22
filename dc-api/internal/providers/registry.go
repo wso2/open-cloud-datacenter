@@ -1,8 +1,8 @@
 // Package providers — registry.go
 //
 // Registry resolves the provider set for a (region, zone) and decides, per call,
-// whether that zone's provider READ ops go through the direct dynamic client or
-// the zone's dc-agent command channel.
+// whether that zone's provider ops go through the direct dynamic client or the
+// zone's dc-agent command channel.
 //
 // ── M-C scope ─────────────────────────────────────────────────────────────────
 // The registry holds exactly ONE zone — the local zone (cfg.LocalRegion /
@@ -11,15 +11,19 @@
 // zone is constructed with a clusteraccess.Routed accessor whose decision
 // closure consults:
 //
-//  1. cfg.AgentRouteReads  (DCAPI_AGENT_ROUTE_READS; default false), AND
+//  1. the per-family toggle for the verb — AgentRouteReads (DCAPI_AGENT_ROUTE_READS,
+//     default false) for reads, AgentRouteWrites (DCAPI_AGENT_ROUTE_WRITES, default
+//     false) for the VM write slice — AND
 //  2. a non-nil agent gateway, AND
 //  3. a LIVE agent session for the zone right now, AND
-//  4. the verb being in the routed allow-set ({Get} for the read slice).
+//  4. the verb being in the routed allow-set ({Get} for reads; {Create, Delete}
+//     for the VM create/delete write slice).
 //
 // If ANY is false the accessor uses Direct — today's behaviour, byte-identical.
-// Condition 3 is the safety belt: even with the toggle on, a zone with no
+// Condition 3 is the safety belt: even with a toggle on, a zone with no
 // connected agent silently uses Direct, so flipping the env var can never strand
-// the local zone if the agent is down.
+// the local zone if the agent is down. The toggles are independent: reads can
+// route while writes stay on the direct path.
 //
 // cluster/network providers in the set are the plain Direct ones for now —
 // rancher is an HTTP Steve client (does not fit the Accessor seam) and network
@@ -58,6 +62,10 @@ type Registry struct {
 	// routeReads gates the dark read slice (DCAPI_AGENT_ROUTE_READS).
 	routeReads bool
 
+	// routeWrites gates the write slice (DCAPI_AGENT_ROUTE_WRITES): VM
+	// create (SSA apply) + delete first. Independent of routeReads.
+	routeWrites bool
+
 	localRegion, localZone string
 	log                    zerolog.Logger
 }
@@ -76,6 +84,7 @@ func NewRegistry(cfg *config.Config, agentGateway agentgw.SessionResolver, log z
 		set:          make(map[string]*ProviderSet, 1),
 		agentGateway: agentGateway,
 		routeReads:   cfg.AgentRouteReads,
+		routeWrites:  cfg.AgentRouteWrites,
 		localRegion:  cfg.LocalRegion,
 		localZone:    cfg.LocalZone,
 		log:          log,
@@ -123,6 +132,9 @@ func NewRegistry(cfg *config.Config, agentGateway agentgw.SessionResolver, log z
 		Network: network,
 	}
 
+	// One log line covering BOTH toggles so an operator can tell from the logs
+	// whether reads and/or writes route. Each only ever engages when a live agent
+	// is connected for the zone; with the gateway absent both are forced off.
 	if agentGateway != nil && cfg.AgentRouteReads {
 		log.Info().
 			Str("region", cfg.LocalRegion).Str("zone", cfg.LocalZone).
@@ -132,6 +144,16 @@ func NewRegistry(cfg *config.Config, agentGateway agentgw.SessionResolver, log z
 			Str("region", cfg.LocalRegion).Str("zone", cfg.LocalZone).
 			Bool("toggle", cfg.AgentRouteReads).Bool("gateway", agentGateway != nil).
 			Msg("provider registry: agent read-routing disabled — using the direct cluster path")
+	}
+	if agentGateway != nil && cfg.AgentRouteWrites {
+		log.Info().
+			Str("region", cfg.LocalRegion).Str("zone", cfg.LocalZone).
+			Msg("provider registry: agent write-routing ENABLED (DCAPI_AGENT_ROUTE_WRITES=true) — VM create/delete route only when a live agent is connected for the zone and its RBAC permits the verb")
+	} else {
+		log.Info().
+			Str("region", cfg.LocalRegion).Str("zone", cfg.LocalZone).
+			Bool("toggle", cfg.AgentRouteWrites).Bool("gateway", agentGateway != nil).
+			Msg("provider registry: agent write-routing disabled — VM writes use the direct cluster path")
 	}
 	return r, nil
 }
@@ -150,26 +172,45 @@ func (r *Registry) For(region, zone string) (*ProviderSet, error) {
 }
 
 // agentDecision builds the live decision closure for the local zone's Routed
-// accessor. It re-evaluates the toggle + live-session check + verb allow-set on
+// accessor. It re-evaluates the toggles + live-session check + verb allow-set on
 // EVERY call, so "toggle on / toggle off" and "agent connected / disconnected"
 // are observable on the very next request with no provider reconstruction.
 //
-// The routed allow-set starts as {VerbGet} for the M-C read slice. Each write
-// phase widens it verb-by-verb IN THE SAME PR as the matching dc-agent RBAC rule
-// — never one without the other. Until a verb is added here it always returns
-// (_, false) → Direct.
+// The routed allow-set is gated per family: reads (VerbGet) by AgentRouteReads,
+// writes (VerbCreate, VerbDelete — the VM create/delete slice) by AgentRouteWrites.
+// Each verb is added here IN THE SAME PR as the matching dc-agent RBAC rule —
+// never one without the other. Any verb not listed always returns (_, false) →
+// Direct.
+//
+// NOTE: the write allow-set uses VerbCreate (not VerbApply) because CreateVM
+// calls c.access.Create(...). On the Direct path that is a byte-identical POST;
+// only the AgentBacked path turns VerbCreate into a server-side apply, since SSA
+// is the agent's only create mechanism. VerbApply/VerbUpdate stay out until a
+// later phase needs them.
 func (r *Registry) agentDecision(cfg *config.Config) clusteraccess.AgentDecision {
 	mapper := clusteraccess.DefaultGVKMapper()
 	fieldManager := "dc-api"
 	region, zone := cfg.LocalRegion, cfg.LocalZone
 
 	return func(verb clusteraccess.Verb) (clusteraccess.Accessor, bool) {
-		// (1) read toggle, (2) gateway present.
-		if !r.routeReads || r.agentGateway == nil {
+		// (2) gateway present — shared precondition for any routing.
+		if r.agentGateway == nil {
 			return nil, false
 		}
-		// (4) verb allow-set for the current phase: reads only (Get).
-		if verb != clusteraccess.VerbGet {
+		// (1)+(4) per-family toggle AND verb allow-set, together.
+		//   reads  → AgentRouteReads  gates {VerbGet}
+		//   writes → AgentRouteWrites gates {VerbCreate, VerbDelete} (VM write slice)
+		// A verb not listed here always falls through to Direct.
+		switch verb {
+		case clusteraccess.VerbGet:
+			if !r.routeReads {
+				return nil, false
+			}
+		case clusteraccess.VerbCreate, clusteraccess.VerbDelete:
+			if !r.routeWrites {
+				return nil, false
+			}
+		default:
 			return nil, false
 		}
 		// (3) a live agent session must exist for the zone RIGHT NOW.
