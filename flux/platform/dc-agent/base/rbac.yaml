@@ -22,7 +22,10 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachines"]
-    verbs: ["get", "list", "watch"]
+    # create+patch = server-side apply (VM create); delete = VM delete.
+    # Widened for the agent VM write slice (DCAPI_AGENT_ROUTE_WRITES). Nothing
+    # broader: still scoped to virtualmachines only.
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

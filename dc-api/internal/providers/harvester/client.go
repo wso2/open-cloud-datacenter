@@ -95,10 +95,12 @@ type Client struct {
 
 	// access is the per-zone cluster-access seam (M-C). It defaults to a
 	// clusteraccess.Direct wrapping `dynamic` (today's behaviour, byte-identical)
-	// unless WithRoutedAccessor injects a routed accessor. Only GetVM's primary
-	// VirtualMachine read goes through it for the M-C read slice; every other
-	// method still calls c.dynamic directly. The seam never leaks an agent
-	// concept past the ComputeProvider interface.
+	// unless WithRoutedAccessor injects a routed accessor. The VM-object ops route
+	// through it: GetVM's primary VirtualMachine read (read slice), and CreateVM's
+	// create + DeleteVM's delete (write slice 1). Image resolution, the cloud-
+	// provider SA bootstrap, ListVMs, and the VMI read inside GetVM all still call
+	// c.dynamic directly — those GVRs are not in the agent's mapper/RBAC. The seam
+	// never leaks an agent concept past the ComputeProvider interface.
 	access clusteraccess.Accessor
 }
 
@@ -192,10 +194,16 @@ func (c *Client) CreateVM(ctx context.Context, tenantID, projectID string, spec 
 
 	vmManifest := buildVMManifest(spec, ns, imageID, storageClass, mac)
 
-	_, err = c.dynamic.
-		Resource(harvesterVMResource).
-		Namespace(ns).
-		Create(ctx, vmManifest, metav1.CreateOptions{})
+	// VM-object create goes through the cluster-access seam (c.access). With the
+	// write toggle OFF (default) this is clusteraccess.Direct.Create — the exact
+	// dynamic-client POST (.Resource(gvr).Namespace(ns).Create(...)) this method ran
+	// before the write slice, so it is byte-identical. With the toggle ON and a live
+	// agent for the zone, this routes to the agent's create, which is a server-side
+	// apply (the only create mechanism the agent exposes); the agent error is
+	// terminal (no silent Direct fallback). The asymmetry (direct=POST, agent=SSA)
+	// lives only on the opt-in agent path. Image resolution above stays on
+	// c.dynamic.
+	_, err = c.access.Create(ctx, harvesterVMResource, ns, vmManifest, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("harvester create VM %q in %s: %w", spec.Name, ns, err)
 	}
@@ -297,13 +305,18 @@ func (c *Client) DeleteVM(ctx context.Context, backendUID string) error {
 		return err
 	}
 
+	// VM-object delete goes through the cluster-access seam (c.access). With the
+	// write toggle OFF (default) this is clusteraccess.Direct.Delete — the exact
+	// dynamic-client delete with PropagationPolicy=Background as before, byte-
+	// identical. With the toggle ON and a live agent for the zone, this routes to
+	// Session.Delete; the agent error is terminal (no silent Direct fallback). On
+	// both seams a missing object is a successful idempotent delete: Direct surfaces
+	// a NotFound that IsNotFound swallows here; the agent maps Existed==false to a
+	// nil error.
 	propagation := metav1.DeletePropagationBackground
-	err = c.dynamic.
-		Resource(harvesterVMResource).
-		Namespace(ns).
-		Delete(ctx, name, metav1.DeleteOptions{
-			PropagationPolicy: &propagation,
-		})
+	err = c.access.Delete(ctx, harvesterVMResource, ns, name, metav1.DeleteOptions{
+		PropagationPolicy: &propagation,
+	})
 	if err != nil && !k8serrors.IsNotFound(err) {
 		// IsNotFound is fine — the VM is already gone, deletion goal is achieved.
 		return fmt.Errorf("harvester delete VM %s: %w", backendUID, err)

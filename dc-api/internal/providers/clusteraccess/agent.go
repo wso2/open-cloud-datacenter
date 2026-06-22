@@ -29,11 +29,33 @@ const agentCallTimeout = 30 * time.Second
 // depends on the neutral agentgw.Session interface, never on package handlers,
 // so there is no import cycle.
 //
-// M-C maps only the status-shaped Get onto an agent op (Session.GetStatus). The
-// mutating verbs (Create/Update/Apply/Delete) and List are stubbed to return
-// ErrOpNotRoutable until their write phase lands AND the matching dc-agent RBAC
-// is widened in the same PR. Routed treats ErrOpNotRoutable as "fall back to
-// Direct", so an un-cut-over verb is never worse than today.
+// Op coverage: the status-shaped Get maps onto Session.GetStatus (read slice);
+// Create/Update/Apply all map onto Session.Apply and Delete onto Session.Delete
+// (write slice 1 — VM create/delete). These verbs are IMPLEMENTED, not stubbed.
+// List has no agent op yet (M-D) and still returns ErrOpNotRoutable so Routed
+// falls back to Direct.
+//
+// NOTE on Create: the agent exposes only server-side apply (Session.Apply) as its
+// create mechanism, so AgentBacked.Create is an SSA, NOT a POST. This is the one
+// intentional asymmetry with the Direct seam, whose Create is a plain dynamic POST
+// (byte-identical to the pre-seam behaviour). It is acceptable because it lives
+// solely on the opt-in agent path (DCAPI_AGENT_ROUTE_WRITES); the default
+// toggle-OFF create stays a POST.
+//
+// Activation is NOT decided here — it is gated by the Routed allow-set (which the
+// per-family DCAPI_AGENT_ROUTE_{READS,WRITES} toggles drive). A verb the allow-set
+// does not include is chosen as Direct BEFORE any method here is called, so no
+// agent op runs. CRITICALLY, for a verb the allow-set DOES activate, this
+// accessor's return value — success OR error — is TERMINAL in Routed: there is no
+// mid-call fallback to Direct (see routed.go). The load-bearing invariant that
+// keeps that safe: for a mapped, supported resource an activated write verb must
+// never return ErrOpNotRoutable. ErrOpNotRoutable is produced only for an
+// unmapped GVR (a programming error — VMs are mapped) or an OP_UNSUPPORTED reply
+// (gone once the agent's op handler + RBAC ship in the activating PR). A genuine
+// write failure — RBAC 403, timeout, dropped channel — surfaces as a real error
+// (403 passes through translateErr unchanged; a dropped channel becomes a
+// retryable "agent unavailable"), so a misconfigured routed write fails LOUDLY
+// rather than silently double-running on Direct.
 type AgentBacked struct {
 	sess         agentgw.Session
 	region, zone string
@@ -156,11 +178,15 @@ func (a *AgentBacked) List(ctx context.Context, gvr schema.GroupVersionResource,
 	return nil, fmt.Errorf("clusteraccess: list of %s not routable: %w", gvr.Resource, agentgw.ErrOpNotRoutable)
 }
 
-// Create / Update / Apply all map to Session.Apply (SSA is create-or-update)
-// once a resource family is cut over in its write phase. Until then they return
-// ErrOpNotRoutable so Routed uses the direct path. The implementation below is
-// the shape the write phases will enable; it is unreachable in M-C because the
-// Routed allow-set does not include any mutating verb.
+// Create / Update / Apply all map to Session.Apply (SSA is create-or-update) —
+// server-side apply is the only mutating mechanism the agent exposes. They are
+// LIVE for the VM write slice: the Routed allow-set activates VerbCreate (and
+// VerbDelete) behind DCAPI_AGENT_ROUTE_WRITES, so the CreateVM call site's
+// c.access.Create(...) reaches Session.Apply here when the toggle is on and a live
+// agent serves the zone. The create therefore becomes an SSA on the agent path
+// (vs a plain POST on the Direct path) — the intentional asymmetry documented on
+// the type above. For a mapped GVR (VMs are mapped) these never return
+// ErrOpNotRoutable — only a real apply failure or, transiently, agent-unavailable.
 func (a *AgentBacked) Create(ctx context.Context, gvr schema.GroupVersionResource, ns string, obj *unstructured.Unstructured, _ metav1.CreateOptions) (*unstructured.Unstructured, error) {
 	return a.apply(ctx, gvr, ns, obj)
 }
@@ -169,6 +195,10 @@ func (a *AgentBacked) Update(ctx context.Context, gvr schema.GroupVersionResourc
 	return a.apply(ctx, gvr, ns, obj)
 }
 
+// Apply deliberately IGNORES the caller's fieldManager argument and uses
+// a.fieldManager instead: the agent owns the field-manager identity for every op
+// it applies (it is fixed at the agent boundary, not chosen per call site), so the
+// caller's value is intentionally not forwarded. This is by design, not a bug.
 func (a *AgentBacked) Apply(ctx context.Context, gvr schema.GroupVersionResource, ns string, obj *unstructured.Unstructured, _ string, force bool) (*unstructured.Unstructured, error) {
 	return a.applyForce(ctx, gvr, ns, obj, force)
 }
