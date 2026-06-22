@@ -81,9 +81,3 @@ variable "rancher_hostname" {
   description = "FQDN of the Rancher server. Added to the Harvester CoreDNS hosts block when patch_coredns = true."
   default     = ""
 }
-
-variable "insecure_registration" {
-  type        = bool
-  description = "Pass --insecure-skip-tls-verify to the kubectl apply for Harvester registration. Use when Rancher TLS cert is a private/origin CA not trusted by the local machine."
-  default     = false
-}
