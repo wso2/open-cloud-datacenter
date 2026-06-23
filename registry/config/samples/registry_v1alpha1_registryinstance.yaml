@@ -1,0 +1,13 @@
+apiVersion: registry.opencloud.wso2.com/v1alpha1
+kind: RegistryInstance
+metadata:
+  labels:
+    app.kubernetes.io/name: registry
+    app.kubernetes.io/managed-by: kustomize
+  name: registryinstance-sample
+  namespace: registry-system
+  annotations:
+    registry.opencloud.wso2.com/hard-delete: "false"
+spec:
+  tenantID: sample-tenant
+  plan: starter

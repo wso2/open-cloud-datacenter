@@ -1,0 +1,100 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - registry.opencloud.wso2.com
+  resources:
+  - registryinstances
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - registry.opencloud.wso2.com
+  resources:
+  - registryinstances/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - registry.opencloud.wso2.com
+  resources:
+  - registryinstances/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - registry.opencloud.wso2.com
+  resources:
+  - registrybackends
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - registry.opencloud.wso2.com
+  resources:
+  - registrybackends/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - registry.opencloud.wso2.com
+  resources:
+  - registrybackends/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  - secrets
+  - events
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - delete
+  - get
+  - list
+  - watch

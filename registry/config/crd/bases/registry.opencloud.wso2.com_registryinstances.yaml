@@ -1,0 +1,130 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: registryinstances.registry.opencloud.wso2.com
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+spec:
+  group: registry.opencloud.wso2.com
+  names:
+    kind: RegistryInstance
+    listKind: RegistryInstanceList
+    plural: registryinstances
+    singular: registryinstance
+    shortNames:
+      - ri
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Tenant
+          type: string
+          jsonPath: .spec.tenantID
+        - name: Project
+          type: string
+          jsonPath: .spec.projectID
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: URL
+          type: string
+          jsonPath: .status.registryURL
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required: [tenantID, projectID]
+              properties:
+                tenantID:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Unique tenant identifier (e.g. "acme").
+                    Determines Harbor namespace name ({tenantID}-management) and Helm release name.
+                projectID:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Datacenter project ID requesting a Harbor project inside the shared Harbor.
+                    Each project gets its own Harbor project and project-scoped robot account.
+                registryName:
+                  type: string
+                  description: >
+                    User-provided registry name (e.g. "prod-images"). Used as the
+                    Harbor project name and to derive the credentials Secret name
+                    (registry-credentials-<cr-name>). Unique within (tenantID, projectID).
+                plan:
+                  type: string
+                  enum: [starter, professional, enterprise]
+                  default: starter
+                  description: Harbor resource profile (CPU/memory/storage limits).
+                backendRef:
+                  type: object
+                  description: >
+                    Cross-namespace reference to the per-tenant RegistryBackend CR
+                    (name: rb-{tenantID}, namespace: dc-tenant-{tenantID}).
+                    dc-api sets this; the controller reads it to locate the running Harbor instance.
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                  required: [name, namespace]
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: [Pending, Provisioning, Ready, Failed, Terminating]
+                  description: Lifecycle state — Pending, Provisioning, Ready, Failed, Terminating.
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime, reason, message]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                registryURL:
+                  type: string
+                  description: Harbor portal URL, populated when phase is Ready.
+                progress:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: >
+                    Sub-step status during provisioning.
+                    Keys: namespace, helm_install, bootstrap. Values: STARTING, READY.
+                    Harbor pod names (e.g. harbor-acme-core) are added as keys once Helm installs.
+                message:
+                  type: string
+                  description: Human-readable error detail when phase is Failed.

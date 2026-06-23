@@ -1,0 +1,101 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: registrybackends.registry.opencloud.wso2.com
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+spec:
+  group: registry.opencloud.wso2.com
+  names:
+    kind: RegistryBackend
+    listKind: RegistryBackendList
+    plural: registrybackends
+    singular: registrybackend
+    shortNames:
+      - rb
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Tenant
+          type: string
+          jsonPath: .spec.tenantID
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: URL
+          type: string
+          jsonPath: .status.registryURL
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required: [tenantID]
+              properties:
+                tenantID:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Unique tenant identifier (e.g. "acme").
+                    The Harbor Helm release (harbor-{tenantID}) and namespace
+                    ({tenantID}-management) are derived from this.
+                plan:
+                  type: string
+                  enum: [starter, professional, enterprise]
+                  default: starter
+                  description: Harbor resource profile (CPU/memory/storage limits).
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: [Pending, Provisioning, Ready, Failed, Terminating]
+                  description: Lifecycle state — Pending, Provisioning, Ready, Failed, Terminating.
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime, reason, message]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                registryURL:
+                  type: string
+                  description: Harbor portal URL, populated when phase is Ready.
+                progress:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Sub-step deployment progress (namespace, helm_install, bootstrap, pod names).
+                message:
+                  type: string
+                  description: Human-readable error detail when phase is Failed.

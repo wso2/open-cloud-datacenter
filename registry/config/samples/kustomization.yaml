@@ -1,0 +1,4 @@
+resources:
+- registry_v1alpha1_registrybackend.yaml
+- registry_v1alpha1_registryinstance.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
