@@ -108,7 +108,17 @@ type RouterDeps struct {
 	// wiring providers. Either way it is the single source of agent Sessions for
 	// the routes built here.
 	AgentRegistry *handlers.Registry
-	Log           zerolog.Logger
+	// LocalRegion/LocalZone are the (region, zone) dc-api routes agent traffic
+	// to (cfg.LocalRegion/LocalZone). AgentRouteReads/Writes mirror the routing
+	// toggles. They are passed to the agent WS handler so it can WARN loudly at
+	// connect time when a connecting agent's token zone does not match the
+	// routing zone (the colombo-vs-zone-1 case). Observability only — additive,
+	// zero values disable the warning (router-only callers / tests).
+	LocalRegion      string
+	LocalZone        string
+	AgentRouteReads  bool
+	AgentRouteWrites bool
+	Log              zerolog.Logger
 }
 
 // NewRouter creates and returns the fully configured Chi router.
@@ -193,7 +203,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 	if agentRegistry == nil {
 		agentRegistry = handlers.NewRegistry()
 	}
-	agentWSHandler := handlers.NewAgentWSHandler(deps.Repo, agentRegistry, deps.Log)
+	agentWSHandler := handlers.NewAgentWSHandler(deps.Repo, agentRegistry, deps.LocalRegion, deps.LocalZone, deps.AgentRouteReads, deps.AgentRouteWrites, deps.Log)
 	r.Get("/v1/agent/ws", agentWSHandler.ServeHTTP)
 
 	// ── API v1 (authenticated) ────────────────────────────────────────────────

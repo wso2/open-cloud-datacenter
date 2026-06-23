@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -59,6 +60,7 @@ func decisionRegistryToggles(routeReads, routeWrites bool, gw agentgw.SessionRes
 		localRegion:  "lk",
 		localZone:    "zone-1",
 		log:          zerolog.Nop(),
+		noAgentWarn:  make(map[string]time.Time),
 	}
 }
 
@@ -175,5 +177,47 @@ func TestAgentDecision_WritesOn_NoLiveAgent_StayDirect(t *testing.T) {
 		if _, ok := decide(v); ok {
 			t.Errorf("no connected agent must keep verb %v on Direct even with the toggle on", v)
 		}
+	}
+}
+
+// TestWarnNoAgent_RateLimited proves the routing-time no-agent warning is
+// time-gated per zone: the FIRST call records a timestamp, an immediate SECOND
+// call within the window does not refresh it, and a call after the window
+// elapses warns again (refreshing the timestamp). This is what stops a routed
+// verb hammered at request rate from flooding the log.
+func TestWarnNoAgent_RateLimited(t *testing.T) {
+	r := decisionRegistryToggles(true, true, fakeResolver{connected: false})
+
+	// First warn records a timestamp for the zone.
+	r.warnNoAgent("lk", "zone-1")
+	first, ok := r.noAgentWarn[registryKey("lk", "zone-1")]
+	if !ok {
+		t.Fatal("first warnNoAgent must record a timestamp for the zone")
+	}
+
+	// Second warn inside the window must NOT refresh the timestamp.
+	r.warnNoAgent("lk", "zone-1")
+	if got := r.noAgentWarn[registryKey("lk", "zone-1")]; !got.Equal(first) {
+		t.Errorf("warn inside the rate-limit window must not refresh the timestamp: %v != %v", got, first)
+	}
+
+	// Simulate the window having elapsed; the next warn must refresh.
+	r.noAgentMu.Lock()
+	r.noAgentWarn[registryKey("lk", "zone-1")] = time.Now().Add(-2 * noAgentWarnEvery)
+	r.noAgentMu.Unlock()
+	r.warnNoAgent("lk", "zone-1")
+	if got := r.noAgentWarn[registryKey("lk", "zone-1")]; !got.After(first) {
+		t.Error("warn after the rate-limit window must refresh the timestamp")
+	}
+}
+
+// TestWarnNoAgent_PerZoneIndependent proves the gate is keyed per zone: warning
+// for one zone does not suppress a first warning for a different zone.
+func TestWarnNoAgent_PerZoneIndependent(t *testing.T) {
+	r := decisionRegistryToggles(true, true, fakeResolver{connected: false})
+	r.warnNoAgent("lk", "zone-1")
+	r.warnNoAgent("lk", "zone-2")
+	if _, ok := r.noAgentWarn[registryKey("lk", "zone-2")]; !ok {
+		t.Error("a second zone must get its own first warning (independent gate)")
 	}
 }

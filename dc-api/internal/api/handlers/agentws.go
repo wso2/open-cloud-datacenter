@@ -88,12 +88,33 @@ type AgentWSHandler struct {
 	repo     *db.Repository
 	registry *Registry
 	log      zerolog.Logger
+
+	// routeRegion/routeZone are the (region, zone) dc-api routes traffic to
+	// (cfg.LocalRegion/LocalZone). routeReads/routeWrites mirror the per-family
+	// toggles. They are used ONLY for the connect-time validation warning below
+	// — they never reject a connection or change a route. Empty/false ⇒ no
+	// validation (router-only callers and tests that don't wire routing).
+	routeRegion, routeZone  string
+	routeReads, routeWrites bool
 }
 
 // NewAgentWSHandler constructs the handler with injected dependencies. The
 // registry is shared with the HTTP handlers that Call connected agents.
-func NewAgentWSHandler(repo *db.Repository, registry *Registry, log zerolog.Logger) *AgentWSHandler {
-	return &AgentWSHandler{repo: repo, registry: registry, log: log}
+//
+// routeRegion/routeZone + routeReads/routeWrites give the handler the routing
+// context so it can WARN loudly at connect time when an agent's token zone does
+// not match the zone dc-api would route to (the colombo-vs-zone-1 case). They
+// are additive and observability-only; the zero values disable the warning.
+func NewAgentWSHandler(repo *db.Repository, registry *Registry, routeRegion, routeZone string, routeReads, routeWrites bool, log zerolog.Logger) *AgentWSHandler {
+	return &AgentWSHandler{
+		repo:        repo,
+		registry:    registry,
+		log:         log,
+		routeRegion: routeRegion,
+		routeZone:   routeZone,
+		routeReads:  routeReads,
+		routeWrites: routeWrites,
+	}
 }
 
 // ServeHTTP authenticates the bearer token, upgrades to WebSocket, and runs
@@ -150,11 +171,31 @@ func (h *AgentWSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The token, not the hello frame, is authoritative for (region, zone): an
 	// agent can't claim a zone it wasn't issued a credential for. We log a
 	// mismatch but bind the agents row to the token's scope.
-	if hello.Region != region || hello.Zone != zone {
+	//
+	// Guarded to fire ONLY when the hello carries non-empty values that differ:
+	// token-only agents (the new single-source default, DCAGENT_ZONE dropped)
+	// send an empty hello region/zone advisorily, which is not a misconfig — it
+	// is the intended path — so it must not warn.
+	if (hello.Region != "" || hello.Zone != "") && (hello.Region != region || hello.Zone != zone) {
 		h.log.Warn().
 			Str("token_region", region).Str("token_zone", zone).
 			Str("hello_region", hello.Region).Str("hello_zone", hello.Zone).
-			Msg("agent hello region/zone differs from token scope; using token scope")
+			Msg("agent hello region/zone differs from token scope; using token scope (DCAGENT_ZONE/DCAGENT_REGION are deprecated — drop them)")
+	}
+
+	// Connect-time route-mismatch WARNING — the loud version of the
+	// colombo-vs-zone-1 incident. The token's (region, zone) is authoritative
+	// for THIS agent; (routeRegion, routeZone) is the zone dc-api ROUTES to. If
+	// routing is enabled and they disagree, this agent will register fine but
+	// will NEVER receive routed traffic (the registry only resolves a provider
+	// set + Session for the routing zone). That used to be silent. Make it loud.
+	// Observability only: the connection still succeeds and registers normally.
+	if (h.routeReads || h.routeWrites) && (region != h.routeRegion || zone != h.routeZone) {
+		h.log.Warn().
+			Str("agent_token_region", region).Str("agent_token_zone", zone).
+			Str("route_region", h.routeRegion).Str("route_zone", h.routeZone).
+			Bool("reads", h.routeReads).Bool("writes", h.routeWrites).
+			Msg("agent connected for a zone that does NOT match the routing zone; this agent will NOT receive routed traffic — mint the agent token for the routing zone, or set DCAPI_LOCAL_ZONE/DCAPI_LOCAL_REGION to match this agent's token")
 	}
 
 	agentID, err := h.repo.UpsertAgent(sessCtx, region, zone, hello.Version, r.RemoteAddr)
