@@ -25,9 +25,12 @@
 // the local zone if the agent is down. The toggles are independent: reads can
 // route while writes stay on the direct path.
 //
-// cluster/network providers in the set are the plain Direct ones for now —
-// rancher is an HTTP Steve client (does not fit the Accessor seam) and network
-// routing is a later phase (M-E).
+// The cluster provider stays plain Direct — rancher is an HTTP Steve client that
+// does not fit the Accessor seam. The network provider (kubeovn) now ALSO carries
+// a routed seam: the kubeovn CRD CRUD lifecycle (Vpc/Subnet/NAD create/get/delete)
+// routes per-family under the SAME reads/writes toggles, gated by the network
+// families' RouteVerbs. The intricate plumbing (NAT, CoreDNS, ACL/route/peering
+// patches, DNS ConfigMaps, namespace/quota) stays Direct on the master kubeconfig.
 package providers
 
 import (
@@ -36,11 +39,13 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/wso2/dc-api/internal/agentgw"
 	"github.com/wso2/dc-api/internal/config"
 	"github.com/wso2/dc-api/internal/providers/clusteraccess"
 	"github.com/wso2/dc-api/internal/providers/harvester"
+	"github.com/wso2/dc-api/internal/providers/kubeovn"
 )
 
 // ProviderSet is the trio of providers that serve one zone.
@@ -103,10 +108,15 @@ func NewRegistry(cfg *config.Config, agentGateway agentgw.SessionResolver, log z
 		noAgentWarn:  make(map[string]time.Time),
 	}
 
+	// One GVR-aware decision closure serves BOTH families: it is per-GVR (Part A),
+	// so the same closure correctly routes VM verbs for the kubevirt GVRs and
+	// network verbs for the kubeovn/NAD GVRs, each gated by that family's RouteVerbs.
+	decide := r.agentDecision(cfg)
+
 	// ── Compute provider (harvester) with the routed cluster-access seam ───────
-	// Only the harvester path supports the M-C read slice. WithRoutedAccessor
-	// builds the Routed accessor over the client's OWN dynamic client (the Direct
-	// fallback), so the off-path and every not-yet-routed method share one client.
+	// Only the harvester path supports the seam. WithRoutedAccessor builds the
+	// Routed accessor over the client's OWN dynamic client (the Direct fallback),
+	// so the off-path and every not-yet-routed method share one client.
 	var compute ComputeProvider
 	switch cfg.VMProvider {
 	case "harvester":
@@ -114,7 +124,6 @@ func NewRegistry(cfg *config.Config, agentGateway agentgw.SessionResolver, log z
 		if err != nil {
 			return nil, fmt.Errorf("build harvester client for registry: %w", err)
 		}
-		decide := r.agentDecision(cfg)
 		hc.WithRoutedAccessor(func(direct clusteraccess.Accessor) clusteraccess.Accessor {
 			return clusteraccess.NewRouted(direct, decide)
 		})
@@ -129,14 +138,41 @@ func NewRegistry(cfg *config.Config, agentGateway agentgw.SessionResolver, log z
 		compute = c
 	}
 
-	// ── Cluster + Network providers: plain Direct (unchanged) ──────────────────
+	// ── Cluster provider: plain Direct (unchanged — rancher is an HTTP Steve
+	// client that does not fit the Accessor seam). ─────────────────────────────
 	cluster, err := NewClusterProvider(cfg)
 	if err != nil {
 		return nil, err
 	}
-	network, err := NewNetworkProvider(cfg)
-	if err != nil {
-		return nil, err
+
+	// ── Network provider (kubeovn) with the routed cluster-access seam ─────────
+	// Mirrors the compute path: build the kubeovn client directly so we can wire
+	// WithRoutedAccessor over its OWN dynamic client (the same SHARED decide
+	// closure). The kubeovn CRD CRUD lifecycle (Vpc/Subnet/NAD create/get/delete)
+	// then routes per-family under the SAME reads/writes toggles, gated by the
+	// network families' RouteVerbs. main.go still applies F15 WithExternalNetwork
+	// and F20 WithDNSConfig to localSet.Network (this same instance) AFTER the
+	// registry returns, so that plumbing is untouched — WithRoutedAccessor only
+	// swaps c.access. With the toggles off (default) every network op is the
+	// byte-identical Direct path.
+	var network NetworkProvider
+	switch cfg.NetworkProvider {
+	case "kubeovn":
+		kc, err := kubeovn.New(cfg.HarvesterKubeconfig, cfg.KubeOVNNamespace)
+		if err != nil {
+			return nil, fmt.Errorf("build kubeovn client for registry: %w", err)
+		}
+		kc.WithRoutedAccessor(func(direct clusteraccess.Accessor) clusteraccess.Accessor {
+			return clusteraccess.NewRouted(direct, decide)
+		})
+		network = kc
+	default:
+		// Non-kubeovn network providers don't have the seam — plain factory (Direct).
+		n, err := NewNetworkProvider(cfg)
+		if err != nil {
+			return nil, err
+		}
+		network = n
 	}
 
 	r.set[registryKey(cfg.LocalRegion, cfg.LocalZone)] = &ProviderSet{
@@ -162,7 +198,7 @@ func NewRegistry(cfg *config.Config, agentGateway agentgw.SessionResolver, log z
 	if agentGateway != nil && cfg.AgentRouteReads {
 		log.Info().
 			Str("region", cfg.LocalRegion).Str("zone", cfg.LocalZone).
-			Msg("provider registry: agent read-routing ENABLED (DCAPI_AGENT_ROUTE_READS=true) — routes only when a live agent is connected for the zone")
+			Msg("provider registry: agent read-routing ENABLED (DCAPI_AGENT_ROUTE_READS=true) — routes the onboarded read families (VM + network CRD reads) only when a live agent is connected for the zone")
 	} else {
 		log.Info().
 			Str("region", cfg.LocalRegion).Str("zone", cfg.LocalZone).
@@ -172,12 +208,12 @@ func NewRegistry(cfg *config.Config, agentGateway agentgw.SessionResolver, log z
 	if agentGateway != nil && cfg.AgentRouteWrites {
 		log.Info().
 			Str("region", cfg.LocalRegion).Str("zone", cfg.LocalZone).
-			Msg("provider registry: agent write-routing ENABLED (DCAPI_AGENT_ROUTE_WRITES=true) — VM create/delete route only when a live agent is connected for the zone and its RBAC permits the verb")
+			Msg("provider registry: agent write-routing ENABLED (DCAPI_AGENT_ROUTE_WRITES=true) — the onboarded write families (VM create/delete + network CRD create/delete: Vpc/Subnet/NAD) route only when a live agent is connected for the zone and its RBAC permits the verb")
 	} else {
 		log.Info().
 			Str("region", cfg.LocalRegion).Str("zone", cfg.LocalZone).
 			Bool("toggle", cfg.AgentRouteWrites).Bool("gateway", agentGateway != nil).
-			Msg("provider registry: agent write-routing disabled — VM writes use the direct cluster path")
+			Msg("provider registry: agent write-routing disabled — VM and network writes use the direct cluster path")
 	}
 	return r, nil
 }
@@ -200,11 +236,14 @@ func (r *Registry) For(region, zone string) (*ProviderSet, error) {
 // EVERY call, so "toggle on / toggle off" and "agent connected / disconnected"
 // are observable on the very next request with no provider reconstruction.
 //
-// The routed allow-set is gated per family: reads (VerbGet) by AgentRouteReads,
-// writes (VerbCreate, VerbDelete — the VM create/delete slice) by AgentRouteWrites.
-// Each verb is added here IN THE SAME PR as the matching dc-agent RBAC rule —
-// never one without the other. Any verb not listed always returns (_, false) →
-// Direct.
+// The routed allow-set is gated per family via clusteraccess.RoutableVerbs(gvr)
+// (the capability registry's RouteVerbs for that GVR), then split reads (VerbGet)
+// by AgentRouteReads, writes (VerbCreate, VerbDelete) by AgentRouteWrites. Each
+// verb is declared on a capability IN THE SAME PR as the matching dc-agent RBAC
+// rule — never one without the other. A GVR/verb the registry does not declare
+// always returns (_, false) → Direct. Because membership is per-GVR, onboarding a
+// second family (e.g. KubeOVN networks) routes ONLY that family's declared verbs;
+// it cannot inherit a verb that only another family (e.g. VMs) declared.
 //
 // NOTE: the write allow-set uses VerbCreate (not VerbApply) because CreateVM
 // calls c.access.Create(...). On the Direct path that is a byte-identical POST;
@@ -216,23 +255,21 @@ func (r *Registry) agentDecision(cfg *config.Config) clusteraccess.AgentDecision
 	fieldManager := "dc-api"
 	region, zone := cfg.LocalRegion, cfg.LocalZone
 
-	// routable is the union of every capability's RouteVerbs — the registry-
-	// derived membership test that REPLACES the old hand-written switch. With one
-	// onboarded family today it equals {VerbGet, VerbCreate, VerbDelete}, exactly
-	// the pre-refactor allow-set, so decisions are byte-identical. The reads vs
-	// writes split (which toggle gates which verb) stays here.
-	routable := clusteraccess.UnionRouteVerbs()
-
-	return func(verb clusteraccess.Verb) (clusteraccess.Accessor, bool) {
+	return func(verb clusteraccess.Verb, gvr schema.GroupVersionResource) (clusteraccess.Accessor, bool) {
 		// (2) gateway present — shared precondition for any routing.
 		if r.agentGateway == nil {
 			return nil, false
 		}
-		// (1)+(4) registry membership AND per-family toggle, together.
-		//   reads  → AgentRouteReads  gates read verbs  (VerbGet today)
-		//   writes → AgentRouteWrites gates write verbs (VerbCreate, VerbDelete today)
-		// A verb not in the registry's routable union always falls through to Direct.
-		if !routable[verb] {
+		// (1)+(4) PER-FAMILY registry membership AND per-family toggle, together.
+		//   reads  → AgentRouteReads  gates read verbs  (VerbGet)
+		//   writes → AgentRouteWrites gates write verbs (VerbCreate, VerbDelete)
+		// RoutableVerbs(gvr) is the per-family allow-set declared in the capability
+		// registry (RouteVerbs). A GVR that is not an onboarded routable family, or
+		// a verb that family did not declare, always falls through to Direct. This
+		// REPLACES the cross-family UnionRouteVerbs() so a second family routes ONLY
+		// its own declared verbs — never a verb another family happened to declare.
+		routable, ok := clusteraccess.RoutableVerbs(gvr)
+		if !ok || !routable[verb] {
 			return nil, false
 		}
 		switch {

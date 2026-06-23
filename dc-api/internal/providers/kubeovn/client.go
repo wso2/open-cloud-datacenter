@@ -84,6 +84,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"github.com/wso2/dc-api/internal/models"
+	"github.com/wso2/dc-api/internal/providers/clusteraccess"
 	"github.com/wso2/dc-api/internal/providers/common"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -128,6 +129,18 @@ type Client struct {
 	restConfig *rest.Config // retained so callers (kvi proxy) can build typed HTTP clients
 	namespace  string       // KubeOVN daemon namespace (default: "kube-ovn") — used only for NAD provider sync notes
 
+	// access is the per-zone cluster-access seam (mirrors harvester.Client.access).
+	// It defaults to clusteraccess.Direct over `dynamic` (byte-identical to the
+	// pre-seam behaviour) unless WithRoutedAccessor injects a Routed accessor. ONLY
+	// the CRD CRUD lifecycle of the three onboarded network families routes through
+	// it: CreateVNet/GetVNet/DeleteVNet (Vpc), the Subnet+NAD create/get/delete in
+	// CreateSubnet/GetSubnet/DeleteSubnet. Everything else (the stuck-finalizer
+	// recovery, ACL/route/peering patches, DNS ConfigMaps, NAT/CoreDNS plumbing,
+	// namespace/quota provisioning) still calls c.dynamic directly — those GVRs are
+	// not in the agent's mapper/RBAC and are deferred to a later slice. The seam
+	// never leaks an agent concept past the NetworkProvider interface.
+	access clusteraccess.Accessor
+
 	// vpcDnsAvailable is set to true at construction time if the
 	// vpcdnses.kubeovn.io CRD exists on the cluster.  If false, the driver
 	// falls back to ConfigMaps for DNS zone management.
@@ -170,6 +183,10 @@ func New(kubeconfig, namespace string) (*Client, error) {
 		dynamic:    dynClient,
 		restConfig: restConfig,
 		namespace:  namespace,
+		// Default seam: Direct on the SAME dynamic client → byte-identical to the
+		// pre-seam behaviour. providers.NewRegistry replaces this with a Routed
+		// accessor via WithRoutedAccessor when the agent path is wired.
+		access: clusteraccess.NewDirect(dynClient),
 	}
 
 	// Probe for VpcDns CRD availability (best-effort; if the probe call itself
@@ -193,6 +210,23 @@ func (c *Client) Name() string { return "kubeovn" }
 // particular providers/endpoints — can construct their own resource clients
 // without duplicating kubeconfig parsing.
 func (c *Client) Dynamic() dynamic.Interface { return c.dynamic }
+
+// WithRoutedAccessor replaces the client's cluster-access seam with a routed
+// accessor produced from the client's own dynamic client. build receives a
+// clusteraccess.Direct over c.dynamic (the Direct fallback the routed accessor
+// must use so the off-path is byte-identical) and returns the Accessor to
+// install. Returns the same *Client for chaining. A nil build (or nil result)
+// leaves the default Direct seam in place. Mirrors harvester.Client verbatim so
+// the registry can wire both compute and network with one decision closure.
+func (c *Client) WithRoutedAccessor(build func(direct clusteraccess.Accessor) clusteraccess.Accessor) *Client {
+	if build == nil {
+		return c
+	}
+	if a := build(clusteraccess.NewDirect(c.dynamic)); a != nil {
+		c.access = a
+	}
+	return c
+}
 
 // RESTConfig exposes the underlying *rest.Config so callers (e.g. the KVI
 // OpenBao proxy) can build typed Kubernetes REST clients against the same
@@ -244,7 +278,10 @@ func (c *Client) CreateVNet(ctx context.Context, tenantID, projectID string, spe
 		},
 	}
 
-	created, err := c.dynamic.Resource(vpcGVR).Create(ctx, vpc, metav1.CreateOptions{})
+	// Vpc is cluster-scoped → ns="" (Direct's .Namespace("") is the cluster-scoped
+	// client, identical to the prior c.dynamic.Resource(vpcGVR).Create). Routes via
+	// the agent only under DCAPI_AGENT_ROUTE_WRITES + a live agent; otherwise Direct.
+	created, err := c.access.Create(ctx, vpcGVR, "", vpc, metav1.CreateOptions{})
 	if err != nil {
 		if k8serrors.IsAlreadyExists(err) {
 			// Idempotent: return the existing VPC's name as BackendUID.
@@ -266,7 +303,9 @@ func (c *Client) CreateVNet(ctx context.Context, tenantID, projectID string, spe
 
 // GetVNet returns the current provider state of a VNet.
 func (c *Client) GetVNet(ctx context.Context, backendUID string) (*models.VNetResource, error) {
-	obj, err := c.dynamic.Resource(vpcGVR).Get(ctx, backendUID, metav1.GetOptions{})
+	// Cluster-scoped → ns="". Routes via the agent only under DCAPI_AGENT_ROUTE_READS
+	// + a live agent; otherwise the byte-identical Direct Get.
+	obj, err := c.access.Get(ctx, vpcGVR, "", backendUID, metav1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			return nil, fmt.Errorf("vpc %q not found", backendUID)
@@ -287,7 +326,9 @@ func (c *Client) GetVNet(ctx context.Context, backendUID string) (*models.VNetRe
 // delete child subnets before calling DeleteVNet.  This driver does NOT
 // force-remove finalizers.
 func (c *Client) DeleteVNet(ctx context.Context, backendUID string) error {
-	err := c.dynamic.Resource(vpcGVR).Delete(ctx, backendUID, metav1.DeleteOptions{})
+	// Cluster-scoped → ns="". Routes via the agent only under DCAPI_AGENT_ROUTE_WRITES
+	// + a live agent; otherwise the byte-identical Direct Delete.
+	err := c.access.Delete(ctx, vpcGVR, "", backendUID, metav1.DeleteOptions{})
 	if err != nil && !k8serrors.IsNotFound(err) {
 		return fmt.Errorf("delete kubeovn vpc %q: %w", backendUID, err)
 	}
@@ -368,7 +409,9 @@ func (c *Client) CreateSubnet(ctx context.Context, vnetUID string, spec models.S
 		},
 	}
 
-	if _, err := c.dynamic.Resource(nadGVR).Namespace(ns).Create(ctx, nad, metav1.CreateOptions{}); err != nil {
+	// NAD is namespaced → pass ns. Routes via the agent under DCAPI_AGENT_ROUTE_WRITES
+	// + a live agent; otherwise the byte-identical Direct Create.
+	if _, err := c.access.Create(ctx, nadGVR, ns, nad, metav1.CreateOptions{}); err != nil {
 		if !k8serrors.IsAlreadyExists(err) {
 			return nil, fmt.Errorf("create NAD %q in %s: %w", nadName, ns, err)
 		}
@@ -380,7 +423,9 @@ func (c *Client) CreateSubnet(ctx context.Context, vnetUID string, spec models.S
 	// (set by the same controller); if we race ahead, it rejects with
 	// "network type of nad is not kubeovn instead".
 	if err := c.waitForNADReady(ctx, ns, nadName); err != nil {
-		_ = c.dynamic.Resource(nadGVR).Namespace(ns).Delete(ctx, nadName, metav1.DeleteOptions{})
+		// Rollback the NAD we just created through the same accessor it was created
+		// with, so the create+rollback pair share one credential.
+		_ = c.access.Delete(ctx, nadGVR, ns, nadName, metav1.DeleteOptions{})
 		return nil, fmt.Errorf("create subnet: %w", err)
 	}
 
@@ -418,10 +463,13 @@ func (c *Client) CreateSubnet(ctx context.Context, vnetUID string, spec models.S
 		},
 	}
 
-	if _, err := c.dynamic.Resource(subnetGVR).Create(ctx, subnet, metav1.CreateOptions{}); err != nil {
+	// Subnet is cluster-scoped → ns="". Routes via the agent under
+	// DCAPI_AGENT_ROUTE_WRITES + a live agent; otherwise the byte-identical Direct.
+	if _, err := c.access.Create(ctx, subnetGVR, "", subnet, metav1.CreateOptions{}); err != nil {
 		if !k8serrors.IsAlreadyExists(err) {
-			// Best-effort NAD cleanup on Subnet create failure.
-			_ = c.dynamic.Resource(nadGVR).Namespace(ns).Delete(ctx, nadName, metav1.DeleteOptions{})
+			// Best-effort NAD cleanup on Subnet create failure — through the same
+			// accessor the NAD was created with (single-credential rollback).
+			_ = c.access.Delete(ctx, nadGVR, ns, nadName, metav1.DeleteOptions{})
 			return nil, fmt.Errorf("create kubeovn subnet %q: %w", subnetName, err)
 		}
 	}
@@ -435,7 +483,9 @@ func (c *Client) CreateSubnet(ctx context.Context, vnetUID string, spec models.S
 
 // GetSubnet returns the current provider state of a Subnet.
 func (c *Client) GetSubnet(ctx context.Context, backendUID string) (*models.SubnetResource, error) {
-	obj, err := c.dynamic.Resource(subnetGVR).Get(ctx, backendUID, metav1.GetOptions{})
+	// Cluster-scoped → ns="". Routes via the agent under DCAPI_AGENT_ROUTE_READS
+	// + a live agent; otherwise the byte-identical Direct Get.
+	obj, err := c.access.Get(ctx, subnetGVR, "", backendUID, metav1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			return nil, fmt.Errorf("subnet %q not found", backendUID)
@@ -456,7 +506,10 @@ func (c *Client) GetSubnet(ctx context.Context, backendUID string) (*models.Subn
 // detach first; the driver patches ACLs to empty before issuing the delete.
 func (c *Client) DeleteSubnet(ctx context.Context, backendUID string) error {
 	// First: fetch the subnet to find the tenant namespace (for the NAD).
-	obj, err := c.dynamic.Resource(subnetGVR).Get(ctx, backendUID, metav1.GetOptions{})
+	// Cluster-scoped → ns="". This Get is the leading read of the delete lifecycle,
+	// so it routes with the same accessor as the Delete below (under the reads
+	// toggle); otherwise the byte-identical Direct Get.
+	obj, err := c.access.Get(ctx, subnetGVR, "", backendUID, metav1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			return nil // already gone — idempotent
@@ -489,8 +542,12 @@ func (c *Client) DeleteSubnet(ctx context.Context, backendUID string) error {
 		log.Warn().Err(err).Str("subnet", backendUID).Msg("kubeovn: failed to clear ACLs before subnet delete; proceeding anyway")
 	}
 
-	// Delete the Subnet CRD.
-	if err := c.dynamic.Resource(subnetGVR).Delete(ctx, backendUID, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+	// Delete the Subnet CRD. Cluster-scoped → ns="". This is the PRIMARY delete verb
+	// the reconciler observes; it routes via the agent under DCAPI_AGENT_ROUTE_WRITES
+	// + a live agent, otherwise the byte-identical Direct Delete. (The stuck-finalizer
+	// recovery below stays on c.dynamic — a cold, best-effort self-heal that needs
+	// ips/pods verbs the network families deliberately do NOT declare.)
+	if err := c.access.Delete(ctx, subnetGVR, "", backendUID, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
 		return fmt.Errorf("delete kubeovn subnet %q: %w", backendUID, err)
 	}
 
@@ -575,8 +632,10 @@ func (c *Client) DeleteSubnet(ctx context.Context, backendUID string) error {
 		}
 	}
 
-	// Delete the NAD — same name, in the tenant namespace.
-	if err := c.dynamic.Resource(nadGVR).Namespace(ns).Delete(ctx, backendUID, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+	// Delete the NAD — same name, in the tenant namespace (namespaced → pass ns).
+	// Routes via the agent under DCAPI_AGENT_ROUTE_WRITES + a live agent; otherwise
+	// the byte-identical Direct Delete.
+	if err := c.access.Delete(ctx, nadGVR, ns, backendUID, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
 		return fmt.Errorf("delete NAD %q in %s: %w", backendUID, ns, err)
 	}
 

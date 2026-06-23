@@ -72,13 +72,13 @@ var vmCapability = AgentCapability{
 	AgentVerbs: []Verb{VerbGet, VerbList, VerbWatch, VerbCreate, VerbApply, VerbDelete},
 }
 
-// The pre-seeded, GVK-only capabilities. These exist so DefaultGVKMapper keeps
-// resolving the GVRs the existing drivers use (the table stays a 6-entry
-// superset, unchanged from the pre-refactor literal), but they are NOT yet
-// onboarded to the agent: RouteVerbs=nil means they contribute nothing to the
-// routing allow-set, and AgentVerbs=nil means they emit no RBAC rule. They are
-// NOT agent-managed today — onboarding any of them is a later phase that fills
-// in RouteVerbs/AgentVerbs.
+// The network families (NAD, Vpc, Subnet) are onboarded for the kubeovn CRD
+// CRUD slice (RouteVerbs/AgentVerbs filled below). vmiCapability and
+// vmImageCapability remain GVK-only pre-seeded entries: DefaultGVKMapper still
+// resolves their GVRs (the table stays a superset the drivers rely on) but
+// RouteVerbs=nil means they contribute nothing to the routing allow-set and
+// AgentVerbs=nil means they emit no RBAC rule. Onboarding either is a later phase
+// that fills in RouteVerbs/AgentVerbs.
 var (
 	vmiCapability = AgentCapability{
 		GVR:        schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachineinstances"},
@@ -92,33 +92,49 @@ var (
 		Kind:       "VirtualMachineImage",
 		Namespaced: true,
 	}
+	// nadCapability onboards the NetworkAttachmentDefinition CRUD that
+	// CreateSubnet/DeleteSubnet route through the kubeovn seam.
 	nadCapability = AgentCapability{
 		GVR:        schema.GroupVersionResource{Group: "k8s.cni.cncf.io", Version: "v1", Resource: "network-attachment-definitions"},
 		APIVersion: "k8s.cni.cncf.io/v1",
 		Kind:       "NetworkAttachmentDefinition",
 		Namespaced: true,
+		// dc-api routes exactly the NAD Create/Get/Delete the seam re-points.
+		RouteVerbs: []Verb{VerbGet, VerbCreate, VerbDelete},
+		// SA superset: list/watch for future inventory; create+patch because the
+		// AgentBacked create is a server-side apply (patch). Mirrors vmCapability.
+		AgentVerbs: []Verb{VerbGet, VerbList, VerbWatch, VerbCreate, VerbApply, VerbDelete},
 	}
+	// vpcCapability onboards the Vpc (VNet) CRUD that CreateVNet/GetVNet/DeleteVNet
+	// route through the kubeovn seam.
 	vpcCapability = AgentCapability{
 		GVR:        schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "vpcs"},
 		APIVersion: "kubeovn.io/v1",
 		Kind:       "Vpc",
 		Namespaced: false,
+		RouteVerbs: []Verb{VerbGet, VerbCreate, VerbDelete},
+		AgentVerbs: []Verb{VerbGet, VerbList, VerbWatch, VerbCreate, VerbApply, VerbDelete},
 	}
+	// subnetCapability onboards the Subnet CRUD that CreateSubnet/GetSubnet/
+	// DeleteSubnet route through the kubeovn seam.
 	subnetCapability = AgentCapability{
 		GVR:        schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "subnets"},
 		APIVersion: "kubeovn.io/v1",
 		Kind:       "Subnet",
 		Namespaced: false,
+		RouteVerbs: []Verb{VerbGet, VerbCreate, VerbDelete},
+		AgentVerbs: []Verb{VerbGet, VerbList, VerbWatch, VerbCreate, VerbApply, VerbDelete},
 	}
 )
 
 // AgentCapabilities is THE registry: one declaration per resource family.
 //
-// Phase 1 has exactly one truly onboarded entry (vmCapability) plus five
-// GVK-only pre-seeded entries that keep the wire mapper a superset without
-// granting any routing or RBAC. New families are added here (one struct each)
-// in later phases — never by editing the mapper, the allow-set switch, or the
-// RBAC YAML by hand.
+// Onboarded (RouteVerbs + AgentVerbs set): vmCapability and the three network
+// families nadCapability/vpcCapability/subnetCapability (the kubeovn CRD CRUD
+// slice). vmiCapability and vmImageCapability stay GVK-only pre-seeded entries
+// that keep the wire mapper a superset without granting any routing or RBAC. New
+// families are added here (one struct each) in later phases — never by editing
+// the mapper, the allow-set switch, or the RBAC YAML by hand.
 var AgentCapabilities = []AgentCapability{
 	vmCapability,
 	vmiCapability,
@@ -164,11 +180,12 @@ func buildDerived() {
 // the pre-refactor hand-maintained allow-set. agentDecision consults this for
 // membership, then gates reads vs writes by the per-family env toggles.
 //
-// PHASE-1 SIMPLIFICATION: agentDecision is verb-only (it does not receive a
-// GVR), so the union is the correct membership test while there is a single
-// onboarded family. When a second family with DIFFERENT RouteVerbs is onboarded,
-// the GVR must be threaded into agentDecision and RoutableVerbs(gvr) used
-// instead of the union.
+// NOTE: agentDecision is now GVR-AWARE (the GVR is threaded through
+// AgentDecision) and uses RoutableVerbs(gvr) for its per-family membership test,
+// NOT this union — that is what lets a second family with DIFFERENT RouteVerbs
+// route only its own declared verbs without inheriting another family's. This
+// union is retained only for any non-GVR callers/tests that want the aggregate
+// routable set; it is no longer the routing membership test.
 func UnionRouteVerbs() map[Verb]bool {
 	buildDerived()
 	out := make(map[Verb]bool, len(derivedUnionRoute))

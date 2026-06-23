@@ -253,7 +253,7 @@ func sampleVMSpec() models.VMSpec {
 // can assert whether the direct path ran. allow=false models the toggle-off /
 // no-connected-agent case (always Direct).
 func writeRouted(direct clusteraccess.Accessor, agent clusteraccess.Accessor, allow bool) *clusteraccess.Routed {
-	return clusteraccess.NewRouted(direct, func(v clusteraccess.Verb) (clusteraccess.Accessor, bool) {
+	return clusteraccess.NewRouted(direct, func(v clusteraccess.Verb, _ schema.GroupVersionResource) (clusteraccess.Accessor, bool) {
 		if !allow {
 			return nil, false
 		}
