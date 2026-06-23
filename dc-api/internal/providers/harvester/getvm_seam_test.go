@@ -109,7 +109,7 @@ func TestGetVM_DirectAndAgentSeamsAgreeOnStatus(t *testing.T) {
 			agentAccessor := clusteraccess.NewAgentBacked(sess, "lk", "zone-1", "dc-api", clusteraccess.DefaultGVKMapper(), zerolog.Nop())
 			routed := clusteraccess.NewRouted(
 				clusteraccess.NewDirect(dynAgent),
-				func(v clusteraccess.Verb) (clusteraccess.Accessor, bool) {
+				func(v clusteraccess.Verb, _ schema.GroupVersionResource) (clusteraccess.Accessor, bool) {
 					if v == clusteraccess.VerbGet {
 						return agentAccessor, true
 					}

@@ -33,10 +33,15 @@ const (
 // AgentDecision is the live decision function a Routed accessor consults per
 // call. It returns the AgentBacked accessor and true ONLY when the relevant
 // family toggle is on AND a live agent session exists for the zone right now AND
-// the specific verb is in the routed allow-set for the current phase. Otherwise
-// it returns (_, false) and Routed falls through to Direct — so behaviour is
-// never worse than today.
-type AgentDecision func(verb Verb) (Accessor, bool)
+// the specific verb is in the routed allow-set FOR THIS RESOURCE FAMILY (gvr).
+// Otherwise it returns (_, false) and Routed falls through to Direct — so
+// behaviour is never worse than today.
+//
+// The gvr is threaded through so the decision is PER-FAMILY: a verb that routes
+// for one family (e.g. VM Create) does not route for another family that did not
+// declare it. This replaces the earlier verb-only union, which would over-permit
+// once a second family with different RouteVerbs is onboarded.
+type AgentDecision func(verb Verb, gvr schema.GroupVersionResource) (Accessor, bool)
 
 // Routed picks Direct or AgentBacked per call from a live decision function.
 // This is what lets a single cached provider flip between seams without
@@ -52,7 +57,7 @@ type Routed struct {
 // function. If decide is nil the accessor is always Direct (agent path disabled).
 func NewRouted(direct Accessor, decide AgentDecision) *Routed {
 	if decide == nil {
-		decide = func(Verb) (Accessor, bool) { return nil, false }
+		decide = func(Verb, schema.GroupVersionResource) (Accessor, bool) { return nil, false }
 	}
 	return &Routed{direct: direct, agent: decide}
 }
@@ -61,21 +66,21 @@ func NewRouted(direct Accessor, decide AgentDecision) *Routed {
 var _ Accessor = (*Routed)(nil)
 
 func (r *Routed) Get(ctx context.Context, gvr schema.GroupVersionResource, ns, name string, opts metav1.GetOptions) (*unstructured.Unstructured, error) {
-	if a, ok := r.agent(VerbGet); ok {
+	if a, ok := r.agent(VerbGet, gvr); ok {
 		return a.Get(ctx, gvr, ns, name, opts)
 	}
 	return r.direct.Get(ctx, gvr, ns, name, opts)
 }
 
 func (r *Routed) List(ctx context.Context, gvr schema.GroupVersionResource, ns string, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
-	if a, ok := r.agent(VerbList); ok {
+	if a, ok := r.agent(VerbList, gvr); ok {
 		return a.List(ctx, gvr, ns, opts)
 	}
 	return r.direct.List(ctx, gvr, ns, opts)
 }
 
 func (r *Routed) Create(ctx context.Context, gvr schema.GroupVersionResource, ns string, obj *unstructured.Unstructured, opts metav1.CreateOptions) (*unstructured.Unstructured, error) {
-	if a, ok := r.agent(VerbCreate); ok {
+	if a, ok := r.agent(VerbCreate, gvr); ok {
 		// TERMINAL on activation: once the agent is chosen its result — success OR
 		// error — is returned directly; there is NO re-check and NO retry on
 		// r.direct. This is the no-double-execution boundary for the routed VM
@@ -90,7 +95,7 @@ func (r *Routed) Create(ctx context.Context, gvr schema.GroupVersionResource, ns
 }
 
 func (r *Routed) Apply(ctx context.Context, gvr schema.GroupVersionResource, ns string, obj *unstructured.Unstructured, fieldManager string, force bool) (*unstructured.Unstructured, error) {
-	if a, ok := r.agent(VerbApply); ok {
+	if a, ok := r.agent(VerbApply, gvr); ok {
 		// TERMINAL on activation: once the agent is chosen, its result — success OR
 		// error — is returned directly. There is NO errors.Is(err, ErrOpNotRoutable)
 		// re-check and NO retry on r.direct here. This is the no-double-execution
@@ -103,14 +108,14 @@ func (r *Routed) Apply(ctx context.Context, gvr schema.GroupVersionResource, ns 
 }
 
 func (r *Routed) Update(ctx context.Context, gvr schema.GroupVersionResource, ns string, obj *unstructured.Unstructured, opts metav1.UpdateOptions) (*unstructured.Unstructured, error) {
-	if a, ok := r.agent(VerbUpdate); ok {
+	if a, ok := r.agent(VerbUpdate, gvr); ok {
 		return a.Update(ctx, gvr, ns, obj, opts)
 	}
 	return r.direct.Update(ctx, gvr, ns, obj, opts)
 }
 
 func (r *Routed) Delete(ctx context.Context, gvr schema.GroupVersionResource, ns, name string, opts metav1.DeleteOptions) error {
-	if a, ok := r.agent(VerbDelete); ok {
+	if a, ok := r.agent(VerbDelete, gvr); ok {
 		// TERMINAL on activation: the agent's result is returned directly — no
 		// re-check, no retry on r.direct. The no-double-execution boundary: an
 		// activated delete that fails must NOT also run on Direct. Do not add a

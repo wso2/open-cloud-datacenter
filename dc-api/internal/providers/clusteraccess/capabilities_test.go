@@ -29,6 +29,44 @@ func TestUnionRouteVerbs(t *testing.T) {
 	}
 }
 
+// TestRoutableVerbs_VMEqualsUnionToday is the Part A equivalence guard: with the
+// VM family the only onboarded routable family before Part B, the per-GVR
+// RoutableVerbs(virtualmachines) must equal the cross-family UnionRouteVerbs()
+// EXACTLY — proving the GVR-threading change is bit-for-bit identical for VM
+// routing decisions. (After Part B, networks declare the SAME {Get,Create,Delete}
+// so the union is unchanged; this guard still holds for the VM GVR.)
+func TestRoutableVerbs_VMEqualsUnionToday(t *testing.T) {
+	vmGVR := schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachines"}
+	got, ok := RoutableVerbs(vmGVR)
+	if !ok {
+		t.Fatal("virtualmachines must be an onboarded routable family")
+	}
+	want := UnionRouteVerbs()
+	if len(got) != len(want) {
+		t.Fatalf("RoutableVerbs(vm) size = %d, want %d (union)", len(got), len(want))
+	}
+	for v := range want {
+		if !got[v] {
+			t.Errorf("RoutableVerbs(vm) missing %v that the union has", v)
+		}
+	}
+}
+
+// TestRoutableVerbs_UnknownGVRNotRoutable proves a GVR with no RouteVerbs (e.g. a
+// pre-seeded GVK-only capability, or an unknown GVR) is NOT routable — the
+// per-family gate returns ok=false, so the decision closure falls to Direct.
+func TestRoutableVerbs_UnknownGVRNotRoutable(t *testing.T) {
+	// virtualmachineimages is GVK-mapped but has no RouteVerbs (pre-seeded).
+	imgGVR := schema.GroupVersionResource{Group: "harvesterhci.io", Version: "v1beta1", Resource: "virtualmachineimages"}
+	if _, ok := RoutableVerbs(imgGVR); ok {
+		t.Error("virtualmachineimages has no RouteVerbs and must NOT be routable")
+	}
+	// A wholly unknown GVR is never routable.
+	if _, ok := RoutableVerbs(schema.GroupVersionResource{Group: "x", Version: "v1", Resource: "widgets"}); ok {
+		t.Error("unknown GVR must NOT be routable")
+	}
+}
+
 // TestDefaultGVKMapperResolvesKnownGVRs pins the derived GVK table to the same
 // six entries (and same APIVersion/Kind) the pre-refactor literal had.
 func TestDefaultGVKMapperResolvesKnownGVRs(t *testing.T) {

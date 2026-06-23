@@ -7,11 +7,17 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/wso2/dc-api/internal/agentgw"
 	"github.com/wso2/dc-api/internal/config"
 	"github.com/wso2/dc-api/internal/providers/clusteraccess"
 )
+
+// vmGVR is the onboarded VM family GVR — the decision closure is per-family
+// (Part A), so the tests must pass a GVR. All the pre-existing VM-behaviour tests
+// use this so they assert the SAME routing decisions as before Part A.
+var vmGVR = schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachines"}
 
 // fakeResolver is an agentgw.SessionResolver that returns a fixed presence
 // answer. The decision closure only checks the boolean (presence); it never
@@ -84,7 +90,7 @@ func cfgWithToggles(routeReads, routeWrites bool) *config.Config {
 func TestAgentDecision_ToggleOff_AlwaysDirect(t *testing.T) {
 	r := decisionRegistry(false, fakeResolver{connected: true})
 	decide := r.agentDecision(cfgWith(false))
-	if _, ok := decide(clusteraccess.VerbGet); ok {
+	if _, ok := decide(clusteraccess.VerbGet, vmGVR); ok {
 		t.Error("toggle off must NOT route to the agent (Get)")
 	}
 }
@@ -92,7 +98,7 @@ func TestAgentDecision_ToggleOff_AlwaysDirect(t *testing.T) {
 func TestAgentDecision_NoGateway_AlwaysDirect(t *testing.T) {
 	r := decisionRegistry(true, nil)
 	decide := r.agentDecision(cfgWith(true))
-	if _, ok := decide(clusteraccess.VerbGet); ok {
+	if _, ok := decide(clusteraccess.VerbGet, vmGVR); ok {
 		t.Error("nil gateway must NOT route to the agent")
 	}
 }
@@ -100,7 +106,7 @@ func TestAgentDecision_NoGateway_AlwaysDirect(t *testing.T) {
 func TestAgentDecision_ToggleOn_NoLiveAgent_Direct(t *testing.T) {
 	r := decisionRegistry(true, fakeResolver{connected: false})
 	decide := r.agentDecision(cfgWith(true))
-	if _, ok := decide(clusteraccess.VerbGet); ok {
+	if _, ok := decide(clusteraccess.VerbGet, vmGVR); ok {
 		t.Error("toggle on but no connected agent must fall back to Direct")
 	}
 }
@@ -110,13 +116,13 @@ func TestAgentDecision_ToggleOn_LiveAgent_RoutesGetOnly(t *testing.T) {
 	r := decisionRegistryToggles(true, false, fakeResolver{connected: true})
 	decide := r.agentDecision(cfgWithToggles(true, false))
 
-	if _, ok := decide(clusteraccess.VerbGet); !ok {
+	if _, ok := decide(clusteraccess.VerbGet, vmGVR); !ok {
 		t.Error("toggle on + live agent must route Get through the agent")
 	}
 	// With ONLY the read toggle on, no write verb may route — Create/Delete are
 	// gated by the (off) write toggle; List/Apply/Update are not in any allow-set.
 	for _, v := range []clusteraccess.Verb{clusteraccess.VerbList, clusteraccess.VerbCreate, clusteraccess.VerbApply, clusteraccess.VerbUpdate, clusteraccess.VerbDelete} {
-		if _, ok := decide(v); ok {
+		if _, ok := decide(v, vmGVR); ok {
 			t.Errorf("verb %v must NOT route with only the read toggle on", v)
 		}
 	}
@@ -132,18 +138,18 @@ func TestAgentDecision_WritesOn_LiveAgent_RoutesCreateAndDelete(t *testing.T) {
 	decide := r.agentDecision(cfgWithToggles(false, true))
 
 	for _, v := range []clusteraccess.Verb{clusteraccess.VerbCreate, clusteraccess.VerbDelete} {
-		if _, ok := decide(v); !ok {
+		if _, ok := decide(v, vmGVR); !ok {
 			t.Errorf("write toggle on + live agent must route verb %v through the agent", v)
 		}
 	}
 	// Read toggle is OFF here → Get must stay Direct.
-	if _, ok := decide(clusteraccess.VerbGet); ok {
+	if _, ok := decide(clusteraccess.VerbGet, vmGVR); ok {
 		t.Error("read toggle off must keep Get on Direct even when writes route")
 	}
 	// VerbApply/VerbUpdate are NOT in the write allow-set (create is VerbCreate, a
 	// POST on Direct); they must never route. VerbList has no agent op.
 	for _, v := range []clusteraccess.Verb{clusteraccess.VerbList, clusteraccess.VerbApply, clusteraccess.VerbUpdate} {
-		if _, ok := decide(v); ok {
+		if _, ok := decide(v, vmGVR); ok {
 			t.Errorf("verb %v is not in the write allow-set and must NOT route", v)
 		}
 	}
@@ -159,7 +165,7 @@ func TestAgentDecision_WritesOff_CreateDeleteStayDirect(t *testing.T) {
 	decide := r.agentDecision(cfgWithToggles(true, false))
 
 	for _, v := range []clusteraccess.Verb{clusteraccess.VerbCreate, clusteraccess.VerbDelete} {
-		if _, ok := decide(v); ok {
+		if _, ok := decide(v, vmGVR); ok {
 			t.Errorf("write toggle off must keep verb %v on Direct", v)
 		}
 	}
@@ -174,8 +180,34 @@ func TestAgentDecision_WritesOn_NoLiveAgent_StayDirect(t *testing.T) {
 	decide := r.agentDecision(cfgWithToggles(true, true))
 
 	for _, v := range []clusteraccess.Verb{clusteraccess.VerbGet, clusteraccess.VerbCreate, clusteraccess.VerbDelete} {
-		if _, ok := decide(v); ok {
+		if _, ok := decide(v, vmGVR); ok {
 			t.Errorf("no connected agent must keep verb %v on Direct even with the toggle on", v)
+		}
+	}
+}
+
+// TestAgentDecision_PerFamily_UnonboardedGVRStaysDirect is the Part A
+// no-over-permit guard. With BOTH toggles on AND a live agent, a GVR that is NOT
+// an onboarded routable family (here virtualmachineimages — GVK-mapped but with
+// no RouteVerbs) must NEVER route, for ANY verb. This proves the decision is
+// per-family: a verb that routes for VMs (Get/Create/Delete) does not leak to a
+// family that didn't declare it. Before Part A the verb-only union would have
+// matched, so this is exactly the over-permit Part A closes.
+func TestAgentDecision_PerFamily_UnonboardedGVRStaysDirect(t *testing.T) {
+	r := decisionRegistryToggles(true, true, fakeResolver{connected: true})
+	decide := r.agentDecision(cfgWithToggles(true, true))
+
+	imgGVR := schema.GroupVersionResource{Group: "harvesterhci.io", Version: "v1beta1", Resource: "virtualmachineimages"}
+	for _, v := range []clusteraccess.Verb{clusteraccess.VerbGet, clusteraccess.VerbCreate, clusteraccess.VerbDelete} {
+		if _, ok := decide(v, imgGVR); ok {
+			t.Errorf("verb %v on an unonboarded family (virtualmachineimages) must NOT route, even with toggles+agent on", v)
+		}
+	}
+	// Sanity: the SAME verbs DO route for the onboarded VM family under identical
+	// toggles+agent — proving the gate is per-GVR, not a blanket on/off.
+	for _, v := range []clusteraccess.Verb{clusteraccess.VerbGet, clusteraccess.VerbCreate, clusteraccess.VerbDelete} {
+		if _, ok := decide(v, vmGVR); !ok {
+			t.Errorf("verb %v on the onboarded VM family must route under toggles+agent on", v)
 		}
 	}
 }

@@ -233,7 +233,7 @@ func TestRouted_FallsBackToDirectWhenAgentDeclines(t *testing.T) {
 	agent := recordingAccessor{name: "agent", getHits: &agentGets}
 
 	// agent() always declines → must use Direct.
-	r := NewRouted(direct, func(Verb) (Accessor, bool) { return agent, false })
+	r := NewRouted(direct, func(Verb, schema.GroupVersionResource) (Accessor, bool) { return agent, false })
 
 	obj, err := r.Get(context.Background(), vmGVR, "ns", "n", metav1.GetOptions{})
 	if err != nil {
@@ -253,7 +253,7 @@ func TestRouted_UsesAgentWhenDecisionAllows(t *testing.T) {
 	agent := recordingAccessor{name: "agent", getHits: &agentGets}
 
 	// agent() allows ONLY VerbGet — mirrors the M-C read allow-set.
-	r := NewRouted(direct, func(v Verb) (Accessor, bool) {
+	r := NewRouted(direct, func(v Verb, _ schema.GroupVersionResource) (Accessor, bool) {
 		if v == VerbGet {
 			return agent, true
 		}
