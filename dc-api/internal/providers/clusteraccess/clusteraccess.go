@@ -68,23 +68,20 @@ func (m staticGVKMapper) GVK(gvr schema.GroupVersionResource) (string, string, b
 	return v.APIVersion, v.Kind, ok
 }
 
-// DefaultGVKMapper returns the GVR→GVK table seeded from the drivers' own GVR
-// vars and their kinds. It is extended (here, in one place) as each write phase
-// routes a new resource family — never widened ahead of the routed verb.
+// DefaultGVKMapper returns the GVR→GVK table DERIVED from the capability
+// registry (AgentCapabilities). Every capability — onboarded or pre-seeded
+// GVK-only — contributes one table entry, so the table is the same 6-entry
+// superset it has always been, now built from the single source of truth
+// instead of a hand-written literal. An unmapped GVR is a programming error,
+// surfaced as ErrOpNotRoutable by the AgentBacked accessor.
 //
-// For M-C only the KubeVirt VirtualMachine entry is exercised (the read slice);
-// the rest are pre-seeded because they are the GVRs the existing drivers use and
-// having them present makes the eventual write phases a no-op here. apiVersion is
-// "group/version" (or bare "version" for the core group, which is empty).
+// A new resource family is GVK-mapped by adding it to AgentCapabilities — never
+// by editing this function.
 func DefaultGVKMapper() GVRToGVK {
-	return staticGVKMapper{table: map[schema.GroupVersionResource]gvk{
-		// ── harvester driver ───────────────────────────────────────────────────
-		{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachines"}:                    {APIVersion: "kubevirt.io/v1", Kind: "VirtualMachine"},
-		{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachineinstances"}:            {APIVersion: "kubevirt.io/v1", Kind: "VirtualMachineInstance"},
-		{Group: "harvesterhci.io", Version: "v1beta1", Resource: "virtualmachineimages"}:      {APIVersion: "harvesterhci.io/v1beta1", Kind: "VirtualMachineImage"},
-		{Group: "k8s.cni.cncf.io", Version: "v1", Resource: "network-attachment-definitions"}: {APIVersion: "k8s.cni.cncf.io/v1", Kind: "NetworkAttachmentDefinition"},
-		// ── kubeovn driver (reads first in M-E, then writes) ─────────────────────
-		{Group: "kubeovn.io", Version: "v1", Resource: "vpcs"}:    {APIVersion: "kubeovn.io/v1", Kind: "Vpc"},
-		{Group: "kubeovn.io", Version: "v1", Resource: "subnets"}: {APIVersion: "kubeovn.io/v1", Kind: "Subnet"},
-	}}
+	buildDerived()
+	table := make(map[schema.GroupVersionResource]gvk, len(derivedGVKTable))
+	for k, v := range derivedGVKTable {
+		table[k] = v
+	}
+	return staticGVKMapper{table: table}
 }

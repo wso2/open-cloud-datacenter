@@ -1,11 +1,17 @@
+# GENERATED FILE — DO NOT EDIT.
+#
+# Produced by dc-api/cmd/gen-agent-rbac from the capability registry
+# (dc-api/internal/providers/clusteraccess/capabilities.go). To change the
+# agent's permissions, edit the relevant AgentCapability.AgentVerbs and run
+# 'make gen-agent-rbac', then commit the regenerated file. A drift-check unit
+# test fails CI if this file is out of sync with the registry.
+#
 # The agent runs in-cluster and reads THIS datacenter's inventory (at the
 # control plane's request) via this ServiceAccount — no kubeconfig travels
-# (DCAGENT_KUBECONFIG is empty, so the executor uses in-cluster config). The
-# executor (dc-agent/internal/executor/kube.go GetInventory) reads exactly three
-# things, all read-only and cluster-wide: Nodes, Pods (all namespaces, to sum
-# allocated CPU/memory), and KubeVirt VirtualMachines (all namespaces, counted).
-# Tenant VMs live in dc-<id> namespaces not predictable at deploy time, so the
-# grant is cluster-scoped (ClusterRole), exactly as dc-webhook does for NADs.
+# (DCAGENT_KUBECONFIG is empty, so the executor uses in-cluster config). Tenant
+# VMs live in dc-<id> namespaces not predictable at deploy time, so the grant is
+# cluster-scoped (ClusterRole), exactly as dc-webhook does for NADs.
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -22,9 +28,6 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachines"]
-    # create+patch = server-side apply (VM create); delete = VM delete.
-    # Widened for the agent VM write slice (DCAPI_AGENT_ROUTE_WRITES). Nothing
-    # broader: still scoped to virtualmachines only.
     verbs: ["get", "list", "watch", "create", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
