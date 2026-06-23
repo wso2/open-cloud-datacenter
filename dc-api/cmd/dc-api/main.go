@@ -408,7 +408,13 @@ func main() {
 		// agent's Session is visible to both the WS/inventory handlers and the
 		// routed compute provider.
 		AgentRegistry: agentRegistry,
-		Log:           log.Logger,
+		// Routing context for the agent WS handler's connect-time zone-vs-route
+		// validation warning (the colombo-vs-zone-1 loud check).
+		LocalRegion:      cfg.LocalRegion,
+		LocalZone:        cfg.LocalZone,
+		AgentRouteReads:  cfg.AgentRouteReads,
+		AgentRouteWrites: cfg.AgentRouteWrites,
+		Log:              log.Logger,
 	})
 
 	// ── HTTP Server ───────────────────────────────────────────────────────────

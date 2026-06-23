@@ -33,6 +33,7 @@ package providers
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -68,7 +69,18 @@ type Registry struct {
 
 	localRegion, localZone string
 	log                    zerolog.Logger
+
+	// noAgentWarn rate-limits the routing-time "toggle on but no agent connected"
+	// warning to at most once per zone per noAgentWarnEvery, so a routed verb
+	// hammered at request rate doesn't flood the log. Keyed by registryKey.
+	noAgentMu   sync.Mutex
+	noAgentWarn map[string]time.Time
 }
+
+// noAgentWarnEvery bounds how often the routing-time no-agent warning fires per
+// zone. Long enough to avoid per-request floods, short enough that an operator
+// watching logs sees it promptly after flipping a toggle on with no agent up.
+const noAgentWarnEvery = 30 * time.Second
 
 func registryKey(region, zone string) string { return region + "/" + zone }
 
@@ -88,6 +100,7 @@ func NewRegistry(cfg *config.Config, agentGateway agentgw.SessionResolver, log z
 		localRegion:  cfg.LocalRegion,
 		localZone:    cfg.LocalZone,
 		log:          log,
+		noAgentWarn:  make(map[string]time.Time),
 	}
 
 	// ── Compute provider (harvester) with the routed cluster-access seam ───────
@@ -131,6 +144,17 @@ func NewRegistry(cfg *config.Config, agentGateway agentgw.SessionResolver, log z
 		Cluster: cluster,
 		Network: network,
 	}
+
+	// One explicit "which zone do I route to" line at boot. This is the routing
+	// TARGET (cfg.LocalRegion/LocalZone) — the zone whose token an agent must be
+	// minted for to receive routed traffic. Surfacing it here makes the
+	// colombo-vs-zone-1 class of misconfig visible at startup rather than as a
+	// silent no-route at request time.
+	log.Info().
+		Str("route_region", cfg.LocalRegion).Str("route_zone", cfg.LocalZone).
+		Bool("reads", cfg.AgentRouteReads).Bool("writes", cfg.AgentRouteWrites).
+		Bool("gateway", agentGateway != nil).
+		Msg("agent routing config: routed traffic targets this region/zone; an agent must present a token minted for it (else routing warns and uses the direct path)")
 
 	// One log line covering BOTH toggles so an operator can tell from the logs
 	// whether reads and/or writes route. Each only ever engages when a live agent
@@ -226,8 +250,36 @@ func (r *Registry) agentDecision(cfg *config.Config) clusteraccess.AgentDecision
 		// (3) a live agent session must exist for the zone RIGHT NOW.
 		sess, ok := r.agentGateway.Session(region, zone)
 		if !ok {
+			// The toggle for this verb is ON (we passed the checks above) but no
+			// agent is connected for the routing zone. Direct is still the correct,
+			// byte-identical safety belt — but this used to be SILENT, which is
+			// exactly how the colombo-vs-zone-1 misconfig hid. Make it observable
+			// without flooding: warn at most once per zone per noAgentWarnEvery.
+			r.warnNoAgent(region, zone)
 			return nil, false
 		}
 		return clusteraccess.NewAgentBacked(sess, region, zone, fieldManager, mapper, r.log), true
 	}
+}
+
+// warnNoAgent emits a rate-limited WARNING when a routed verb's toggle is on but
+// no agent is connected for the zone dc-api routes to. It fires at most once per
+// zone per noAgentWarnEvery so a routed call hammered at request rate cannot
+// flood the log. The caller still returns Direct — this is observability only,
+// the byte-identical fallthrough behaviour is unchanged.
+func (r *Registry) warnNoAgent(region, zone string) {
+	key := registryKey(region, zone)
+	now := time.Now()
+	r.noAgentMu.Lock()
+	last, seen := r.noAgentWarn[key]
+	if seen && now.Sub(last) < noAgentWarnEvery {
+		r.noAgentMu.Unlock()
+		return
+	}
+	r.noAgentWarn[key] = now
+	r.noAgentMu.Unlock()
+
+	r.log.Warn().
+		Str("region", region).Str("zone", zone).
+		Msg("agent routing enabled for this region/zone but no agent is connected; using the direct cluster path — mint and connect an agent for this zone, or the routed traffic stays direct")
 }

@@ -341,6 +341,70 @@ func TestBuildDispatchers_BadParams(t *testing.T) {
 	})
 }
 
+// TestLoadConfig_ZoneRegionOptional asserts the phase-2 single-source change:
+// with a valid endpoint + token, the agent loads its config even when
+// DCAGENT_REGION and DCAGENT_ZONE are UNSET. Identity now comes from the token
+// (the control plane derives the zone from agent_tokens), so a missing zone env
+// is no longer fatal — it used to be.
+func TestLoadConfig_ZoneRegionOptional(t *testing.T) {
+	t.Setenv("DCAGENT_ENDPOINT", "wss://cp.example.com/v1/agent/ws")
+	t.Setenv("DCAGENT_TOKEN", "dcagent_abc")
+	t.Setenv("DCAGENT_REGION", "")
+	t.Setenv("DCAGENT_ZONE", "")
+	t.Setenv("DCAGENT_LOG_LEVEL", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig must succeed with token set and zone/region unset, got: %v", err)
+	}
+	if cfg.region != "" || cfg.zone != "" {
+		t.Errorf("unset zone/region must stay empty (advisory on hello), got region=%q zone=%q", cfg.region, cfg.zone)
+	}
+}
+
+// TestLoadConfig_ZoneRegionFlowThroughWhenSet asserts back-compat: a deployment
+// that still sets DCAGENT_REGION/DCAGENT_ZONE keeps reading them into cfg (so
+// they still flow onto the hello frame, byte-identical wire), even though they
+// are now ignored for identity server-side.
+func TestLoadConfig_ZoneRegionFlowThroughWhenSet(t *testing.T) {
+	t.Setenv("DCAGENT_ENDPOINT", "wss://cp.example.com/v1/agent/ws")
+	t.Setenv("DCAGENT_TOKEN", "dcagent_abc")
+	t.Setenv("DCAGENT_REGION", "lk")
+	t.Setenv("DCAGENT_ZONE", "zone-1")
+	t.Setenv("DCAGENT_LOG_LEVEL", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.region != "lk" || cfg.zone != "zone-1" {
+		t.Errorf("set zone/region must flow into cfg, got region=%q zone=%q", cfg.region, cfg.zone)
+	}
+}
+
+// TestLoadConfig_TokenStillRequired asserts the identity fail-fast is preserved:
+// a missing or wrong-prefix DCAGENT_TOKEN is still a config error (the agent
+// would Fatal in main). Dropping the zone requirement must not weaken this.
+func TestLoadConfig_TokenStillRequired(t *testing.T) {
+	t.Setenv("DCAGENT_ENDPOINT", "wss://cp.example.com/v1/agent/ws")
+	t.Setenv("DCAGENT_REGION", "")
+	t.Setenv("DCAGENT_ZONE", "")
+	t.Setenv("DCAGENT_LOG_LEVEL", "")
+
+	t.Run("missing token", func(t *testing.T) {
+		t.Setenv("DCAGENT_TOKEN", "")
+		if _, err := loadConfig(); err == nil {
+			t.Error("missing DCAGENT_TOKEN must be a config error")
+		}
+	})
+	t.Run("wrong prefix", func(t *testing.T) {
+		t.Setenv("DCAGENT_TOKEN", "notanagenttoken")
+		if _, err := loadConfig(); err == nil {
+			t.Error("wrong-prefix DCAGENT_TOKEN must be a config error")
+		}
+	})
+}
+
 // TestBuildDispatchers_RegistersAllOps asserts buildDispatchers wires exactly the
 // five M-B ops: the four request/response verbs in Dispatcher and watch_status in
 // StreamDispatcher. The hello advertisement (the merge of these two maps, sorted)

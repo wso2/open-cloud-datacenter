@@ -96,14 +96,16 @@ func loadConfig() (config, error) {
 		problems = append(problems, fmt.Sprintf("DCAGENT_TOKEN must start with %q (control-plane-minted agent token)", tokenPrefix))
 	}
 
-	if cfg.region == "" {
-		problems = append(problems, "DCAGENT_REGION is required (e.g. lk)")
-	}
-	if cfg.zone == "" {
-		// Zones are first-class from day one (region → zone model); an
-		// implicit default would bake single-zone assumptions into deployments.
-		problems = append(problems, "DCAGENT_ZONE is required (e.g. zone-1)")
-	}
+	// DCAGENT_REGION / DCAGENT_ZONE are NO LONGER required for identity.
+	// The agent's (region, zone) is established once at token mint and recorded
+	// in the control plane's agent_tokens row; on connect dc-api looks the token
+	// up and that (region, zone) is authoritative — it OVERRIDES anything the
+	// agent claims in its hello frame. Requiring the env here only created a
+	// drift surface (the colombo-vs-zone-1 incident: a token minted for one zone
+	// while DCAGENT_ZONE named another). We still read the env into cfg so it
+	// continues to flow onto the hello frame (byte-identical wire for existing
+	// overlays), but a missing value is no longer fatal and a present value is
+	// advisory only. See loud deprecation warn in main().
 
 	if _, err := zerolog.ParseLevel(cfg.logLevel); err != nil {
 		problems = append(problems, fmt.Sprintf("DCAGENT_LOG_LEVEL %q is invalid: %v", cfg.logLevel, err))
@@ -134,6 +136,17 @@ func main() {
 		Str("endpoint", cfg.endpoint).
 		Str("log_level", level.String()).
 		Msg("dc-agent starting")
+
+	// DCAGENT_ZONE / DCAGENT_REGION are deprecated: the agent's identity is the
+	// (region, zone) bound to its token at mint time, which the control plane
+	// derives from the token on connect. If a deployment still sets these, nudge
+	// it — but keep working: the values still flow onto the hello frame for
+	// observability/back-compat and are ignored for binding server-side.
+	if os.Getenv("DCAGENT_ZONE") != "" || os.Getenv("DCAGENT_REGION") != "" {
+		logger.Warn().
+			Str("region", cfg.region).Str("zone", cfg.zone).
+			Msg("DCAGENT_ZONE/DCAGENT_REGION are deprecated and ignored for agent identity; the control plane derives the agent zone from its token — you can remove them from the deployment")
+	}
 
 	// ── Signal-driven shutdown ────────────────────────────────────────────────
 	// SIGTERM is how Kubernetes asks a pod to stop; SIGINT covers Ctrl-C in

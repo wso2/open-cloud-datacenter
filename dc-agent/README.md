@@ -46,9 +46,11 @@ reporting every problem at once.
 |---|---|---|---|
 | `DCAGENT_ENDPOINT` | yes | — | Control-plane agent-channel URL, e.g. `wss://connect.<domain>/v1/agent/ws`. This is the dedicated **connect** host (not the human/API host), which must not sit behind a bot/JS challenge. Scheme must be `wss` (`ws` allowed for local dev). |
 | `DCAGENT_TOKEN` | yes | — | Agent bearer token minted by the control plane — `dcctl admin agent-token create --region <r> --zone <z>` (or the cloud-ui admin page). Must start with `dcagent_`. |
-| `DCAGENT_REGION` | yes | — | Region this agent serves, e.g. `lk`. Sent in the `hello` frame. |
-| `DCAGENT_ZONE` | yes | — | Zone within the region, e.g. `zone-1`. Required even while regions have one zone — the region → zone model is first-class from day one. |
+| `DCAGENT_REGION` | **deprecated / ignored** | — | The agent's region is derived from its token (the control plane's `agent_tokens` row), not from this env. Still read and sent in the `hello` frame for back-compat, but ignored for identity; a one-time deprecation warning logs if set. Safe to remove. |
+| `DCAGENT_ZONE` | **deprecated / ignored** | — | The agent's zone is derived from its token, not from this env. Still read and sent in `hello` for back-compat, ignored for identity; logs a deprecation warning if set. Safe to remove. |
 | `DCAGENT_LOG_LEVEL` | no | `info` | `trace`, `debug`, `info`, `warn`, or `error`. |
+
+> **Single source of truth for zone.** An agent's `(region, zone)` is fixed when its token is minted (`dcctl admin agent-token create --region <r> --zone <z>`) and recorded in the control plane's `agent_tokens` row. dc-api looks that up on connect and it overrides anything the agent claims, so `DCAGENT_REGION`/`DCAGENT_ZONE` are redundant. If you still set them, the agent works unchanged but logs a deprecation warning. On the dc-api side, `DCAPI_LOCAL_ZONE` must match the minted token zone, or routing logs a warning and falls back to the direct path (it never routes to a zone with no matching agent).
 
 ## Running locally against a dev control plane
 
@@ -59,10 +61,9 @@ With a dc-api dev instance listening on `localhost:8080` (see
 cd dc-agent
 go build -o dc-agent .
 
+# Zone/region come from the token — no DCAGENT_ZONE/DCAGENT_REGION needed.
 DCAGENT_ENDPOINT=ws://localhost:8080/v1/agent/ws \
 DCAGENT_TOKEN=dcagent_<your-dev-token> \
-DCAGENT_REGION=lk \
-DCAGENT_ZONE=zone-1 \
 DCAGENT_LOG_LEVEL=debug \
 ./dc-agent
 ```
