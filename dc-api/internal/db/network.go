@@ -39,11 +39,16 @@ import (
 func (r *Repository) CreateVNet(ctx context.Context, v *models.VNet) (*models.VNet, error) {
 	const q = `
 		INSERT INTO vnets
-			(tenant_id, tenant_uuid, project_id, project_uuid, name, region, address_space, description, status, backend_uid, provider_type, message)
+			(tenant_id, tenant_uuid, project_id, project_uuid, name, region, address_space, description, status, backend_uid, provider_type, message, zone)
 		VALUES
-			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, created_at, updated_at`
 
+	// Zone (phase 0): the VNet is a root resource, so its zone is stamped from
+	// DCAPI_LOCAL_ZONE when the handler leaves it empty. Children inherit this.
+	if v.Zone == "" {
+		v.Zone = r.zoneStamp()
+	}
 	row := r.pool.QueryRow(ctx, q,
 		v.TenantID,
 		v.TenantUUID,
@@ -57,6 +62,7 @@ func (r *Repository) CreateVNet(ctx context.Context, v *models.VNet) (*models.VN
 		nilIfEmpty(v.BackendUID),
 		v.ProviderType,
 		nilIfEmpty(v.Message),
+		v.Zone,
 	)
 	if err := row.Scan(&v.ID, &v.CreatedAt, &v.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create vnet: %w", err)
@@ -75,7 +81,7 @@ func (r *Repository) CreateVNet(ctx context.Context, v *models.VNet) (*models.VN
 func (r *Repository) GetVNet(ctx context.Context, id uuid.UUID, tenantUUID uuid.UUID, projectUUID uuid.UUID) (*models.VNet, error) {
 	const q = `
 		SELECT id, tenant_id, tenant_uuid, COALESCE(project_id,''), project_uuid,
-		       name, region, address_space, description,
+		       name, region, COALESCE(zone,''), address_space, description,
 		       status, backend_uid, provider_type, message,
 		       COALESCE(dns_server_ip::TEXT, ''),
 		       created_at, updated_at
@@ -85,7 +91,7 @@ func (r *Repository) GetVNet(ctx context.Context, id uuid.UUID, tenantUUID uuid.
 	var desc, backendUID, msg *string
 	err := r.pool.QueryRow(ctx, q, id, tenantUUID, projectUUID).Scan(
 		&v.ID, &v.TenantID, &v.TenantUUID, &v.ProjectID, &v.ProjectUUID,
-		&v.Name, &v.Region, &v.AddressSpace, &desc,
+		&v.Name, &v.Region, &v.Zone, &v.AddressSpace, &desc,
 		&v.Status, &backendUID, &v.ProviderType, &msg,
 		&v.DNSServerIP,
 		&v.CreatedAt, &v.UpdatedAt,
@@ -115,7 +121,7 @@ func (r *Repository) GetVNet(ctx context.Context, id uuid.UUID, tenantUUID uuid.
 func (r *Repository) GetVNetByTenant(ctx context.Context, id uuid.UUID, tenantUUID uuid.UUID) (*models.VNet, error) {
 	const q = `
 		SELECT id, tenant_id, tenant_uuid, COALESCE(project_id,''), project_uuid,
-		       name, region, address_space, description,
+		       name, region, COALESCE(zone,''), address_space, description,
 		       status, backend_uid, provider_type, message,
 		       COALESCE(dns_server_ip::TEXT, ''),
 		       created_at, updated_at
@@ -125,7 +131,7 @@ func (r *Repository) GetVNetByTenant(ctx context.Context, id uuid.UUID, tenantUU
 	var desc, backendUID, msg *string
 	err := r.pool.QueryRow(ctx, q, id, tenantUUID).Scan(
 		&v.ID, &v.TenantID, &v.TenantUUID, &v.ProjectID, &v.ProjectUUID,
-		&v.Name, &v.Region, &v.AddressSpace, &desc,
+		&v.Name, &v.Region, &v.Zone, &v.AddressSpace, &desc,
 		&v.Status, &backendUID, &v.ProviderType, &msg,
 		&v.DNSServerIP,
 		&v.CreatedAt, &v.UpdatedAt,
@@ -154,7 +160,7 @@ func (r *Repository) GetVNetByTenant(ctx context.Context, id uuid.UUID, tenantUU
 func (r *Repository) GetVNetInternal(ctx context.Context, id uuid.UUID) (*models.VNet, error) {
 	const q = `
 		SELECT id, tenant_id, tenant_uuid, COALESCE(project_id,''), project_uuid,
-		       name, region, address_space, description,
+		       name, region, COALESCE(zone,''), address_space, description,
 		       status, backend_uid, provider_type, message,
 		       COALESCE(dns_server_ip::TEXT, ''),
 		       created_at, updated_at
@@ -164,7 +170,7 @@ func (r *Repository) GetVNetInternal(ctx context.Context, id uuid.UUID) (*models
 	var desc, backendUID, msg *string
 	err := r.pool.QueryRow(ctx, q, id).Scan(
 		&v.ID, &v.TenantID, &v.TenantUUID, &v.ProjectID, &v.ProjectUUID,
-		&v.Name, &v.Region, &v.AddressSpace, &desc,
+		&v.Name, &v.Region, &v.Zone, &v.AddressSpace, &desc,
 		&v.Status, &backendUID, &v.ProviderType, &msg,
 		&v.DNSServerIP,
 		&v.CreatedAt, &v.UpdatedAt,
@@ -192,7 +198,7 @@ func (r *Repository) GetVNetInternal(ctx context.Context, id uuid.UUID) (*models
 func (r *Repository) ListVNetsByProject(ctx context.Context, tenantUUID uuid.UUID, projectUUID uuid.UUID) ([]*models.VNet, error) {
 	const q = `
 		SELECT id, tenant_id, tenant_uuid, COALESCE(project_id,''), project_uuid,
-		       name, region, address_space, description,
+		       name, region, COALESCE(zone,''), address_space, description,
 		       status, backend_uid, provider_type, message,
 		       COALESCE(dns_server_ip::TEXT, ''),
 		       created_at, updated_at
@@ -212,7 +218,7 @@ func (r *Repository) ListVNetsByProject(ctx context.Context, tenantUUID uuid.UUI
 		var desc, backendUID, msg *string
 		if err := rows.Scan(
 			&v.ID, &v.TenantID, &v.TenantUUID, &v.ProjectID, &v.ProjectUUID,
-			&v.Name, &v.Region, &v.AddressSpace, &desc,
+			&v.Name, &v.Region, &v.Zone, &v.AddressSpace, &desc,
 			&v.Status, &backendUID, &v.ProviderType, &msg,
 			&v.DNSServerIP,
 			&v.CreatedAt, &v.UpdatedAt,
@@ -239,7 +245,7 @@ func (r *Repository) ListVNetsByProject(ctx context.Context, tenantUUID uuid.UUI
 func (r *Repository) ListVNetsByTenant(ctx context.Context, tenantUUID uuid.UUID) ([]*models.VNet, error) {
 	const q = `
 		SELECT id, tenant_id, tenant_uuid, COALESCE(project_id,''), project_uuid,
-		       name, region, address_space, description,
+		       name, region, COALESCE(zone,''), address_space, description,
 		       status, backend_uid, provider_type, message,
 		       COALESCE(dns_server_ip::TEXT, ''),
 		       created_at, updated_at
@@ -259,7 +265,7 @@ func (r *Repository) ListVNetsByTenant(ctx context.Context, tenantUUID uuid.UUID
 		var desc, backendUID, msg *string
 		if err := rows.Scan(
 			&v.ID, &v.TenantID, &v.TenantUUID, &v.ProjectID, &v.ProjectUUID,
-			&v.Name, &v.Region, &v.AddressSpace, &desc,
+			&v.Name, &v.Region, &v.Zone, &v.AddressSpace, &desc,
 			&v.Status, &backendUID, &v.ProviderType, &msg,
 			&v.DNSServerIP,
 			&v.CreatedAt, &v.UpdatedAt,
@@ -296,7 +302,7 @@ func (r *Repository) UpdateVNetStatus(ctx context.Context, id uuid.UUID, status 
 // use its native TEXT[] decoder. No json.Unmarshal needed.
 func (r *Repository) ListAllActiveVNets(ctx context.Context) ([]*models.VNet, error) {
 	const q = `
-		SELECT id, tenant_id, name, address_space, region, status, message, backend_uid, created_at, updated_at
+		SELECT id, tenant_id, name, address_space, region, COALESCE(zone,''), status, message, backend_uid, created_at, updated_at
 		FROM   vnets
 		WHERE  status = 'ACTIVE'
 		ORDER  BY created_at`
@@ -311,7 +317,7 @@ func (r *Repository) ListAllActiveVNets(ctx context.Context) ([]*models.VNet, er
 		var msg, backendUID *string
 		// address_space is TEXT[] — pgx decodes it natively into []string.
 		// Do NOT scan into []byte + json.Unmarshal (F19 bug).
-		if err := rows.Scan(&v.ID, &v.TenantID, &v.Name, &v.AddressSpace, &v.Region,
+		if err := rows.Scan(&v.ID, &v.TenantID, &v.Name, &v.AddressSpace, &v.Region, &v.Zone,
 			&v.Status, &msg, &backendUID, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("db scan vnet: %w", err)
 		}

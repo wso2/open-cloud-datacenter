@@ -98,6 +98,13 @@ type Resource struct {
 	// 'lk' by schema.sql). Full multi-region semantics are tracked in the
 	// multi-region design.
 	Region    string    `json:"region,omitempty"`
+	// Zone is the phase-0 multi-region stamp companion to Region: the
+	// availability zone within Region whose control plane (or parent) placed
+	// this resource. Stamped from DCAPI_LOCAL_ZONE at create time for root
+	// resources, inherited from the parent VNet for child resources; nullable
+	// in the DB for pre-stamp rows (backfilled to 'zone-1' by schema.sql).
+	// INTERNAL — not yet used for routing, and never read back into responses.
+	Zone      string    `json:"zone,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

@@ -46,6 +46,12 @@ type VNet struct {
 	ProjectUUID uuid.UUID `json:"project_uuid"`
 	Name         string         `json:"name"`
 	Region       string         `json:"region"`
+	// Zone is the phase-0 availability-zone stamp companion to Region (the VNet
+	// is a root resource, so its zone is stamped from DCAPI_LOCAL_ZONE at create
+	// time, defaulted in CreateVNet). Children (subnet/peering/VM/cluster/etc.)
+	// inherit this zone. INTERNAL — not surfaced in vnetResponse, never used for
+	// routing in this slice. omitempty keeps it absent from any incidental JSON.
+	Zone         string         `json:"zone,omitempty"`
 	AddressSpace []string       `json:"address_space"`
 	Description  string         `json:"description,omitempty"`
 	Status       ResourceStatus `json:"status"`

@@ -87,6 +87,10 @@ func main() {
 	// its local region (default "lk"). GET /v1/regions and the dc-agent channel
 	// build on the same regions/zones catalog.
 	repo.SetLocalRegion(cfg.LocalRegion)
+	// Zone slice (phase 0): stamp the local availability zone (default "zone-1")
+	// on root resources; VPC children inherit their parent VNet's zone. Recorded
+	// + validated only — routing still keys off DCAPI_LOCAL_ZONE (unchanged).
+	repo.SetLocalZone(cfg.LocalZone)
 
 	// ── Agent registry (must exist BEFORE providers) ──────────────────────────
 	// The Registry holds the live per-zone dc-agent Sessions. M-C gives it a

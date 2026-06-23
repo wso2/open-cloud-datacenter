@@ -250,6 +250,7 @@ func (h *BastionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ProviderType: h.provider.Name(),
 		VNetID:       &vnet.ID,
 		SubnetID:     &subnet.ID,
+		Zone:         vnet.Zone, // phase-0 zone inheritance: bastion is always a VPC child
 	})
 	if err != nil {
 		h.log.Error().Err(err).Str("tenant", tenantID).Msg("create bastion resource in DB")

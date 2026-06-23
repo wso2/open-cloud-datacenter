@@ -31,17 +31,22 @@ var ErrDatabaseNotFound = errors.New("database not found")
 // violations (same name within a project) surface as Postgres SQLSTATE
 // 23505; handlers map that to 409 Conflict.
 func (r *Repository) CreateDatabase(ctx context.Context, d *models.Database) (*models.Database, error) {
+	// Zone (phase 0): write-only DB column with no Database.Zone model field,
+	// mirroring region (Database has no Region field either). Bound to the local
+	// zone here; under the single seeded zone this equals what a VPC-attached
+	// database would inherit from its parent VNet, so 3a is value-identical.
+	// True parent-zone inheritance for the VPC path is wired when 3b consumes it.
 	const q = `
 		INSERT INTO databases (
 			tenant_id, tenant_uuid, project_id, project_uuid,
 			name, engine, engine_version, instance_class, allocated_storage_gb,
 			network_mode, vnet_id, subnet_id, nad_ref,
-			status, message, region
+			status, message, region, zone
 		) VALUES (
 			$1, $2, $3, $4,
 			$5, $6, $7, $8, $9,
 			$10, $11, $12, $13,
-			$14, $15, $16
+			$14, $15, $16, $17
 		)
 		RETURNING id, created_at, updated_at`
 
@@ -49,7 +54,7 @@ func (r *Repository) CreateDatabase(ctx context.Context, d *models.Database) (*m
 		d.TenantID, d.TenantUUID, d.ProjectID, d.ProjectUUID,
 		d.Name, string(d.Engine), nilIfEmpty(d.EngineVersion), d.InstanceClass, d.AllocatedStorageGB,
 		string(d.NetworkMode), d.VNetID, d.SubnetID, nilIfEmpty(d.NadRef),
-		string(d.Status), nilIfEmpty(d.Message), r.regionStamp(),
+		string(d.Status), nilIfEmpty(d.Message), r.regionStamp(), r.zoneStamp(),
 	).Scan(&d.ID, &d.CreatedAt, &d.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create database: %w", err)
 	}

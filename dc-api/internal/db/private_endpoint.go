@@ -25,11 +25,16 @@ var ErrPrivateEndpointNotFound = errors.New("private endpoint not found")
 // (target_type, target_id, vnet_id) constraint maps to 409 Conflict.
 // M2.5: includes project_id, project_uuid in INSERT.
 func (r *Repository) CreatePrivateEndpoint(ctx context.Context, ep *models.PrivateEndpoint) (*models.PrivateEndpoint, error) {
+	// Zone (phase 0): write-only DB column with no PrivateEndpoint.Zone model
+	// field, mirroring region. A PE is always VPC-attached, so its zone equals
+	// the parent VNet's; under the single seeded zone that is the local zone,
+	// so binding r.zoneStamp() here is value-identical to inheriting vnet.Zone.
+	// True parent-zone inheritance is wired when 3b consumes it.
 	const q = `
 		INSERT INTO private_endpoints
 		    (tenant_id, tenant_uuid, project_id, project_uuid, target_type, target_id, vnet_id, subnet_id, name,
-		     ip_address, hostname, backend_addr, proxy_pod_name, status, message, region)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		     ip_address, hostname, backend_addr, proxy_pod_name, status, message, region, zone)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		RETURNING id, created_at, updated_at`
 
 	var ipPtr, hostnamePtr, proxyPodPtr, messagePtr *string
@@ -49,7 +54,7 @@ func (r *Repository) CreatePrivateEndpoint(ctx context.Context, ep *models.Priva
 		ep.TenantID, ep.TenantUUID,
 		nilIfEmpty(ep.ProjectID), nilIfNilUUID(ep.ProjectUUID),
 		string(ep.TargetType), ep.TargetID, ep.VNetID, ep.SubnetID, ep.Name,
-		ipPtr, hostnamePtr, ep.BackendAddr, proxyPodPtr, string(ep.Status), messagePtr, r.regionStamp(),
+		ipPtr, hostnamePtr, ep.BackendAddr, proxyPodPtr, string(ep.Status), messagePtr, r.regionStamp(), r.zoneStamp(),
 	).Scan(&ep.ID, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create private_endpoint: %w", err)
 	}
