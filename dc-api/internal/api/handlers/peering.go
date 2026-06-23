@@ -178,6 +178,18 @@ func (h *PeeringHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Phase-0 same-zone check (mirrors the cross-region guard above for the
+	// sibling case; a 422 because zone disagreement is an unprocessable
+	// containment violation, not a malformed request). With the single seeded
+	// zone both VNets are 'zone-1', so this never fires today. The parent-child
+	// families rely on the existing FK containment instead of an explicit guard.
+	if vnet.Zone != peerVNet.Zone {
+		writeError(w, http.StatusUnprocessableEntity,
+			fmt.Sprintf("cross-zone peering is not supported (VNet zone: %s, peer VNet zone: %s)",
+				vnet.Zone, peerVNet.Zone))
+		return
+	}
+
 	// Address space overlap check.
 	for _, a := range vnet.AddressSpace {
 		for _, b := range peerVNet.AddressSpace {

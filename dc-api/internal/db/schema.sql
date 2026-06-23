@@ -1033,3 +1033,27 @@ UPDATE resources         SET region = 'lk' WHERE region IS NULL;
 UPDATE key_vaults        SET region = 'lk' WHERE region IS NULL;
 UPDATE databases         SET region = 'lk' WHERE region IS NULL;
 UPDATE private_endpoints SET region = 'lk' WHERE region IS NULL;
+
+-- ── Phase-0 zone stamps on existing resource families ────────────────────────
+-- Mirrors the region stamps above: every regional row also records the
+-- availability zone within that region. New rows are stamped from
+-- DCAPI_LOCAL_ZONE in the repo Create* methods (root resources) or inherited
+-- from the parent VNet (child resources); pre-existing rows are backfilled to
+-- 'zone-1' (the seeded local zone for region 'lk'). Guarded on `zone IS NULL`
+-- so re-runs are no-ops. INTERNAL ONLY — never surfaced in the API.
+-- (subnets/peerings/route_tables/NSGs/DNS zones derive zone from the parent
+-- VNet by containment, exactly as they derive region.) Columns are plain
+-- nullable TEXT with no FK — the composite (region,zone)->zones(region_name,name)
+-- FK is deferred to a later slice (mirrors the phase-0 region stamp, which is
+-- likewise unconstrained; only vnets.region carries the older NOT NULL FK).
+ALTER TABLE resources         ADD COLUMN IF NOT EXISTS zone TEXT;
+ALTER TABLE key_vaults        ADD COLUMN IF NOT EXISTS zone TEXT;
+ALTER TABLE databases         ADD COLUMN IF NOT EXISTS zone TEXT;
+ALTER TABLE private_endpoints ADD COLUMN IF NOT EXISTS zone TEXT;
+ALTER TABLE vnets             ADD COLUMN IF NOT EXISTS zone TEXT;
+
+UPDATE resources         SET zone = 'zone-1' WHERE zone IS NULL;
+UPDATE key_vaults        SET zone = 'zone-1' WHERE zone IS NULL;
+UPDATE databases         SET zone = 'zone-1' WHERE zone IS NULL;
+UPDATE private_endpoints SET zone = 'zone-1' WHERE zone IS NULL;
+UPDATE vnets             SET zone = 'zone-1' WHERE zone IS NULL;

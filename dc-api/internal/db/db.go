@@ -44,6 +44,12 @@ type Repository struct {
 	// from cfg.LocalRegion. Empty falls back to "lk" at write time so a repo
 	// constructed without the call (older tests) still produces valid rows.
 	localRegion string
+	// localZone is the availability zone THIS control plane stamps on the
+	// resources it creates (multi-region phase 0, zone slice). Set once at
+	// startup via SetLocalZone from cfg.LocalZone. Empty falls back to "zone-1"
+	// at write time so a repo constructed without the call (older tests) still
+	// produces valid rows. INTERNAL — not yet used for routing.
+	localZone string
 }
 
 // NewRepository creates a Repository backed by the given connection pool.
@@ -70,6 +76,22 @@ func (r *Repository) regionStamp() string {
 		return "lk"
 	}
 	return r.localRegion
+}
+
+// SetLocalZone records the availability zone this control plane stamps on
+// resources it creates (multi-region phase 0, zone slice). Called once at
+// startup from cfg.LocalZone (and in test setup). Safe to leave unset —
+// zoneStamp falls back to "zone-1".
+func (r *Repository) SetLocalZone(zone string) { r.localZone = zone }
+
+// zoneStamp returns the zone to write on a newly created root row. Defaults to
+// "zone-1" when SetLocalZone was never called, matching the schema's seeded
+// zone and the backfill of pre-existing rows.
+func (r *Repository) zoneStamp() string {
+	if r.localZone == "" {
+		return "zone-1"
+	}
+	return r.localZone
 }
 
 // Connect opens a pgxpool connection to the given DSN.
@@ -128,11 +150,18 @@ func (r *Repository) Create(ctx context.Context, res *models.Resource) (*models.
 
 	const q = `
 		INSERT INTO resources
-			(tenant_id, tenant_uuid, project_id, project_uuid, owner_id, name, type, size, status, provider_type, backend_uid, vnet_id, subnet_id, message, region)
+			(tenant_id, tenant_uuid, project_id, project_uuid, owner_id, name, type, size, status, provider_type, backend_uid, vnet_id, subnet_id, message, region, zone)
 		VALUES
-			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		RETURNING id, created_at, updated_at`
 
+	// Zone (phase 0): VPC children pass the parent VNet's zone via res.Zone;
+	// root/standalone resources leave it empty and fall back to zoneStamp()
+	// (DCAPI_LOCAL_ZONE). Mirrors how region is always regionStamp() today.
+	zone := res.Zone
+	if zone == "" {
+		zone = r.zoneStamp()
+	}
 	row := tx.QueryRow(ctx, q,
 		res.TenantID,
 		res.TenantUUID,
@@ -149,6 +178,7 @@ func (r *Repository) Create(ctx context.Context, res *models.Resource) (*models.
 		res.SubnetID,
 		nilIfEmpty(res.Message),
 		r.regionStamp(),
+		zone,
 	)
 	if err := row.Scan(&res.ID, &res.CreatedAt, &res.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create resource: %w", err)

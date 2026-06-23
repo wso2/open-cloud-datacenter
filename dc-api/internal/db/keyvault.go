@@ -26,9 +26,13 @@ var ErrKeyVaultNotFound = errors.New("key vault not found")
 // ACTIVE because chunk 1 has no async backend provisioning step.
 // M2.5: includes project_id, project_uuid in INSERT.
 func (r *Repository) CreateKeyVault(ctx context.Context, kv *models.KeyVault) (*models.KeyVault, error) {
+	// Zone (phase 0): a key vault is a root resource (no parent VNet), so it is
+	// stamped with the local zone, mirroring its region stamp. Write-only DB
+	// column — there is no KeyVault.Zone model field, exactly as there is no
+	// KeyVault.Region field.
 	const q = `
-		INSERT INTO key_vaults (tenant_id, tenant_uuid, project_id, project_uuid, name, soft_delete_days, status, message, region)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO key_vaults (tenant_id, tenant_uuid, project_id, project_uuid, name, soft_delete_days, status, message, region, zone)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, created_at, updated_at`
 
 	var message *string
@@ -38,7 +42,7 @@ func (r *Repository) CreateKeyVault(ctx context.Context, kv *models.KeyVault) (*
 	if err := r.pool.QueryRow(ctx, q,
 		kv.TenantID, kv.TenantUUID,
 		nilIfEmpty(kv.ProjectID), nilIfNilUUID(kv.ProjectUUID),
-		kv.Name, kv.SoftDeleteDays, string(kv.Status), message, r.regionStamp(),
+		kv.Name, kv.SoftDeleteDays, string(kv.Status), message, r.regionStamp(), r.zoneStamp(),
 	).Scan(&kv.ID, &kv.CreatedAt, &kv.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create key_vault: %w", err)
 	}

@@ -284,6 +284,7 @@ func (h *VMHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// queries the DB directly (single-responsibility principle).
 	var vnetBackendUID, subnetBackendUID string
 	var vnetUUIDPtr, subnetUUIDPtr *uuid.UUID // F41: persisted on the Resource row when VPC path is used
+	var vmZone string                         // phase-0 zone: inherited from the parent VNet on the VPC path
 	if req.VNetID != "" {
 		vnetUUID, _ := uuid.Parse(req.VNetID)    // already validated above
 		subnetUUID, _ := uuid.Parse(req.SubnetID) // already validated above
@@ -316,6 +317,10 @@ func (h *VMHandler) Create(w http.ResponseWriter, r *http.Request) {
 		subnetBackendUID = subnet.BackendUID
 		vnetUUIDPtr = &vnetUUID
 		subnetUUIDPtr = &subnetUUID
+		// Phase-0 zone inheritance: the VM adopts its parent VNet's zone. The
+		// subnet was already verified to belong to this VNet (single-parent
+		// containment above), so there is no independent zone to mismatch.
+		vmZone = vnet.Zone
 	}
 
 	// ── Step 4a: read VPC DNS server IP (F20) ────────────────────────────────
@@ -350,6 +355,7 @@ func (h *VMHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ProviderType: h.provider.Name(),
 		VNetID:       vnetUUIDPtr,
 		SubnetID:     subnetUUIDPtr,
+		Zone:         vmZone, // empty on the legacy bridge path → Create falls back to zoneStamp()
 	})
 	if err != nil {
 		h.log.Error().Err(err).Str("tenant", tenantID).Msg("create resource in DB")

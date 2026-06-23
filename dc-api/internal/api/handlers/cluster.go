@@ -373,6 +373,7 @@ func (h *ClusterHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// failed lookup returns 4xx without creating an orphan resource row.
 	var vnetBackendUID, subnetBackendUID string
 	var vnetUUIDPtr, subnetUUIDPtr *uuid.UUID // F41: persisted on the Resource row when VPC path is used
+	var clusterZone string                    // phase-0 zone: inherited from the parent VNet on the VPC path
 	if req.VNetID != "" {
 		vnetUUID, _ := uuid.Parse(req.VNetID)
 		subnetUUID, _ := uuid.Parse(req.SubnetID)
@@ -405,6 +406,8 @@ func (h *ClusterHandler) Create(w http.ResponseWriter, r *http.Request) {
 		subnetBackendUID = subnet.BackendUID
 		vnetUUIDPtr = &vnetUUID
 		subnetUUIDPtr = &subnetUUID
+		// Phase-0 zone inheritance: the cluster adopts its parent VNet's zone.
+		clusterZone = vnet.Zone
 	}
 
 	// Create PENDING record
@@ -421,6 +424,7 @@ func (h *ClusterHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Status:       models.StatusPending,
 		VNetID:       vnetUUIDPtr,
 		SubnetID:     subnetUUIDPtr,
+		Zone:         clusterZone, // empty on the non-VPC path → Create falls back to zoneStamp()
 		ProviderType: h.provider.Name(),
 	})
 	if err != nil {
