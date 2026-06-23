@@ -1,4 +1,4 @@
-.PHONY: help bootstrap check up down db-reset build-api build-cli build run dev
+.PHONY: help bootstrap check up down db-reset build-api build-cli build run dev gen-agent-rbac
 
 # Default target — print help
 help:
@@ -47,6 +47,14 @@ build-cli:
 	@echo "Built: ~/bin/dcctl"
 
 build: build-api build-cli
+
+# ── Code generation ───────────────────────────────────────────────────────────
+# Regenerate the dc-agent RBAC manifest from the capability registry
+# (dc-api/internal/providers/clusteraccess/capabilities.go). Run this after
+# editing any AgentCapability.AgentVerbs; the drift-check unit test fails CI if
+# the committed file is stale.
+gen-agent-rbac:
+	cd dc-api && go run ./cmd/gen-agent-rbac -out ../flux/platform/dc-agent/base/rbac.yaml
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 run:

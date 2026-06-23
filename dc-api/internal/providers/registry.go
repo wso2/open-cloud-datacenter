@@ -192,21 +192,31 @@ func (r *Registry) agentDecision(cfg *config.Config) clusteraccess.AgentDecision
 	fieldManager := "dc-api"
 	region, zone := cfg.LocalRegion, cfg.LocalZone
 
+	// routable is the union of every capability's RouteVerbs — the registry-
+	// derived membership test that REPLACES the old hand-written switch. With one
+	// onboarded family today it equals {VerbGet, VerbCreate, VerbDelete}, exactly
+	// the pre-refactor allow-set, so decisions are byte-identical. The reads vs
+	// writes split (which toggle gates which verb) stays here.
+	routable := clusteraccess.UnionRouteVerbs()
+
 	return func(verb clusteraccess.Verb) (clusteraccess.Accessor, bool) {
 		// (2) gateway present — shared precondition for any routing.
 		if r.agentGateway == nil {
 			return nil, false
 		}
-		// (1)+(4) per-family toggle AND verb allow-set, together.
-		//   reads  → AgentRouteReads  gates {VerbGet}
-		//   writes → AgentRouteWrites gates {VerbCreate, VerbDelete} (VM write slice)
-		// A verb not listed here always falls through to Direct.
-		switch verb {
-		case clusteraccess.VerbGet:
+		// (1)+(4) registry membership AND per-family toggle, together.
+		//   reads  → AgentRouteReads  gates read verbs  (VerbGet today)
+		//   writes → AgentRouteWrites gates write verbs (VerbCreate, VerbDelete today)
+		// A verb not in the registry's routable union always falls through to Direct.
+		if !routable[verb] {
+			return nil, false
+		}
+		switch {
+		case clusteraccess.IsReadVerb(verb):
 			if !r.routeReads {
 				return nil, false
 			}
-		case clusteraccess.VerbCreate, clusteraccess.VerbDelete:
+		case clusteraccess.IsWriteVerb(verb):
 			if !r.routeWrites {
 				return nil, false
 			}

@@ -21,6 +21,13 @@ const (
 	VerbApply
 	VerbUpdate
 	VerbDelete
+	// VerbWatch is appended LAST so the iota values of the existing verbs are
+	// unchanged. It is an RBAC-vocabulary token ONLY — it is NOT in any
+	// RouteVerbs set, the Accessor interface gains no Watch method, and Routed
+	// gains no Watch path. It exists purely so AgentCapability.AgentVerbs can
+	// express the agent's watch grant (get_status/watch_status) for the RBAC
+	// generator. Routing behaviour is therefore unchanged by its addition.
+	VerbWatch
 )
 
 // AgentDecision is the live decision function a Routed accessor consults per
