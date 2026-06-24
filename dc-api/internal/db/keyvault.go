@@ -14,6 +14,7 @@ import (
 
 	"github.com/wso2/dc-api/internal/audit"
 	"github.com/wso2/dc-api/internal/models"
+	"github.com/wso2/dc-api/internal/placement"
 )
 
 // ErrKeyVaultNotFound is returned by GetKeyVault / DeleteKeyVault when the
@@ -39,10 +40,14 @@ func (r *Repository) CreateKeyVault(ctx context.Context, kv *models.KeyVault) (*
 	if kv.Message != "" {
 		message = &kv.Message
 	}
+	// Field-less root: region/zone default-stamped via the table-driven Stamp
+	// helper (empty inputs → regionStamp(), zoneStamp()). Nothing is written to
+	// the model — KeyVault has no Region/Zone field.
+	region, zone := r.Stamp(placement.KeyVault, "", "")
 	if err := r.pool.QueryRow(ctx, q,
 		kv.TenantID, kv.TenantUUID,
 		nilIfEmpty(kv.ProjectID), nilIfNilUUID(kv.ProjectUUID),
-		kv.Name, kv.SoftDeleteDays, string(kv.Status), message, r.regionStamp(), r.zoneStamp(),
+		kv.Name, kv.SoftDeleteDays, string(kv.Status), message, region, zone,
 	).Scan(&kv.ID, &kv.CreatedAt, &kv.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create key_vault: %w", err)
 	}

@@ -19,6 +19,7 @@ import (
 
 	"github.com/wso2/dc-api/internal/audit"
 	"github.com/wso2/dc-api/internal/models"
+	"github.com/wso2/dc-api/internal/placement"
 )
 
 // ErrDatabaseNotFound is returned by GetDatabase/DeleteDatabase when the
@@ -50,11 +51,17 @@ func (r *Repository) CreateDatabase(ctx context.Context, d *models.Database) (*m
 		)
 		RETURNING id, created_at, updated_at`
 
+	// Field-less family declared Root (see placement.Database): region/zone are
+	// default-stamped via the table-driven Stamp helper (empty inputs →
+	// regionStamp(), zoneStamp()), value-identical to the prior unconditional
+	// binds. True parent-zone inheritance for the VPC path is wired when 3b
+	// flips the declaration to Child.
+	region, zone := r.Stamp(placement.Database, "", "")
 	if err := r.pool.QueryRow(ctx, q,
 		d.TenantID, d.TenantUUID, d.ProjectID, d.ProjectUUID,
 		d.Name, string(d.Engine), nilIfEmpty(d.EngineVersion), d.InstanceClass, d.AllocatedStorageGB,
 		string(d.NetworkMode), d.VNetID, d.SubnetID, nilIfEmpty(d.NadRef),
-		string(d.Status), nilIfEmpty(d.Message), r.regionStamp(), r.zoneStamp(),
+		string(d.Status), nilIfEmpty(d.Message), region, zone,
 	).Scan(&d.ID, &d.CreatedAt, &d.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create database: %w", err)
 	}

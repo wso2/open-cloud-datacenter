@@ -41,6 +41,7 @@ import (
 	"github.com/wso2/dc-api/internal/api/middleware"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
+	"github.com/wso2/dc-api/internal/placement"
 	"github.com/wso2/dc-api/internal/providers"
 	"github.com/wso2/dc-api/internal/rbac"
 	"golang.org/x/crypto/ssh"
@@ -317,10 +318,11 @@ func (h *VMHandler) Create(w http.ResponseWriter, r *http.Request) {
 		subnetBackendUID = subnet.BackendUID
 		vnetUUIDPtr = &vnetUUID
 		subnetUUIDPtr = &subnetUUID
-		// Phase-0 zone inheritance: the VM adopts its parent VNet's zone. The
+		// Phase-0 zone inheritance: the VM adopts its parent VNet's zone, resolved
+		// through the table-driven helper (placement.VM is a Child of VNET). The
 		// subnet was already verified to belong to this VNet (single-parent
 		// containment above), so there is no independent zone to mismatch.
-		vmZone = vnet.Zone
+		_, vmZone = inheritPlacement(placement.VM, vnet.Region, vnet.Zone, true)
 	}
 
 	// ── Step 4a: read VPC DNS server IP (F20) ────────────────────────────────

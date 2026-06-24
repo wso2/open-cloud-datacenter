@@ -15,6 +15,7 @@ import (
 
 	"github.com/wso2/dc-api/internal/audit"
 	"github.com/wso2/dc-api/internal/models"
+	"github.com/wso2/dc-api/internal/placement"
 )
 
 // ErrPrivateEndpointNotFound is returned when a lookup misses.
@@ -50,11 +51,15 @@ func (r *Repository) CreatePrivateEndpoint(ctx context.Context, ep *models.Priva
 	if ep.Message != "" {
 		messagePtr = &ep.Message
 	}
+	// Field-less family declared Root (see placement.PrivateEndpoint): region/zone
+	// are default-stamped via the table-driven Stamp helper, value-identical to
+	// the prior unconditional binds. No handler inheritance today, none added.
+	region, zone := r.Stamp(placement.PrivateEndpoint, "", "")
 	if err := r.pool.QueryRow(ctx, q,
 		ep.TenantID, ep.TenantUUID,
 		nilIfEmpty(ep.ProjectID), nilIfNilUUID(ep.ProjectUUID),
 		string(ep.TargetType), ep.TargetID, ep.VNetID, ep.SubnetID, ep.Name,
-		ipPtr, hostnamePtr, ep.BackendAddr, proxyPodPtr, string(ep.Status), messagePtr, r.regionStamp(), r.zoneStamp(),
+		ipPtr, hostnamePtr, ep.BackendAddr, proxyPodPtr, string(ep.Status), messagePtr, region, zone,
 	).Scan(&ep.ID, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("db create private_endpoint: %w", err)
 	}

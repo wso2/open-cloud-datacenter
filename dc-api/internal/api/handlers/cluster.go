@@ -32,6 +32,7 @@ import (
 	"github.com/wso2/dc-api/internal/api/middleware"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
+	"github.com/wso2/dc-api/internal/placement"
 	"github.com/wso2/dc-api/internal/providers"
 	"github.com/wso2/dc-api/internal/providers/common"
 	"github.com/wso2/dc-api/internal/rbac"
@@ -406,8 +407,10 @@ func (h *ClusterHandler) Create(w http.ResponseWriter, r *http.Request) {
 		subnetBackendUID = subnet.BackendUID
 		vnetUUIDPtr = &vnetUUID
 		subnetUUIDPtr = &subnetUUID
-		// Phase-0 zone inheritance: the cluster adopts its parent VNet's zone.
-		clusterZone = vnet.Zone
+		// Phase-0 zone inheritance: the cluster adopts its parent VNet's zone,
+		// resolved through the table-driven helper (placement.Cluster is a Child
+		// of VNET).
+		_, clusterZone = inheritPlacement(placement.Cluster, vnet.Region, vnet.Zone, true)
 	}
 
 	// Create PENDING record
