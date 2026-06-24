@@ -37,7 +37,17 @@ import (
 // This is a form of Dependency Injection at the router level.
 // main.go constructs this struct and passes it to NewRouter.
 type RouterDeps struct {
-	Repo            *db.Repository
+	Repo *db.Repository
+	// Providers is the per-resource provider resolver (*providers.Registry).
+	// Handlers call Providers.For(region, zone) per resource so a resource in a
+	// remote zone reaches that zone's agent; in a single-zone / single-cluster
+	// deployment every resource resolves to the SAME local set (a cache hit),
+	// byte-identical to the fixed providers dc-api injected before this change.
+	Providers providers.Resolver
+	// ComputeProvider/ClusterProvider/NetworkProvider remain for router-only
+	// callers (contract harness, some tests) that build a router without a full
+	// Registry. When Providers is nil, NewRouter synthesises a fixed-set Resolver
+	// from these three so the single-cluster path keeps working unchanged.
 	ComputeProvider providers.ComputeProvider
 	ClusterProvider providers.ClusterProvider
 	NetworkProvider providers.NetworkProvider
@@ -125,6 +135,16 @@ type RouterDeps struct {
 // It wires all middleware, handlers, and routes.
 func NewRouter(deps RouterDeps) http.Handler {
 	r := chi.NewRouter()
+
+	// Per-resource provider resolver. main.go injects the *providers.Registry
+	// (the per-(region,zone) cache). Router-only callers (contract harness, some
+	// tests) build a router without a Registry and instead pass three fixed
+	// providers — for those, synthesise a single-zone FixedResolver so every
+	// resource resolves to the same set (the pre-routing single-cluster model).
+	resolve := deps.Providers
+	if resolve == nil {
+		resolve = providers.NewFixedResolver(deps.ComputeProvider, deps.ClusterProvider, deps.NetworkProvider)
+	}
 
 	// ── Global middleware (applied to ALL routes) ─────────────────────────────
 	r.Use(chimiddleware.RealIP)
@@ -228,9 +248,9 @@ func NewRouter(deps RouterDeps) http.Handler {
 		// Instantiate handlers with their dependencies.
 		// Dependency Injection: we pass repo and provider INTO the handler.
 		// The handler does not create these — it receives them.
-		vmHandler := handlers.NewVMHandler(deps.Repo, deps.ComputeProvider, deps.DNSSearchDomain, deps.InfraReservedNADs, deps.Log)
-		bastionHandler := handlers.NewBastionHandler(deps.Repo, deps.ComputeProvider, deps.BastionImage, deps.BastionMgmtNAD, deps.DNSSearchDomain, deps.Log)
-		clusterHandler := handlers.NewClusterHandler(deps.Repo, deps.ClusterProvider, deps.Log)
+		vmHandler := handlers.NewVMHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.DNSSearchDomain, deps.InfraReservedNADs, deps.Log)
+		bastionHandler := handlers.NewBastionHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.BastionImage, deps.BastionMgmtNAD, deps.DNSSearchDomain, deps.Log)
+		clusterHandler := handlers.NewClusterHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.Log)
 
 		// M1.5 member management handler. The directory provider (possibly nil)
 		// powers invite-by-email resolution.
@@ -252,12 +272,12 @@ func NewRouter(deps RouterDeps) http.Handler {
 		serviceAccountHandler := handlers.NewServiceAccountHandler(deps.Repo, deps.Log)
 
 		// M2 network handlers — all share the same NetworkProvider.
-		vnetHandler := handlers.NewVNetHandler(deps.Repo, deps.NetworkProvider, deps.NATProvisioner, deps.DNSProvisioner, deps.Log)
-		subnetHandler := handlers.NewSubnetHandler(deps.Repo, deps.NetworkProvider, deps.NATProvisioner, deps.DNSProvisioner, deps.Log)
-		rtHandler := handlers.NewRouteTableHandler(deps.Repo, deps.NetworkProvider, deps.Log)
-		nsgHandler := handlers.NewNSGHandler(deps.Repo, deps.NetworkProvider, deps.Log)
-		peeringHandler := handlers.NewPeeringHandler(deps.Repo, deps.NetworkProvider, deps.Log)
-		dnsHandler := handlers.NewPrivateDnsZoneHandler(deps.Repo, deps.NetworkProvider, deps.Log)
+		vnetHandler := handlers.NewVNetHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.NATProvisioner, deps.DNSProvisioner, deps.Log)
+		subnetHandler := handlers.NewSubnetHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.NATProvisioner, deps.DNSProvisioner, deps.Log)
+		rtHandler := handlers.NewRouteTableHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.Log)
+		nsgHandler := handlers.NewNSGHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.Log)
+		peeringHandler := handlers.NewPeeringHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.Log)
+		dnsHandler := handlers.NewPrivateDnsZoneHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.Log)
 
 		// Tenant list — used by cloud-ui's tenant switcher. Lives at the
 		// /v1/ level (not under /v1/tenants/{tenant_id}) because it's how

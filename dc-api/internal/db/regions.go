@@ -110,6 +110,21 @@ func (r *Repository) ListRegionsWithZones(ctx context.Context) ([]RegionRow, err
 	return regions, nil
 }
 
+// IsKnownZone reports whether (region, zone) exists in the regions/zones
+// catalog. It backs providers.ZoneCatalog: the per-zone resolver consults it on
+// a build-on-miss to distinguish a registered REMOTE zone (build an agent-only
+// provider set) from an UNKNOWN zone (refuse — never fall back to the local
+// cluster). A lookup failure is returned as an error so the resolver fails
+// closed rather than treating an unreachable catalog as "known".
+func (r *Repository) IsKnownZone(ctx context.Context, region, zone string) (bool, error) {
+	const q = `SELECT EXISTS (SELECT 1 FROM zones WHERE region_name = $1 AND name = $2)`
+	var exists bool
+	if err := r.pool.QueryRow(ctx, q, region, zone).Scan(&exists); err != nil {
+		return false, fmt.Errorf("db is-known-zone %s/%s: %w", region, zone, err)
+	}
+	return exists, nil
+}
+
 // EnsureRegionZone records a region and its zone if they don't already exist,
 // so an admin minting the first token for a freshly bootstrapped cluster
 // implicitly registers it. This is metadata only — provisioning the underlying

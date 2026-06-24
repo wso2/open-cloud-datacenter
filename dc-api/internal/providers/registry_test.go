@@ -10,7 +10,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/wso2/dc-api/internal/agentgw"
-	"github.com/wso2/dc-api/internal/config"
 	"github.com/wso2/dc-api/internal/providers/clusteraccess"
 )
 
@@ -70,26 +69,176 @@ func decisionRegistryToggles(routeReads, routeWrites bool, gw agentgw.SessionRes
 	}
 }
 
-// cfgWith builds a config with only the read toggle set (write toggle off).
-func cfgWith(routeReads bool) *config.Config {
-	return cfgWithToggles(routeReads, false)
+// ─────────────────────── Per-resource resolver (For) tests ──────────────────
+//
+// These exercise the per-(region,zone) cache that backs per-resource routing:
+// local-zone cache hits are pointer-identical (Mode A byte-identical), unknown
+// zones fail clearly, a known remote zone builds an agent-only set whose ops
+// fail clearly with no agent, and the local set is never rebuilt.
+
+// fakeCatalog is a providers.ZoneCatalog whose known-set and error are fixed.
+type fakeCatalog struct {
+	known map[string]bool
+	err   error
 }
 
-// cfgWithToggles builds a config with both per-family agent-routing toggles set.
-// agentDecision reads LocalRegion/LocalZone off cfg, so they are populated to
-// match decisionRegistry's zone.
-func cfgWithToggles(routeReads, routeWrites bool) *config.Config {
-	return &config.Config{
-		LocalRegion:      "lk",
-		LocalZone:        "zone-1",
-		AgentRouteReads:  routeReads,
-		AgentRouteWrites: routeWrites,
+func (f fakeCatalog) IsKnownZone(_ context.Context, region, zone string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.known[region+"/"+zone], nil
+}
+
+// resolverRegistry builds a *Registry with a pre-seeded LOCAL set (no kubeconfig
+// parsing), so the For() cache path can be tested directly. The local set's
+// providers are nil — these tests assert pointers and errors, never call into a
+// provider that needs a real backend.
+func resolverRegistry(catalog ZoneCatalog, gw agentgw.SessionResolver) *Registry {
+	r := &Registry{
+		set:          make(map[string]*ProviderSet, 1),
+		agentGateway: gw,
+		catalog:      catalog,
+		localRegion:  "lk",
+		localZone:    "zone-1",
+		log:          zerolog.Nop(),
+		noAgentWarn:  make(map[string]time.Time),
+	}
+	r.set[registryKey("lk", "zone-1")] = &ProviderSet{} // the local set (sentinel)
+	return r
+}
+
+func TestFor_LocalZone_CacheHit_PointerIdentical(t *testing.T) {
+	r := resolverRegistry(nil, nil)
+	a, err := r.For("lk", "zone-1")
+	if err != nil {
+		t.Fatalf("For(local) must succeed: %v", err)
+	}
+	b, err := r.For("lk", "zone-1")
+	if err != nil {
+		t.Fatalf("For(local) repeat must succeed: %v", err)
+	}
+	if a != b {
+		t.Error("For(local) must return the SAME *ProviderSet pointer across calls (no rebuild)")
+	}
+	// Empty region/zone must resolve to the same local set (pre-stamp rows / Mode A).
+	c, err := r.For("", "")
+	if err != nil {
+		t.Fatalf("For(empty) must resolve to the local zone: %v", err)
+	}
+	if c != a {
+		t.Error("For(\"\",\"\") must resolve to the SAME local set as For(local)")
+	}
+}
+
+func TestFor_LocalZone_NeverRebuilt_ConcurrentSamePointer(t *testing.T) {
+	r := resolverRegistry(nil, nil)
+	want, _ := r.For("lk", "zone-1")
+
+	const n = 50
+	got := make(chan *ProviderSet, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			set, err := r.For("lk", "zone-1")
+			if err != nil {
+				got <- nil
+				return
+			}
+			got <- set
+		}()
+	}
+	for i := 0; i < n; i++ {
+		if set := <-got; set != want {
+			t.Fatal("concurrent For(local) returned a different pointer — the local set must never be rebuilt")
+		}
+	}
+}
+
+func TestFor_UnknownZone_NoCatalog_ClearError(t *testing.T) {
+	r := resolverRegistry(nil, nil) // no catalog ⇒ only the local zone resolves
+	_, err := r.For("us", "zone-9")
+	if err == nil {
+		t.Fatal("an unknown zone with no catalog must NOT resolve")
+	}
+	// Must NOT have built or cached anything for the unknown zone.
+	r.mu.RLock()
+	_, cached := r.set[registryKey("us", "zone-9")]
+	r.mu.RUnlock()
+	if cached {
+		t.Error("an unknown zone must never be cached")
+	}
+}
+
+func TestFor_UnknownZone_WithCatalog_ClearError(t *testing.T) {
+	cat := fakeCatalog{known: map[string]bool{"lk/zone-1": true}} // remote not known
+	r := resolverRegistry(cat, nil)
+	_, err := r.For("us", "zone-9")
+	if err == nil {
+		t.Fatal("a zone absent from the catalog must return a clear unknown-zone error")
+	}
+}
+
+func TestFor_CatalogFailure_FailsClosed(t *testing.T) {
+	cat := fakeCatalog{err: errCatalog}
+	r := resolverRegistry(cat, nil)
+	_, err := r.For("us", "zone-9")
+	if err == nil {
+		t.Fatal("a catalog lookup failure must fail CLOSED (unresolved), never fall back to local")
+	}
+	r.mu.RLock()
+	_, cached := r.set[registryKey("us", "zone-9")]
+	r.mu.RUnlock()
+	if cached {
+		t.Error("a failed catalog lookup must not cache a set")
+	}
+}
+
+func TestFor_RemoteZone_BuildsAgentOnlySet_NoAgent_ClearError(t *testing.T) {
+	// Remote zone is in the catalog, but no agent is connected.
+	cat := fakeCatalog{known: map[string]bool{"lk/zone-1": true, "us/zone-9": true}}
+	r := resolverRegistry(cat, fakeResolver{connected: false})
+
+	set, err := r.For("us", "zone-9")
+	if err != nil {
+		t.Fatalf("a known remote zone must build an agent-only set: %v", err)
+	}
+	if set == nil || set.Compute == nil || set.Network == nil {
+		t.Fatal("the remote set must have non-nil agent-only providers")
+	}
+	// The remote set must be cached and pointer-stable.
+	set2, _ := r.For("us", "zone-9")
+	if set2 != set {
+		t.Error("the remote set must be cached (same pointer on the second call)")
+	}
+	// With NO agent connected, a remote-zone op must fail with a CLEAR error — it
+	// must NOT silently hit the local cluster. The remote compute provider's
+	// GetVM goes through the NoCreds fallback.
+	if _, err := set.Compute.GetVM(context.Background(), "ns:vm"); err == nil {
+		t.Error("a remote-zone op with no connected agent must return a clear error, not silently succeed")
+	}
+}
+
+var errCatalog = errCatalogT{}
+
+type errCatalogT struct{}
+
+func (errCatalogT) Error() string { return "catalog unreachable" }
+
+func TestFixedResolver_AlwaysSameSet(t *testing.T) {
+	set := &ProviderSet{}
+	f := &FixedResolver{set: set}
+	a, err := f.For("lk", "zone-1")
+	if err != nil {
+		t.Fatalf("FixedResolver.For must not error: %v", err)
+	}
+	b, _ := f.For("us", "zone-99") // any zone → the one fixed set (single-zone model)
+	if a != set || b != set {
+		t.Error("FixedResolver must return the SAME set for every zone")
 	}
 }
 
 func TestAgentDecision_ToggleOff_AlwaysDirect(t *testing.T) {
 	r := decisionRegistry(false, fakeResolver{connected: true})
-	decide := r.agentDecision(cfgWith(false))
+	decide := r.agentDecision("lk", "zone-1")
 	if _, ok := decide(clusteraccess.VerbGet, vmGVR); ok {
 		t.Error("toggle off must NOT route to the agent (Get)")
 	}
@@ -97,7 +246,7 @@ func TestAgentDecision_ToggleOff_AlwaysDirect(t *testing.T) {
 
 func TestAgentDecision_NoGateway_AlwaysDirect(t *testing.T) {
 	r := decisionRegistry(true, nil)
-	decide := r.agentDecision(cfgWith(true))
+	decide := r.agentDecision("lk", "zone-1")
 	if _, ok := decide(clusteraccess.VerbGet, vmGVR); ok {
 		t.Error("nil gateway must NOT route to the agent")
 	}
@@ -105,7 +254,7 @@ func TestAgentDecision_NoGateway_AlwaysDirect(t *testing.T) {
 
 func TestAgentDecision_ToggleOn_NoLiveAgent_Direct(t *testing.T) {
 	r := decisionRegistry(true, fakeResolver{connected: false})
-	decide := r.agentDecision(cfgWith(true))
+	decide := r.agentDecision("lk", "zone-1")
 	if _, ok := decide(clusteraccess.VerbGet, vmGVR); ok {
 		t.Error("toggle on but no connected agent must fall back to Direct")
 	}
@@ -114,7 +263,7 @@ func TestAgentDecision_ToggleOn_NoLiveAgent_Direct(t *testing.T) {
 func TestAgentDecision_ToggleOn_LiveAgent_RoutesGetOnly(t *testing.T) {
 	// Reads-only configuration: read toggle on, WRITE toggle off.
 	r := decisionRegistryToggles(true, false, fakeResolver{connected: true})
-	decide := r.agentDecision(cfgWithToggles(true, false))
+	decide := r.agentDecision("lk", "zone-1")
 
 	if _, ok := decide(clusteraccess.VerbGet, vmGVR); !ok {
 		t.Error("toggle on + live agent must route Get through the agent")
@@ -135,7 +284,7 @@ func TestAgentDecision_ToggleOn_LiveAgent_RoutesGetOnly(t *testing.T) {
 func TestAgentDecision_WritesOn_LiveAgent_RoutesCreateAndDelete(t *testing.T) {
 	// writes on, reads off — proves the toggles are independent.
 	r := decisionRegistryToggles(false, true, fakeResolver{connected: true})
-	decide := r.agentDecision(cfgWithToggles(false, true))
+	decide := r.agentDecision("lk", "zone-1")
 
 	for _, v := range []clusteraccess.Verb{clusteraccess.VerbCreate, clusteraccess.VerbDelete} {
 		if _, ok := decide(v, vmGVR); !ok {
@@ -162,7 +311,7 @@ func TestAgentDecision_WritesOn_LiveAgent_RoutesCreateAndDelete(t *testing.T) {
 func TestAgentDecision_WritesOff_CreateDeleteStayDirect(t *testing.T) {
 	// reads on, writes off.
 	r := decisionRegistryToggles(true, false, fakeResolver{connected: true})
-	decide := r.agentDecision(cfgWithToggles(true, false))
+	decide := r.agentDecision("lk", "zone-1")
 
 	for _, v := range []clusteraccess.Verb{clusteraccess.VerbCreate, clusteraccess.VerbDelete} {
 		if _, ok := decide(v, vmGVR); ok {
@@ -177,7 +326,7 @@ func TestAgentDecision_WritesOff_CreateDeleteStayDirect(t *testing.T) {
 // never strand the zone when the agent is down.
 func TestAgentDecision_WritesOn_NoLiveAgent_StayDirect(t *testing.T) {
 	r := decisionRegistryToggles(true, true, fakeResolver{connected: false})
-	decide := r.agentDecision(cfgWithToggles(true, true))
+	decide := r.agentDecision("lk", "zone-1")
 
 	for _, v := range []clusteraccess.Verb{clusteraccess.VerbGet, clusteraccess.VerbCreate, clusteraccess.VerbDelete} {
 		if _, ok := decide(v, vmGVR); ok {
@@ -195,7 +344,7 @@ func TestAgentDecision_WritesOn_NoLiveAgent_StayDirect(t *testing.T) {
 // matched, so this is exactly the over-permit Part A closes.
 func TestAgentDecision_PerFamily_UnonboardedGVRStaysDirect(t *testing.T) {
 	r := decisionRegistryToggles(true, true, fakeResolver{connected: true})
-	decide := r.agentDecision(cfgWithToggles(true, true))
+	decide := r.agentDecision("lk", "zone-1")
 
 	imgGVR := schema.GroupVersionResource{Group: "harvesterhci.io", Version: "v1beta1", Resource: "virtualmachineimages"}
 	for _, v := range []clusteraccess.Verb{clusteraccess.VerbGet, clusteraccess.VerbCreate, clusteraccess.VerbDelete} {

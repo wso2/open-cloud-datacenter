@@ -4,36 +4,39 @@
 // whether that zone's provider ops go through the direct dynamic client or the
 // zone's dc-agent command channel.
 //
-// ── M-C scope ─────────────────────────────────────────────────────────────────
-// The registry holds exactly ONE zone — the local zone (cfg.LocalRegion /
-// cfg.LocalZone) — built from the process-global DCAPI_* credentials, i.e. the
-// same Direct providers main.go built before M-C. The compute provider for that
-// zone is constructed with a clusteraccess.Routed accessor whose decision
-// closure consults:
+// ── Per-resource zone routing ───────────────────────────────────────────────
+// The Registry is the per-(region,zone) ProviderSet cache AND the live per-call
+// agent-routing decision. Handlers and the reconciler hold the Registry as a
+// providers.Resolver and call For(resource.Region, resource.Zone) per resource,
+// so a resource in another zone reaches that zone's agent — instead of one fixed
+// provider set keyed to DCAPI_LOCAL_ZONE.
 //
-//  1. the per-family toggle for the verb — AgentRouteReads (DCAPI_AGENT_ROUTE_READS,
-//     default false) for reads, AgentRouteWrites (DCAPI_AGENT_ROUTE_WRITES, default
-//     false) for the VM write slice — AND
-//  2. a non-nil agent gateway, AND
-//  3. a LIVE agent session for the zone right now, AND
-//  4. the verb being in the routed allow-set ({Get} for reads; {Create, Delete}
-//     for the VM create/delete write slice).
+//  - LOCAL zone — built eagerly in NewRegistry from cfg (the direct Harvester
+//    kubeconfig + Rancher token), wrapped with the Routed accessor. This is the
+//    SAME set dc-api injected before this change, so single-cluster / single-zone
+//    deployments are byte-identical: every resource is stamped with the local
+//    region/zone, every For(local) is a cache HIT on this one set, and the lazy
+//    build-on-miss path is never taken.
 //
-// If ANY is false the accessor uses Direct — today's behaviour, byte-identical.
-// Condition 3 is the safety belt: even with a toggle on, a zone with no
-// connected agent silently uses Direct, so flipping the env var can never strand
-// the local zone if the agent is down. The toggles are independent: reads can
-// route while writes stay on the direct path.
+//  - REMOTE zone — built lazily on first For(region,zone) miss for a zone that
+//    is in the regions/zones catalog but is NOT the local zone. dc-api holds NO
+//    kubeconfig there, so the remote set's Compute/Network providers are agent-
+//    only (a Routed accessor whose Direct fallback is a clusteraccess.NoCreds
+//    that errors clearly — never a silent fallback to the LOCAL cluster). The
+//    Cluster provider is the SAME global Rancher client every zone shares (see
+//    rancherScope in the design: Rancher is one global control plane, not per-DC).
 //
-// The cluster provider stays plain Direct — rancher is an HTTP Steve client that
-// does not fit the Accessor seam. The network provider (kubeovn) now ALSO carries
-// a routed seam: the kubeovn CRD CRUD lifecycle (Vpc/Subnet/NAD create/get/delete)
-// routes per-family under the SAME reads/writes toggles, gated by the network
-// families' RouteVerbs. The intricate plumbing (NAT, CoreDNS, ACL/route/peering
-// patches, DNS ConfigMaps, namespace/quota) stays Direct on the master kubeconfig.
+//  - UNKNOWN zone — neither the local zone nor a catalog zone → For returns a
+//    clear "unknown zone" error and never builds or caches anything.
+//
+// The agent decision closure is bound PER zone (region/zone captured in
+// buildSet), so remote traffic routes to the remote zone's agent session, never
+// the local one. With the toggles off (default) every op is the byte-identical
+// Direct (local) path; remote ops fail closed until an agent connects.
 package providers
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -55,6 +58,49 @@ type ProviderSet struct {
 	Network NetworkProvider
 }
 
+// Resolver is the per-resource provider-set lookup the handlers and the
+// reconciler depend on. *Registry satisfies it. The signature is deliberately
+// the same For(region,zone) the Registry already exposed, so the per-zone cache,
+// the agent-decision closure, and the no-agent warn path are reused with zero
+// new machinery — only the injection point moved from "once at boot" to "per
+// request / per resource".
+type Resolver interface {
+	For(region, zone string) (*ProviderSet, error)
+}
+
+// FixedResolver is a Resolver that returns the SAME ProviderSet for every
+// (region, zone). It exists for callers that build the handler graph from three
+// fixed providers without a full Registry — the contract-test harness and unit
+// tests that nop the backends, and as the single-cluster fallback in NewRouter
+// when no Registry is injected. For these callers there is exactly one (implicit
+// local) zone, so resolving any zone to the one set is correct and behavior-
+// preserving: it is literally the pre-routing "one fixed provider set" model.
+type FixedResolver struct{ set *ProviderSet }
+
+// NewFixedResolver wraps three fixed providers into a Resolver. Every For(...)
+// call returns the same set — appropriate only when there is a single zone.
+func NewFixedResolver(compute ComputeProvider, cluster ClusterProvider, network NetworkProvider) *FixedResolver {
+	return &FixedResolver{set: &ProviderSet{Compute: compute, Cluster: cluster, Network: network}}
+}
+
+// For returns the single fixed set regardless of region/zone.
+func (f *FixedResolver) For(_, _ string) (*ProviderSet, error) { return f.set, nil }
+
+// ZoneCatalog answers "is this a registered remote zone?" for the build-on-miss
+// path. It is consulted OUTSIDE the Registry's write lock (so a slow DB query
+// can't serialize unrelated zone lookups) and MUST fail closed: when the catalog
+// can't be reached the zone is treated as unknown, never as the local zone.
+//
+// The db.Repository satisfies this via its regions/zones catalog. A nil catalog
+// (router-only tests, the single-cluster default that never asks for a non-local
+// zone) means only the local zone ever resolves — any other zone is "unknown".
+type ZoneCatalog interface {
+	// IsKnownZone reports whether (region, zone) exists in the regions/zones
+	// catalog. err is non-nil only on a catalog lookup failure; callers treat a
+	// failure as "not known" (fail closed).
+	IsKnownZone(ctx context.Context, region, zone string) (bool, error)
+}
+
 // Registry resolves the provider set for a (region, zone). It mirrors
 // handlers.Registry's map+RWMutex+zoneKey shape.
 type Registry struct {
@@ -64,6 +110,16 @@ type Registry struct {
 	// agentGateway resolves a zone's live agent Session. nil ⇒ the agent path is
 	// disabled entirely (always the Direct seam).
 	agentGateway agentgw.SessionResolver
+
+	// catalog gates build-on-miss for non-local zones (fail closed). nil ⇒ only
+	// the local zone resolves (the single-cluster default).
+	catalog ZoneCatalog
+
+	// cluster is the GLOBAL Rancher cluster provider, built once in NewRegistry
+	// and shared by EVERY ProviderSet (local and remote). Rancher is one
+	// management control plane across the fleet — there is no per-zone cluster
+	// client and no agent seam for it. buildSet never reconstructs it.
+	cluster ClusterProvider
 
 	// routeReads gates the dark read slice (DCAPI_AGENT_ROUTE_READS).
 	routeReads bool
@@ -90,7 +146,9 @@ const noAgentWarnEvery = 30 * time.Second
 func registryKey(region, zone string) string { return region + "/" + zone }
 
 // NewRegistry builds the local-zone ProviderSet from cfg and wires its compute
-// provider's cluster-access seam to the agent gateway behind the read toggle.
+// and network providers' cluster-access seam to the agent gateway behind the
+// per-family toggles. The global Rancher cluster provider is built once here and
+// shared by every zone.
 //
 // agentGateway may be nil (agent path disabled). It is the handlers.Registry
 // adapted to agentgw.SessionResolver (handlers.NewAgentGateway), constructed in
@@ -108,93 +166,31 @@ func NewRegistry(cfg *config.Config, agentGateway agentgw.SessionResolver, log z
 		noAgentWarn:  make(map[string]time.Time),
 	}
 
-	// One GVR-aware decision closure serves BOTH families: it is per-GVR (Part A),
-	// so the same closure correctly routes VM verbs for the kubevirt GVRs and
-	// network verbs for the kubeovn/NAD GVRs, each gated by that family's RouteVerbs.
-	decide := r.agentDecision(cfg)
-
-	// ── Compute provider (harvester) with the routed cluster-access seam ───────
-	// Only the harvester path supports the seam. WithRoutedAccessor builds the
-	// Routed accessor over the client's OWN dynamic client (the Direct fallback),
-	// so the off-path and every not-yet-routed method share one client.
-	var compute ComputeProvider
-	switch cfg.VMProvider {
-	case "harvester":
-		hc, err := harvester.NewClient(cfg.HarvesterKubeconfig, cfg.HarvesterNamespace)
-		if err != nil {
-			return nil, fmt.Errorf("build harvester client for registry: %w", err)
-		}
-		hc.WithRoutedAccessor(func(direct clusteraccess.Accessor) clusteraccess.Accessor {
-			return clusteraccess.NewRouted(direct, decide)
-		})
-		compute = hc
-	default:
-		// Non-harvester compute providers don't have the seam yet — fall back to
-		// the plain factory (Direct behaviour). Nothing routes through the agent.
-		c, err := NewComputeProvider(cfg)
-		if err != nil {
-			return nil, err
-		}
-		compute = c
-	}
-
-	// ── Cluster provider: plain Direct (unchanged — rancher is an HTTP Steve
-	// client that does not fit the Accessor seam). ─────────────────────────────
+	// ── Cluster provider: GLOBAL, built once, shared by every zone. Plain Direct
+	// (rancher is an HTTP Steve client that does not fit the Accessor seam). ─────
 	cluster, err := NewClusterProvider(cfg)
 	if err != nil {
 		return nil, err
 	}
+	r.cluster = cluster
 
-	// ── Network provider (kubeovn) with the routed cluster-access seam ─────────
-	// Mirrors the compute path: build the kubeovn client directly so we can wire
-	// WithRoutedAccessor over its OWN dynamic client (the same SHARED decide
-	// closure). The kubeovn CRD CRUD lifecycle (Vpc/Subnet/NAD create/get/delete)
-	// then routes per-family under the SAME reads/writes toggles, gated by the
-	// network families' RouteVerbs. main.go still applies F15 WithExternalNetwork
-	// and F20 WithDNSConfig to localSet.Network (this same instance) AFTER the
-	// registry returns, so that plumbing is untouched — WithRoutedAccessor only
-	// swaps c.access. With the toggles off (default) every network op is the
-	// byte-identical Direct path.
-	var network NetworkProvider
-	switch cfg.NetworkProvider {
-	case "kubeovn":
-		kc, err := kubeovn.New(cfg.HarvesterKubeconfig, cfg.KubeOVNNamespace)
-		if err != nil {
-			return nil, fmt.Errorf("build kubeovn client for registry: %w", err)
-		}
-		kc.WithRoutedAccessor(func(direct clusteraccess.Accessor) clusteraccess.Accessor {
-			return clusteraccess.NewRouted(direct, decide)
-		})
-		network = kc
-	default:
-		// Non-kubeovn network providers don't have the seam — plain factory (Direct).
-		n, err := NewNetworkProvider(cfg)
-		if err != nil {
-			return nil, err
-		}
-		network = n
+	// ── Local-zone set (direct Harvester/KubeOVN, routed seam) ─────────────────
+	localSet, err := r.buildLocalSet(cfg)
+	if err != nil {
+		return nil, err
 	}
+	r.set[registryKey(cfg.LocalRegion, cfg.LocalZone)] = localSet
 
-	r.set[registryKey(cfg.LocalRegion, cfg.LocalZone)] = &ProviderSet{
-		Compute: compute,
-		Cluster: cluster,
-		Network: network,
-	}
-
-	// One explicit "which zone do I route to" line at boot. This is the routing
-	// TARGET (cfg.LocalRegion/LocalZone) — the zone whose token an agent must be
-	// minted for to receive routed traffic. Surfacing it here makes the
-	// colombo-vs-zone-1 class of misconfig visible at startup rather than as a
-	// silent no-route at request time.
+	// One explicit "which zone do I route to" line at boot. This is the LOCAL
+	// routing target; per-resource resolution now routes other zones to their own
+	// agents. Surfacing it here makes the colombo-vs-zone-1 class of misconfig
+	// visible at startup rather than as a silent no-route at request time.
 	log.Info().
 		Str("route_region", cfg.LocalRegion).Str("route_zone", cfg.LocalZone).
 		Bool("reads", cfg.AgentRouteReads).Bool("writes", cfg.AgentRouteWrites).
 		Bool("gateway", agentGateway != nil).
-		Msg("agent routing config: routed traffic targets this region/zone; an agent must present a token minted for it (else routing warns and uses the direct path)")
+		Msg("agent routing config: the LOCAL region/zone uses the direct kubeconfig (plus the local agent when routing toggles are on); remote zones route to their own agent")
 
-	// One log line covering BOTH toggles so an operator can tell from the logs
-	// whether reads and/or writes route. Each only ever engages when a live agent
-	// is connected for the zone; with the gateway absent both are forced off.
 	if agentGateway != nil && cfg.AgentRouteReads {
 		log.Info().
 			Str("region", cfg.LocalRegion).Str("zone", cfg.LocalZone).
@@ -218,42 +214,184 @@ func NewRegistry(cfg *config.Config, agentGateway agentgw.SessionResolver, log z
 	return r, nil
 }
 
-// For returns the cached provider set for a (region, zone). Only the local zone
-// exists in M-C; any other zone is an error (no second zone is provisioned yet).
+// WithZoneCatalog injects the regions/zones catalog used to gate build-on-miss
+// for remote zones (fail closed). Returns the same *Registry for chaining. Wired
+// in main.go after the repo exists. Without it, only the local zone resolves.
+func (r *Registry) WithZoneCatalog(c ZoneCatalog) *Registry {
+	r.catalog = c
+	return r
+}
+
+// buildLocalSet builds the LOCAL zone's ProviderSet from cfg: the direct
+// Harvester compute provider and direct KubeOVN network provider, each wrapped
+// with a Routed accessor whose decision is bound to the LOCAL region/zone. This
+// is the exact construction dc-api used before per-resource routing, so the
+// local set is byte-identical.
+func (r *Registry) buildLocalSet(cfg *config.Config) (*ProviderSet, error) {
+	// The decision closure for the LOCAL zone, bound to the local region/zone.
+	decide := r.agentDecision(cfg.LocalRegion, cfg.LocalZone)
+
+	// ── Compute provider (harvester) with the routed cluster-access seam ───────
+	var compute ComputeProvider
+	switch cfg.VMProvider {
+	case "harvester":
+		hc, err := harvester.NewClient(cfg.HarvesterKubeconfig, cfg.HarvesterNamespace)
+		if err != nil {
+			return nil, fmt.Errorf("build harvester client for registry: %w", err)
+		}
+		hc.WithRoutedAccessor(func(direct clusteraccess.Accessor) clusteraccess.Accessor {
+			return clusteraccess.NewRouted(direct, decide)
+		})
+		compute = hc
+	default:
+		c, err := NewComputeProvider(cfg)
+		if err != nil {
+			return nil, err
+		}
+		compute = c
+	}
+
+	// ── Network provider (kubeovn) with the routed cluster-access seam ─────────
+	var network NetworkProvider
+	switch cfg.NetworkProvider {
+	case "kubeovn":
+		kc, err := kubeovn.New(cfg.HarvesterKubeconfig, cfg.KubeOVNNamespace)
+		if err != nil {
+			return nil, fmt.Errorf("build kubeovn client for registry: %w", err)
+		}
+		kc.WithRoutedAccessor(func(direct clusteraccess.Accessor) clusteraccess.Accessor {
+			return clusteraccess.NewRouted(direct, decide)
+		})
+		network = kc
+	default:
+		n, err := NewNetworkProvider(cfg)
+		if err != nil {
+			return nil, err
+		}
+		network = n
+	}
+
+	return &ProviderSet{
+		Compute: compute,
+		Cluster: r.cluster,
+		Network: network,
+	}, nil
+}
+
+// buildRemoteSet builds a REMOTE zone's agent-only ProviderSet. dc-api holds NO
+// kubeconfig for the zone, so:
+//
+//   - Compute/Network are credential-free clients (harvester.NewRemoteClient /
+//     kubeovn.NewRemoteClient). The harvester client routes the VM-object CRUD
+//     lifecycle through a Routed accessor bound to THIS zone, whose Direct
+//     fallback is a clusteraccess.NoCreds — so a missing agent yields a clear
+//     "no agent connected for zone" error, never a silent hit on the LOCAL
+//     cluster. The kubeovn remote client defers networking behind a clear
+//     local-only error (the network plumbing has no agent path yet).
+//   - Cluster is the SAME global Rancher client every zone shares.
+//
+// buildRemoteSet performs NO network I/O (no kubeconfig to dial), so it is safe
+// to run under the Registry write lock without serializing unrelated lookups.
+func (r *Registry) buildRemoteSet(region, zone string) *ProviderSet {
+	decide := r.agentDecision(region, zone)
+	// Agent-only accessor: route via the agent, fall back to NoCreds (clear error)
+	// — NEVER to the local direct path.
+	remoteAccessor := clusteraccess.NewRouted(clusteraccess.NewNoCreds(region, zone), decide)
+
+	return &ProviderSet{
+		Compute: harvester.NewRemoteClient(remoteAccessor, region, zone),
+		Cluster: r.cluster, // global Rancher
+		Network: kubeovn.NewRemoteClient(region, zone),
+	}
+}
+
+// For returns the cached provider set for a (region, zone), building it lazily
+// on a miss.
+//
+// Fast path (the single-cluster / single-zone case and every repeated lookup):
+// an RLock read of the map. The LOCAL zone is always present (built eagerly in
+// NewRegistry), so For(local) is a pure cache hit returning the SAME *ProviderSet
+// pointer every time — byte-identical to today's fixed providers.
+//
+// Build-on-miss (multi-zone): empty region/zone (pre-stamp rows) resolve to the
+// local zone. Otherwise the catalog is consulted OUTSIDE the lock (fail closed):
+//   - not a known zone → clear "unknown zone" error, nothing built or cached;
+//   - a known REMOTE zone → build the agent-only set once under the write lock
+//     (double-checked), cache it, and return it. buildRemoteSet does no network
+//     I/O, so the lock is held only briefly.
+//
+// A failed catalog lookup is treated as unknown — never a fallback to the local
+// cluster (the silent-wrong-cluster failure mode).
 func (r *Registry) For(region, zone string) (*ProviderSet, error) {
+	// Empty region/zone (pre-stamp rows, or callers that don't carry a zone)
+	// resolve to the local zone — that is where those resources actually live.
+	if region == "" {
+		region = r.localRegion
+	}
+	if zone == "" {
+		zone = r.localZone
+	}
+	key := registryKey(region, zone)
+
+	// ── Fast path: cache hit (local-first; covers Mode A entirely). ────────────
 	r.mu.RLock()
-	set, ok := r.set[registryKey(region, zone)]
+	set, ok := r.set[key]
 	r.mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("no provider set for zone %s/%s (only the local zone %s/%s is configured)",
+	if ok {
+		return set, nil
+	}
+
+	// The local zone is always cached, so a miss here is a non-local zone. It
+	// must be a registered remote zone or it does not resolve. Consult the
+	// catalog OUTSIDE the lock (fail closed).
+	if r.catalog == nil {
+		return nil, fmt.Errorf(
+			"no provider set for zone %s/%s: not the local zone %s/%s and no zone catalog is configured",
 			region, zone, r.localRegion, r.localZone)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	known, err := r.catalog.IsKnownZone(ctx, region, zone)
+	if err != nil {
+		// Fail closed: a catalog failure must NOT open a fallback to the local
+		// cluster. Surface it as unresolved so the handler/reconciler retries.
+		return nil, fmt.Errorf("resolve zone %s/%s: zone catalog lookup failed (failing closed, not falling back to the local cluster): %w", region, zone, err)
+	}
+	if !known {
+		return nil, fmt.Errorf(
+			"unknown zone %s/%s: not the local zone %s/%s and not a registered remote zone",
+			region, zone, r.localRegion, r.localZone)
+	}
+
+	// ── Build-on-miss for a known remote zone (double-checked under the lock). ──
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if set, ok := r.set[key]; ok {
+		// Another goroutine built it between our RUnlock and Lock.
+		return set, nil
+	}
+	set = r.buildRemoteSet(region, zone)
+	r.set[key] = set
+	r.log.Info().Str("region", region).Str("zone", zone).
+		Msg("provider registry: built agent-only provider set for remote zone (no direct credentials; ops route to the zone's agent or fail clearly)")
 	return set, nil
 }
 
-// agentDecision builds the live decision closure for the local zone's Routed
+// agentDecision builds the live decision closure for the given zone's Routed
 // accessor. It re-evaluates the toggles + live-session check + verb allow-set on
 // EVERY call, so "toggle on / toggle off" and "agent connected / disconnected"
 // are observable on the very next request with no provider reconstruction.
 //
+// region/zone are bound to THIS zone (not cfg.Local*), so the live-session check
+// and the no-agent warning target the correct zone — this is what lets a remote
+// resource route to its OWN agent session rather than the local one.
+//
 // The routed allow-set is gated per family via clusteraccess.RoutableVerbs(gvr)
 // (the capability registry's RouteVerbs for that GVR), then split reads (VerbGet)
-// by AgentRouteReads, writes (VerbCreate, VerbDelete) by AgentRouteWrites. Each
-// verb is declared on a capability IN THE SAME PR as the matching dc-agent RBAC
-// rule — never one without the other. A GVR/verb the registry does not declare
-// always returns (_, false) → Direct. Because membership is per-GVR, onboarding a
-// second family (e.g. KubeOVN networks) routes ONLY that family's declared verbs;
-// it cannot inherit a verb that only another family (e.g. VMs) declared.
-//
-// NOTE: the write allow-set uses VerbCreate (not VerbApply) because CreateVM
-// calls c.access.Create(...). On the Direct path that is a byte-identical POST;
-// only the AgentBacked path turns VerbCreate into a server-side apply, since SSA
-// is the agent's only create mechanism. VerbApply/VerbUpdate stay out until a
-// later phase needs them.
-func (r *Registry) agentDecision(cfg *config.Config) clusteraccess.AgentDecision {
+// by AgentRouteReads, writes (VerbCreate, VerbDelete) by AgentRouteWrites.
+func (r *Registry) agentDecision(region, zone string) clusteraccess.AgentDecision {
 	mapper := clusteraccess.DefaultGVKMapper()
 	fieldManager := "dc-api"
-	region, zone := cfg.LocalRegion, cfg.LocalZone
 
 	return func(verb clusteraccess.Verb, gvr schema.GroupVersionResource) (clusteraccess.Accessor, bool) {
 		// (2) gateway present — shared precondition for any routing.
@@ -261,13 +399,6 @@ func (r *Registry) agentDecision(cfg *config.Config) clusteraccess.AgentDecision
 			return nil, false
 		}
 		// (1)+(4) PER-FAMILY registry membership AND per-family toggle, together.
-		//   reads  → AgentRouteReads  gates read verbs  (VerbGet)
-		//   writes → AgentRouteWrites gates write verbs (VerbCreate, VerbDelete)
-		// RoutableVerbs(gvr) is the per-family allow-set declared in the capability
-		// registry (RouteVerbs). A GVR that is not an onboarded routable family, or
-		// a verb that family did not declare, always falls through to Direct. This
-		// REPLACES the cross-family UnionRouteVerbs() so a second family routes ONLY
-		// its own declared verbs — never a verb another family happened to declare.
 		routable, ok := clusteraccess.RoutableVerbs(gvr)
 		if !ok || !routable[verb] {
 			return nil, false
@@ -284,14 +415,14 @@ func (r *Registry) agentDecision(cfg *config.Config) clusteraccess.AgentDecision
 		default:
 			return nil, false
 		}
-		// (3) a live agent session must exist for the zone RIGHT NOW.
+		// (3) a live agent session must exist for THIS zone RIGHT NOW.
 		sess, ok := r.agentGateway.Session(region, zone)
 		if !ok {
-			// The toggle for this verb is ON (we passed the checks above) but no
-			// agent is connected for the routing zone. Direct is still the correct,
-			// byte-identical safety belt — but this used to be SILENT, which is
-			// exactly how the colombo-vs-zone-1 misconfig hid. Make it observable
-			// without flooding: warn at most once per zone per noAgentWarnEvery.
+			// The toggle for this verb is ON but no agent is connected for the
+			// zone. For the LOCAL zone the Routed accessor's Direct fallback is the
+			// correct byte-identical safety belt; for a REMOTE zone the fallback is
+			// NoCreds, which errors clearly. Either way warn (rate-limited) so the
+			// colombo-vs-zone-1 misconfig is observable.
 			r.warnNoAgent(region, zone)
 			return nil, false
 		}
@@ -300,10 +431,10 @@ func (r *Registry) agentDecision(cfg *config.Config) clusteraccess.AgentDecision
 }
 
 // warnNoAgent emits a rate-limited WARNING when a routed verb's toggle is on but
-// no agent is connected for the zone dc-api routes to. It fires at most once per
-// zone per noAgentWarnEvery so a routed call hammered at request rate cannot
-// flood the log. The caller still returns Direct — this is observability only,
-// the byte-identical fallthrough behaviour is unchanged.
+// no agent is connected for the zone. It fires at most once per zone per
+// noAgentWarnEvery. The caller still returns "not routed" — the Routed accessor's
+// Direct fallback then runs (local: the byte-identical direct path; remote: a
+// clear NoCreds error).
 func (r *Registry) warnNoAgent(region, zone string) {
 	key := registryKey(region, zone)
 	now := time.Now()
@@ -318,5 +449,5 @@ func (r *Registry) warnNoAgent(region, zone string) {
 
 	r.log.Warn().
 		Str("region", region).Str("zone", zone).
-		Msg("agent routing enabled for this region/zone but no agent is connected; using the direct cluster path — mint and connect an agent for this zone, or the routed traffic stays direct")
+		Msg("agent routing enabled for this region/zone but no agent is connected; the local zone uses the direct cluster path while a remote zone fails clearly — mint and connect an agent for this zone")
 }

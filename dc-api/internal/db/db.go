@@ -706,7 +706,8 @@ func (r *Repository) GetQuota(ctx context.Context, tenantID string) (*models.Quo
 func (r *Repository) ListPending(ctx context.Context) ([]*models.Resource, error) {
 	const q = `
 		SELECT id, tenant_id, tenant_uuid, project_id, project_uuid, owner_id, name, type, size, status,
-		       provider_type, backend_uid, ip_address, mgmt_ip, vnet_id, subnet_id, message, created_at, updated_at
+		       provider_type, backend_uid, ip_address, mgmt_ip, vnet_id, subnet_id, message,
+		       region, zone, created_at, updated_at
 		FROM   resources
 		WHERE  backend_uid IS NOT NULL
 		AND    (
@@ -726,6 +727,7 @@ func (r *Repository) ListPending(ctx context.Context) ([]*models.Resource, error
 	for rows.Next() {
 		var res models.Resource
 		var size, backendUID, ipAddress, mgmtIP, message, projectID *string
+		var region, zone *string
 		var projectUUID *uuid.UUID
 		if err := rows.Scan(
 			&res.ID, &res.TenantID, &res.TenantUUID,
@@ -733,9 +735,18 @@ func (r *Repository) ListPending(ctx context.Context) ([]*models.Resource, error
 			&res.OwnerID, &res.Name,
 			&res.Type, &size, &res.Status,
 			&res.ProviderType, &backendUID, &ipAddress, &mgmtIP, &res.VNetID, &res.SubnetID, &message,
+			&region, &zone,
 			&res.CreatedAt, &res.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("db scan pending resource: %w", err)
+		}
+		// Region/Zone drive per-resource provider resolution in the reconciler.
+		// Nullable for pre-stamp rows (the resolver maps empty → the local zone).
+		if region != nil {
+			res.Region = *region
+		}
+		if zone != nil {
+			res.Zone = *zone
 		}
 		if projectID != nil {
 			res.ProjectID = *projectID

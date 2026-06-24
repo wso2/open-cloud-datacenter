@@ -27,17 +27,47 @@ import (
 
 // SubnetHandler handles all /v1/vnets/{vnet_id}/subnets endpoints.
 type SubnetHandler struct {
-	repo     *db.Repository
-	provider providers.NetworkProvider
-	nat      providers.VPCNATProvisioner  // nil = F15 disabled (no SNAT provisioning)
-	dns      providers.VPCDNSProvisioner  // nil = F20 disabled (no per-VPC DNS)
-	log      zerolog.Logger
+	repo *db.Repository
+	// resolve maps the parent VNet's (region, zone) to its NetworkProvider. A
+	// subnet inherits its parent VNet's zone (it is a VPC child).
+	resolve       providers.Resolver
+	defaultRegion string
+	defaultZone   string
+	// nat/dns are the LOCAL-zone VPC NAT/CoreDNS provisioners. Local-only (no
+	// agent path yet): the handler only runs them for a subnet whose parent VNet
+	// is in the local zone. nil = disabled (tests).
+	nat providers.VPCNATProvisioner // nil = F15 disabled (no SNAT provisioning)
+	dns providers.VPCDNSProvisioner // nil = F20 disabled (no per-VPC DNS)
+	log zerolog.Logger
 }
 
 // NewSubnetHandler creates a SubnetHandler with injected dependencies.
 // nat and dns may be nil — when nil, the respective provisioning steps are skipped.
-func NewSubnetHandler(repo *db.Repository, provider providers.NetworkProvider, nat providers.VPCNATProvisioner, dns providers.VPCDNSProvisioner, log zerolog.Logger) *SubnetHandler {
-	return &SubnetHandler{repo: repo, provider: provider, nat: nat, dns: dns, log: log}
+func NewSubnetHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, nat providers.VPCNATProvisioner, dns providers.VPCDNSProvisioner, log zerolog.Logger) *SubnetHandler {
+	return &SubnetHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, nat: nat, dns: dns, log: log}
+}
+
+// network resolves the NetworkProvider for a subnet's parent VNet (region, zone).
+func (h *SubnetHandler) network(region, zone string) (providers.NetworkProvider, error) {
+	set, err := h.resolve.For(region, zone)
+	if err != nil {
+		return nil, err
+	}
+	return set.Network, nil
+}
+
+// isLocalZone reports whether the parent VNet's (region, zone) is the local zone
+// (where the NAT/DNS provisioners apply). Empty values default to local.
+func (h *SubnetHandler) isLocalZone(region, zone string) bool {
+	r := region
+	if r == "" {
+		r = h.defaultRegion
+	}
+	z := zone
+	if z == "" {
+		z = h.defaultZone
+	}
+	return r == h.defaultRegion && z == h.defaultZone
 }
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
@@ -202,6 +232,15 @@ func (h *SubnetHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the network provider for the parent VNet's zone (inherited by the
+	// subnet) before the PENDING row, so an unreachable zone fails clearly.
+	network, err := h.network(vnet.Region, vnet.Zone)
+	if err != nil {
+		h.log.Error().Err(err).Str("zone", vnet.Zone).Msg("resolve subnet provider for zone")
+		writeError(w, http.StatusBadGateway, "cannot reach the VNet's zone: "+err.Error())
+		return
+	}
+
 	subnet := &models.Subnet{
 		VNetID:       vnetID,
 		TenantID:     tenantID,
@@ -213,7 +252,7 @@ func (h *SubnetHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Gateway:      gw,
 		Description:  req.Description,
 		Status:       models.StatusPending,
-		ProviderType: h.provider.Name(),
+		ProviderType: network.Name(),
 	}
 	subnet, err = h.repo.CreateSubnet(r.Context(), subnet)
 	if err != nil {
@@ -232,8 +271,10 @@ func (h *SubnetHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 
-	// Async: call KubeOVN CreateSubnet.
-	go h.asyncProvisionSubnet(subnet.ID, vnet.ID, tenantID, projectID, userID, vnet.BackendUID, models.SubnetSpec{
+	// Async: call KubeOVN CreateSubnet. The NAT/DNS provisioning inside the
+	// goroutine is local-only; tell it whether the parent VNet is in the local
+	// zone so a remote-zone subnet skips the local NAT/DNS plumbing.
+	go h.asyncProvisionSubnet(network, h.isLocalZone(vnet.Region, vnet.Zone), subnet.ID, vnet.ID, tenantID, projectID, userID, vnet.BackendUID, models.SubnetSpec{
 		Name:        req.Name,
 		CIDR:        req.CIDR,
 		Gateway:     gw,
@@ -386,6 +427,15 @@ func (h *SubnetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the network provider for the parent VNet's zone before DELETING.
+	network, err := h.network(vnet.Region, vnet.Zone)
+	if err != nil && subnet.BackendUID != "" {
+		h.log.Error().Err(err).Str("zone", vnet.Zone).Msg("resolve subnet provider for delete")
+		writeError(w, http.StatusBadGateway, "cannot reach the VNet's zone to delete the subnet: "+err.Error())
+		return
+	}
+	localZone := h.isLocalZone(vnet.Region, vnet.Zone)
+
 	if err := h.repo.UpdateSubnetStatus(r.Context(), subnetID, models.StatusDeleting, "deletion requested", ""); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update subnet status")
 		return
@@ -410,7 +460,7 @@ func (h *SubnetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			h.log.Warn().Err(err).Str("subnet", subnetID.String()).
 				Msg("subnet-delete: CountActiveSubnetsForVNet failed; skipping per-VPC infra teardown")
-		} else if otherActive == 0 {
+		} else if otherActive == 0 && localZone {
 			// Last active subnet — release per-VPC infra that pins LSPs to this subnet.
 			// After each Delete call we poll until the pod is actually gone, because
 			// KubeOVN sets a deletion finalizer on the logical switch and refuses to
@@ -454,7 +504,7 @@ func (h *SubnetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if err := h.provider.DeleteSubnet(ctx, subnet.BackendUID); err != nil {
+		if err := network.DeleteSubnet(ctx, subnet.BackendUID); err != nil {
 			h.log.Error().Err(err).Str("backend_uid", subnet.BackendUID).Msg("kubeovn DeleteSubnet failed")
 			_ = h.repo.UpdateSubnetStatus(ctx, subnetID, models.StatusFailed, "deletion failed: "+err.Error(), "")
 			return
@@ -467,11 +517,11 @@ func (h *SubnetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // ── Async Provisioner ────────────────────────────────────────────────────────
 
-func (h *SubnetHandler) asyncProvisionSubnet(subnetID, vnetID uuid.UUID, tenantID, projectID, userID, vnetUID string, spec models.SubnetSpec) {
+func (h *SubnetHandler) asyncProvisionSubnet(network providers.NetworkProvider, localZone bool, subnetID, vnetID uuid.UUID, tenantID, projectID, userID, vnetUID string, spec models.SubnetSpec) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	providerRes, err := h.provider.CreateSubnet(ctx, vnetUID, spec)
+	providerRes, err := network.CreateSubnet(ctx, vnetUID, spec)
 	if err != nil {
 		h.log.Error().Err(err).Str("subnet", spec.Name).Msg("kubeovn CreateSubnet failed")
 		_ = h.repo.UpdateSubnetStatus(ctx, subnetID, models.StatusFailed,
@@ -481,6 +531,14 @@ func (h *SubnetHandler) asyncProvisionSubnet(subnetID, vnetID uuid.UUID, tenantI
 
 	_ = h.repo.UpdateSubnetStatus(ctx, subnetID, models.StatusActive,
 		"subnet provisioned", providerRes.BackendUID)
+
+	// The per-VPC NAT (F15) and CoreDNS (F20) plumbing is local-only — it runs
+	// against the local kubeconfig and has no agent path yet. A remote-zone subnet
+	// gets its CRD lifecycle through the agent but skips this local-only plumbing
+	// (documented constraint; remote NAT/DNS is future work).
+	if !localZone {
+		return
+	}
 
 	// ── F15: provision per-VPC SNAT if this is the first subnet on the VPC ────
 	// SNAT operates at the VPC router boundary — opaque to any cluster CNI a
