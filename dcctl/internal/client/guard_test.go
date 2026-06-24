@@ -95,3 +95,22 @@ func TestCheckAPIResponse_JSONContentTypeButHTMLBody(t *testing.T) {
 		t.Fatal("expected an error when a challenge marker is present despite a JSON content type, got nil")
 	}
 }
+
+func TestCheckAPIResponse_AcceptedNoContentType(t *testing.T) {
+	// Regression: an async DELETE answered 202 Accepted with no Content-Type and
+	// an empty body. A 2xx reached dc-api, so it is NOT a challenge — the guard
+	// must not turn a successful routed delete into a false Cloudflare error.
+	resp := newResp(http.StatusAccepted, "")
+	if err := checkAPIResponse(resp, nil); err != nil {
+		t.Fatalf("expected no error for a 202 accept with no content type, got: %v", err)
+	}
+}
+
+func TestCheckAPIResponse_AcceptedNonJSONBody(t *testing.T) {
+	// Regression: a 202 Accepted carrying a short non-JSON body (e.g. a plain
+	// status string) is still a successful async accept, not a challenge.
+	resp := newResp(http.StatusAccepted, "text/plain")
+	if err := checkAPIResponse(resp, []byte("accepted")); err != nil {
+		t.Fatalf("expected no error for a 202 accept with a non-JSON body, got: %v", err)
+	}
+}

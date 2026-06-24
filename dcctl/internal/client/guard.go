@@ -31,35 +31,52 @@ var challengeMarkers = []string{
 	"_cf_chl_opt",
 }
 
-// checkAPIResponse reports an actionable error when resp/body is clearly NOT
-// the JSON API response dcctl expects — i.e. it looks like an edge
-// bot-protection challenge or some other HTML interstitial. It returns nil for
-// any plausible JSON response (success OR a real API JSON error), so normal
-// error handling downstream is unchanged.
+// checkAPIResponse reports an actionable error when the response is clearly NOT
+// something dc-api produced — i.e. it looks like an edge bot-protection
+// challenge or another HTML interstitial. It returns nil for any plausible
+// dc-api response (a success, an async 202/204 accept, or a real API JSON
+// error), so normal handling downstream is unchanged.
 //
-// Triggers when, for a non-2xx-or-not, the response is non-JSON: the
-// Content-Type is not JSON (e.g. text/html), OR the body does not look like
-// JSON, OR the body carries a Cloudflare challenge marker.
+//   - A body that actually looks like a challenge (HTML, or a Cloudflare marker)
+//     is flagged whatever the status code.
+//   - Otherwise a 2xx is a successful dc-api response and is left alone, even if
+//     the body is empty or non-JSON: some endpoints answer 202/204 that way for
+//     asynchronous operations (e.g. a routed delete). A 2xx is never a challenge
+//     — the request reached dc-api.
+//   - For a non-2xx, dc-api answers with JSON; a non-JSON body means something
+//     other than dc-api replied, so we surface the guidance.
 func checkAPIResponse(resp *http.Response, body []byte) error {
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
-	jsonContentType := strings.Contains(contentType, "json")
 
-	// A JSON content type with a JSON-shaped body is the normal path — leave it
-	// alone so real API success/error responses flow through as today. A clear
-	// Cloudflare challenge marker overrides even a (spoofed) JSON content type.
-	if jsonContentType && looksLikeJSON(body) && !isChallengeBody(contentType, body) {
+	// A genuine edge challenge (HTML interstitial / Cloudflare marker) is flagged
+	// regardless of status code.
+	if isChallengeBody(contentType, body) {
+		return challengeError(resp.StatusCode)
+	}
+
+	// A 2xx means the request reached dc-api and succeeded. Async endpoints answer
+	// 202/204 with an empty or non-JSON body; that is not a challenge.
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
 	}
 
-	// Otherwise: a non-JSON content type, a body that plainly isn't JSON, or a
-	// Cloudflare challenge marker — all the same root cause (something other than
-	// dc-api answered) with the same actionable guidance.
+	// Non-2xx: dc-api's error responses are JSON. A JSON-shaped body flows through
+	// to normal error handling; anything else is an interstitial we should flag.
+	if strings.Contains(contentType, "json") && looksLikeJSON(body) {
+		return nil
+	}
+	return challengeError(resp.StatusCode)
+}
+
+// challengeError is the single actionable message for a response that did not
+// come from dc-api (an edge bot-protection challenge or other interstitial).
+func challengeError(status int) error {
 	return fmt.Errorf(
 		"dc-api returned a non-JSON response (HTTP %d) — this looks like an "+
 			"edge bot-protection challenge (Cloudflare). dcctl cannot solve a "+
 			"browser challenge. Check that your `dcapi_url` is correct and that "+
 			"your source network is allowed through the API's edge protection",
-		resp.StatusCode,
+		status,
 	)
 }
 
