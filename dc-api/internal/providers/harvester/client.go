@@ -102,6 +102,45 @@ type Client struct {
 	// c.dynamic directly — those GVRs are not in the agent's mapper/RBAC. The seam
 	// never leaks an agent concept past the ComputeProvider interface.
 	access clusteraccess.Accessor
+
+	// remoteRegion/remoteZone are non-empty ONLY for a credential-free REMOTE
+	// client built by NewRemoteClient (multi-zone routing). For such a client
+	// c.dynamic is nil: the seam ops (CreateVM/GetVM/DeleteVM via c.access) route
+	// to that zone's agent, but the direct-only ops (ListVMs, the VMI IP read,
+	// images, ListNetworks, the cloud-provider SA bootstrap) have no direct path
+	// and return a clear local-only error naming the zone instead of panicking on
+	// a nil dynamic client. Empty for the LOCAL client → today's behaviour.
+	remoteRegion, remoteZone string
+}
+
+// localOnlyErr is returned by a REMOTE client's direct-only methods (image
+// lookup/import, ListVMs, ListNetworks, the cloud-provider SA bootstrap). These
+// touch c.dynamic, which a remote client does not have. Failing here — BEFORE a
+// PENDING row or a provisioner call — is the documented local-only constraint
+// for the remote-zone build: routing the VM-object CRUD lifecycle is in scope;
+// routing image/SA bootstrap is future work behind this explicit error.
+func (c *Client) localOnlyErr(op string) error {
+	return fmt.Errorf(
+		"%s is not supported for remote zone %s/%s yet: dc-api holds no direct Harvester credentials there (image lookup, ListVMs/Networks, and the cloud-provider SA bootstrap are local-only for now)",
+		op, c.remoteRegion, c.remoteZone)
+}
+
+// NewRemoteClient builds a credential-free Harvester client for a REMOTE zone.
+// It has NO kubeconfig and NO dynamic client; every VM-object op runs through
+// the supplied agent-only Accessor (a clusteraccess.Routed whose Direct fallback
+// is a clusteraccess.NoCreds, so a missing agent fails clearly rather than
+// hitting the local cluster). The direct-only methods return localOnlyErr.
+//
+// This is the second mandatory red-team gap: a remote provider cannot just stub
+// Direct — it must route the lifecycle through the agent while refusing the
+// direct-only ops. region/zone are carried only for clear error messages.
+func NewRemoteClient(access clusteraccess.Accessor, region, zone string) *Client {
+	return &Client{
+		// dynamic + restConfig deliberately nil — guarded by remoteZone.
+		access:       access,
+		remoteRegion: region,
+		remoteZone:   zone,
+	}
 }
 
 // NewClient creates a Harvester client from a base64-encoded kubeconfig string.
@@ -176,6 +215,13 @@ func (c *Client) Name() string { return "harvester" }
 // EnsureProjectNamespace). CreateVM does NOT create it — missing namespace
 // is a handler-layer bug, not a recoverable provider condition.
 func (c *Client) CreateVM(ctx context.Context, tenantID, projectID string, spec models.VMSpec) (*models.Resource, error) {
+	if c.dynamic == nil {
+		// REMOTE client: VM create needs the image template resolved against the
+		// zone's local VirtualMachineImage catalog (resolveImage → c.dynamic),
+		// which we don't have for a remote zone. Fail clearly BEFORE building the
+		// manifest so the handler surfaces a useful error rather than misrouting.
+		return nil, c.localOnlyErr("VM create")
+	}
 	ns := common.NamespaceForProject(tenantID, projectID)
 
 	// Resolve the image display name or ID to a "namespace/resource-name" string.
@@ -266,6 +312,18 @@ func (c *Client) GetVM(ctx context.Context, backendUID string) (*models.Resource
 	// For single-NIC VMs neither is named "ovn" or "mgmt" (it's "default" or
 	// the legacy single "ovn"), so fall back to the legacy "first IP" reader.
 	var ip, mgmtIP string
+	if c.dynamic == nil {
+		// REMOTE client: status came from the agent (c.access above); IP
+		// enrichment via the direct VMI read is local-only. Return the status
+		// without IPs rather than dereferencing a nil dynamic client.
+		return &models.Resource{
+			Type:         models.ResourceTypeVM,
+			ProviderType: c.Name(),
+			BackendUID:   backendUID,
+			Name:         name,
+			Status:       vmStatusFromUnstructured(obj),
+		}, nil
+	}
 	vmi, vmiErr := c.dynamic.
 		Resource(harvesterVMIResource).
 		Namespace(ns).
@@ -327,6 +385,9 @@ func (c *Client) DeleteVM(ctx context.Context, backendUID string) error {
 // ListVMs returns all VMs in the tenant+project namespace.
 // projectID is the human-readable project slug.
 func (c *Client) ListVMs(ctx context.Context, tenantID, projectID string) ([]*models.Resource, error) {
+	if c.dynamic == nil {
+		return nil, c.localOnlyErr("ListVMs")
+	}
 	ns := common.NamespaceForProject(tenantID, projectID)
 	list, err := c.dynamic.
 		Resource(harvesterVMResource).
@@ -417,6 +478,9 @@ func (c *Client) HarvesterCACert() []byte { return c.restConfig.CAData }
 // the Secret's .data.token field). Polls up to 30 s for the token controller
 // to populate the Secret after creation.
 func (c *Client) EnsureCloudProviderSA(ctx context.Context, tenantNamespace string) ([]byte, error) {
+	if c.dynamic == nil {
+		return nil, c.localOnlyErr("cloud-provider ServiceAccount bootstrap")
+	}
 	saName := "harvester-cloud-provider-" + tenantNamespace
 
 	commonLabels := map[string]interface{}{
@@ -627,6 +691,9 @@ func vmIPByInterfaceName(obj *unstructured.Unstructured) (ovnIP, mgmtIP string) 
 // ListImages returns all VirtualMachineImages available in Harvester across all namespaces.
 // The Image.ID field ("namespace/resource-name") is what callers pass to CreateVM.
 func (c *Client) ListImages(ctx context.Context) ([]*models.Image, error) {
+	if c.dynamic == nil {
+		return nil, c.localOnlyErr("ListImages")
+	}
 	list, err := c.dynamic.Resource(vmImageGVR).Namespace("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("harvester list images: %w", err)
@@ -651,6 +718,9 @@ func (c *Client) ListImages(ctx context.Context) ([]*models.Image, error) {
 // Harvester stores a human-readable label in annotation "network.harvesterhci.io/route"
 // or falls back to the resource name.
 func (c *Client) ListNetworks(ctx context.Context) ([]*models.Network, error) {
+	if c.dynamic == nil {
+		return nil, c.localOnlyErr("ListNetworks")
+	}
 	list, err := c.dynamic.Resource(networkAttachmentGVR).Namespace("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("harvester list networks: %w", err)
@@ -675,6 +745,9 @@ func (c *Client) ListNetworks(ctx context.Context) ([]*models.Network, error) {
 // Harvester to download the image from the given URL into Longhorn storage.
 // The image is available for VM creation once its status transitions to "active".
 func (c *Client) CreateImage(ctx context.Context, displayName, downloadURL string) (*models.Image, error) {
+	if c.dynamic == nil {
+		return nil, c.localOnlyErr("CreateImage")
+	}
 	// Images are created in the "default" namespace in Harvester.
 	const imageNamespace = "default"
 

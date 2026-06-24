@@ -20,6 +20,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -38,14 +39,48 @@ import (
 
 // NSGHandler handles all /v1/security-groups endpoints.
 type NSGHandler struct {
-	repo     *db.Repository
-	provider providers.NetworkProvider
-	log      zerolog.Logger
+	repo *db.Repository
+	// resolve maps a zone to its NetworkProvider. NSGs are project-scoped; their
+	// rules only land on a backend when attached to a subnet, so attach/detach
+	// resolve from the target subnet's parent VNet zone. Record-only ops resolve
+	// to the default (local) zone. In a single-zone deployment all of these are
+	// the same cache-hit set.
+	resolve       providers.Resolver
+	defaultRegion string
+	defaultZone   string
+	log           zerolog.Logger
 }
 
 // NewNSGHandler creates an NSGHandler with injected dependencies.
-func NewNSGHandler(repo *db.Repository, provider providers.NetworkProvider, log zerolog.Logger) *NSGHandler {
-	return &NSGHandler{repo: repo, provider: provider, log: log}
+func NewNSGHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, log zerolog.Logger) *NSGHandler {
+	return &NSGHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, log: log}
+}
+
+// network resolves the NetworkProvider for (region, zone). Empty values resolve
+// to the local zone (cache hit).
+func (h *NSGHandler) network(region, zone string) (providers.NetworkProvider, error) {
+	set, err := h.resolve.For(region, zone)
+	if err != nil {
+		return nil, err
+	}
+	return set.Network, nil
+}
+
+// catalogNetwork resolves the NetworkProvider for the default (local) zone, used
+// by NSG record ops that have no subnet to inherit a zone from.
+func (h *NSGHandler) catalogNetwork() (providers.NetworkProvider, error) {
+	return h.network(h.defaultRegion, h.defaultZone)
+}
+
+// networkForSubnet resolves the NetworkProvider for a subnet's parent VNet zone.
+// NSG ACLs are written to the Subnet CRD, which lives in the subnet's zone. If
+// the parent VNet can't be loaded the resolution falls back to the local zone.
+func (h *NSGHandler) networkForSubnet(ctx context.Context, subnet *models.Subnet) (providers.NetworkProvider, error) {
+	vnet, err := h.repo.GetVNetInternal(ctx, subnet.VNetID)
+	if err != nil {
+		return h.catalogNetwork()
+	}
+	return h.network(vnet.Region, vnet.Zone)
 }
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
@@ -187,6 +222,16 @@ func (h *NSGHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	projectID, _ := middleware.ProjectFromContext(r.Context())
 
+	// NSGs are project-scoped (governed at project scope, not per resource zone);
+	// their backend ACLs are written to the subnet they attach to. The NSG record
+	// and its no-op pre-attach driver call resolve to the local/default zone.
+	network, err := h.catalogNetwork()
+	if err != nil {
+		h.log.Error().Err(err).Msg("resolve NSG provider")
+		writeError(w, http.StatusInternalServerError, "failed to resolve provider")
+		return
+	}
+
 	// Insert NSG row to get the UUID.
 	nsg := &models.NSG{
 		TenantID:     tenantID,
@@ -197,9 +242,9 @@ func (h *NSGHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Description:  req.Description,
 		Rules:        nsgRuleDTOsToModel(req.Rules),
 		Status:       models.StatusActive,
-		ProviderType: h.provider.Name(),
+		ProviderType: network.Name(),
 	}
-	nsg, err := h.repo.CreateNSG(r.Context(), nsg)
+	nsg, err = h.repo.CreateNSG(r.Context(), nsg)
 	if err != nil {
 		h.log.Error().Err(err).Str("tenant", tenantID).Msg("create NSG in DB")
 		if strings.Contains(err.Error(), "23505") || strings.Contains(err.Error(), "duplicate key") {
@@ -227,7 +272,7 @@ func (h *NSGHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 		Rules:       nsgRuleDTOsToModel(req.Rules),
 	}
-	providerRes, err := h.provider.CreateNSG(r.Context(), tenantID, projectID, spec)
+	providerRes, err := network.CreateNSG(r.Context(), tenantID, projectID, spec)
 	if err != nil {
 		h.log.Error().Err(err).Str("nsg", req.Name).Msg("kubeovn CreateNSG failed")
 		// Roll back DB row on driver failure.
@@ -247,7 +292,7 @@ func (h *NSGHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// With no attachments, UpdateNSGRules is a no-op at data plane; call anyway
 	// so rules are available immediately when the first subnet attaches.
 	compositeUID := buildNSGBackendUID(nsg.ID, nil)
-	_ = h.provider.UpdateNSGRules(r.Context(), compositeUID, nsgRuleDTOsToModel(req.Rules))
+	_ = network.UpdateNSGRules(r.Context(), compositeUID, nsgRuleDTOsToModel(req.Rules))
 
 	rules, _ := h.repo.ListNSGRules(r.Context(), nsg.ID)
 	writeJSON(w, http.StatusCreated, nsgToResponse(nsg, rules, nil))
@@ -357,7 +402,13 @@ func (h *NSGHandler) UpdateRules(w http.ResponseWriter, r *http.Request) {
 	compositeUID := buildNSGBackendUID(id, subnetBUIDs)
 
 	// Push updated rules to KubeOVN (no-op if no subnets attached).
-	if err := h.provider.UpdateNSGRules(r.Context(), compositeUID, nsgRuleDTOsToModel(req.Rules)); err != nil {
+	network, err := h.catalogNetwork()
+	if err != nil {
+		h.log.Error().Err(err).Msg("resolve NSG provider for rule update")
+		writeError(w, http.StatusInternalServerError, "failed to resolve provider")
+		return
+	}
+	if err := network.UpdateNSGRules(r.Context(), compositeUID, nsgRuleDTOsToModel(req.Rules)); err != nil {
 		h.log.Error().Err(err).Str("nsg", nsg.Name).Msg("kubeovn UpdateNSGRules failed")
 		writeError(w, http.StatusInternalServerError, "rules persisted but KubeOVN update failed: "+err.Error())
 		return
@@ -414,7 +465,13 @@ func (h *NSGHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if nsg.BackendUID != "" {
-		if err := h.provider.DeleteNSG(r.Context(), nsg.BackendUID); err != nil {
+		network, err := h.catalogNetwork()
+		if err != nil {
+			h.log.Error().Err(err).Msg("resolve NSG provider for delete")
+			writeError(w, http.StatusInternalServerError, "failed to resolve provider")
+			return
+		}
+		if err := network.DeleteNSG(r.Context(), nsg.BackendUID); err != nil {
 			h.log.Error().Err(err).Str("backend_uid", nsg.BackendUID).Msg("kubeovn DeleteNSG failed")
 			writeError(w, http.StatusInternalServerError, "failed to delete NSG from KubeOVN: "+err.Error())
 			return
@@ -487,8 +544,18 @@ func (h *NSGHandler) Attach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the network provider for the subnet's zone (NSG ACLs are written to
+	// the Subnet CRD, which lives in the subnet's parent VNet zone). Falls back to
+	// the local zone when the parent VNet's zone can't be loaded.
+	network, err := h.networkForSubnet(r.Context(), subnet)
+	if err != nil {
+		h.log.Error().Err(err).Str("nsg", nsg.Name).Msg("resolve NSG provider for attach")
+		writeError(w, http.StatusBadGateway, "cannot reach the subnet's zone: "+err.Error())
+		return
+	}
+
 	// Call driver to write NSG ACLs to the Subnet CRD.
-	if err := h.provider.AttachNSGToSubnet(r.Context(), nsg.BackendUID, subnet.BackendUID); err != nil {
+	if err := network.AttachNSGToSubnet(r.Context(), nsg.BackendUID, subnet.BackendUID); err != nil {
 		h.log.Error().Err(err).Str("nsg", nsg.Name).Msg("kubeovn AttachNSGToSubnet failed")
 		writeError(w, http.StatusInternalServerError, "failed to attach NSG: "+err.Error())
 		return
@@ -525,7 +592,7 @@ func (h *NSGHandler) Attach(w http.ResponseWriter, r *http.Request) {
 	h.log.Info().Str("nsg", sgID.String()).Int("rules", len(rules)).Int("subnets", len(subnetBUIDs)).
 		Strs("subnet_buids", subnetBUIDs).Msg("attach: applying NSG rules to attached subnets")
 	compositeUID := buildNSGBackendUID(sgID, subnetBUIDs)
-	if err := h.provider.UpdateNSGRules(r.Context(), compositeUID, rules); err != nil {
+	if err := network.UpdateNSGRules(r.Context(), compositeUID, rules); err != nil {
 		h.log.Error().Err(err).Str("nsg", sgID.String()).Msg("attach: kubeovn UpdateNSGRules failed")
 	}
 
@@ -581,7 +648,13 @@ func (h *NSGHandler) Detach(w http.ResponseWriter, r *http.Request) {
 	if att.TargetType == "subnet" {
 		subnet, subErr := h.repo.GetSubnet(r.Context(), att.TargetID)
 		if subErr == nil && subnet != nil {
-			if err := h.provider.DetachNSGFromSubnet(r.Context(), nsg.BackendUID, subnet.BackendUID); err != nil {
+			network, nErr := h.networkForSubnet(r.Context(), subnet)
+			if nErr != nil {
+				h.log.Error().Err(nErr).Str("nsg", nsg.Name).Msg("resolve NSG provider for detach")
+				writeError(w, http.StatusBadGateway, "cannot reach the subnet's zone: "+nErr.Error())
+				return
+			}
+			if err := network.DetachNSGFromSubnet(r.Context(), nsg.BackendUID, subnet.BackendUID); err != nil {
 				h.log.Error().Err(err).Str("nsg", nsg.Name).Msg("kubeovn DetachNSGFromSubnet failed")
 				writeError(w, http.StatusInternalServerError, "failed to detach NSG: "+err.Error())
 				return

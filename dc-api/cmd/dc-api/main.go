@@ -113,6 +113,12 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to initialise provider registry")
 	}
+	// Per-resource zone routing: the registry resolves the provider set for each
+	// resource's (region, zone). The regions/zones catalog gates building a set
+	// for a REMOTE zone (fail closed → an unknown zone never falls back to the
+	// local cluster). In the single-cluster default no remote zone is ever asked
+	// for, so this is inert there. The LOCAL set below stays the eager cache hit.
+	provReg.WithZoneCatalog(repo)
 	localSet, err := provReg.For(cfg.LocalRegion, cfg.LocalZone)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to resolve local provider set")
@@ -222,14 +228,14 @@ func main() {
 		// kube-ovn-controller hiccup must not prevent the API from starting.
 		{
 			bfCtx, bfCancel := context.WithTimeout(ctx, 10*time.Minute)
-			runNATBackfill(bfCtx, repo, kvClient)
+			runNATBackfill(bfCtx, repo, kvClient, cfg.LocalRegion, cfg.LocalZone)
 			bfCancel()
 		}
 
 		// ── Step 4: F20 backfill (10 min budget) ──────────────────────────────
 		{
 			bfCtx, bfCancel := context.WithTimeout(ctx, 10*time.Minute)
-			runDNSBackfill(bfCtx, repo, kvClient)
+			runDNSBackfill(bfCtx, repo, kvClient, cfg.LocalRegion, cfg.LocalZone)
 			bfCancel()
 		}
 	}
@@ -313,7 +319,11 @@ func main() {
 	// Polls PENDING/DELETING resources every 60s and syncs their status from
 	// the provider back into PostgreSQL. Runs as a background goroutine and
 	// exits cleanly when ctx is cancelled (SIGTERM).
-	go reconciler.New(repo, computeProvider, clusterProvider, log.Logger).Run(ctx)
+	// The reconciler resolves the provider per-resource by the resource's zone
+	// (provReg), so a resource in a remote zone reconciles against that zone's
+	// agent and one unreachable zone never stalls the others. In the single-zone
+	// case every resource resolves to the same local set (the cache hit).
+	go reconciler.New(repo, provReg, log.Logger).Run(ctx)
 
 	// ── F21: build infra-reserved-NAD set + sanity-check operator config ─────
 	// Build a set from DCAPI_INFRA_RESERVED_NADS, then assert that the
@@ -387,10 +397,17 @@ func main() {
 	// ── Router ────────────────────────────────────────────────────────────────
 	// All wiring happens in NewRouter. main.go does not know about individual routes.
 	router := api.NewRouter(api.RouterDeps{
-		Repo:                repo,
-		ComputeProvider:     computeProvider,
-		ClusterProvider:     clusterProvider,
-		NetworkProvider:     networkProvider,
+		Repo: repo,
+		// Per-resource provider resolver. Handlers call Providers.For(region, zone)
+		// per resource so a resource in a remote zone reaches that zone's agent. In
+		// the single-cluster / single-zone case every lookup is a cache hit on the
+		// local set built once in NewRegistry — byte-identical to the fixed
+		// providers below. The fixed providers remain for router-only callers
+		// (contract harness / tests) that build a router without a Registry.
+		Providers:       provReg,
+		ComputeProvider: computeProvider,
+		ClusterProvider: clusterProvider,
+		NetworkProvider: networkProvider,
 		NATProvisioner:      natProvisioner,
 		DNSProvisioner:      dnsProvisioner,
 		DNSSearchDomain:     cfg.VPCDNSSearchDomain,
@@ -460,7 +477,25 @@ func main() {
 //
 // Error handling: individual VPC failures are logged and skipped so a single
 // broken VPC doesn't prevent the API from starting.
-func runNATBackfill(ctx context.Context, repo *db.Repository, kvClient *kubeovn.Client) {
+// isLocalZoneVNet reports whether a VNet's (region, zone) is the local zone the
+// startup backfill loops can act on. dc-api holds direct kubeconfig credentials
+// only for the local zone; an empty region/zone on the row means "unspecified" →
+// the local zone (single-zone deployments never stamp a non-local zone). A
+// remote-zone VNet is skipped — its NAT/DNS has no agent path yet, and running
+// the local kvClient against it would wrongly target the LOCAL cluster.
+func isLocalZoneVNet(region, zone, localRegion, localZone string) bool {
+	r := region
+	if r == "" {
+		r = localRegion
+	}
+	z := zone
+	if z == "" {
+		z = localZone
+	}
+	return r == localRegion && z == localZone
+}
+
+func runNATBackfill(ctx context.Context, repo *db.Repository, kvClient *kubeovn.Client, localRegion, localZone string) {
 	vnets, err := repo.ListAllActiveVNets(ctx)
 	if err != nil {
 		log.Error().Err(err).Msg("NAT backfill: failed to list VNets — skipping backfill")
@@ -475,6 +510,14 @@ func runNATBackfill(ctx context.Context, repo *db.Repository, kvClient *kubeovn.
 	for _, vnet := range vnets {
 		if vnet.BackendUID == "" {
 			log.Warn().Str("vnet_id", vnet.ID.String()).Msg("NAT backfill: skipping VNet with no backend_uid (still PENDING?)")
+			continue
+		}
+		// The local kvClient holds credentials ONLY for the local zone. A remote-
+		// zone VNet's NAT cannot be provisioned here (no agent path for NAT yet) —
+		// skip it rather than misroute the CRDs to the LOCAL cluster.
+		if !isLocalZoneVNet(vnet.Region, vnet.Zone, localRegion, localZone) {
+			log.Debug().Str("vpc", vnet.BackendUID).Str("region", vnet.Region).Str("zone", vnet.Zone).
+				Msg("NAT backfill: skipping non-local-zone VNet (NAT plumbing is local-only)")
 			continue
 		}
 
@@ -529,7 +572,7 @@ func runNATBackfill(ctx context.Context, repo *db.Repository, kvClient *kubeovn.
 // CoreDNS Deployment (F20). Mirrors runNATBackfill exactly.
 //
 // Error handling: individual VPC failures are logged and skipped.
-func runDNSBackfill(ctx context.Context, repo *db.Repository, kvClient *kubeovn.Client) {
+func runDNSBackfill(ctx context.Context, repo *db.Repository, kvClient *kubeovn.Client, localRegion, localZone string) {
 	vnets, err := repo.ListAllActiveVNets(ctx)
 	if err != nil {
 		log.Error().Err(err).Msg("DNS backfill: failed to list VNets — skipping backfill")
@@ -544,6 +587,12 @@ func runDNSBackfill(ctx context.Context, repo *db.Repository, kvClient *kubeovn.
 	for _, vnet := range vnets {
 		if vnet.BackendUID == "" {
 			log.Warn().Str("vnet_id", vnet.ID.String()).Msg("DNS backfill: skipping VNet with no backend_uid (still PENDING?)")
+			continue
+		}
+		// Local-only: the local kvClient cannot provision a remote zone's CoreDNS.
+		if !isLocalZoneVNet(vnet.Region, vnet.Zone, localRegion, localZone) {
+			log.Debug().Str("vpc", vnet.BackendUID).Str("region", vnet.Region).Str("zone", vnet.Zone).
+				Msg("DNS backfill: skipping non-local-zone VNet (CoreDNS plumbing is local-only)")
 			continue
 		}
 

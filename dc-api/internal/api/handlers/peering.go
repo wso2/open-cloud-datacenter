@@ -36,14 +36,30 @@ import (
 
 // PeeringHandler handles all /v1/vnets/{vnet_id}/peerings endpoints.
 type PeeringHandler struct {
-	repo     *db.Repository
-	provider providers.NetworkProvider
-	log      zerolog.Logger
+	repo *db.Repository
+	// resolve maps a peering's local VNet (region, zone) to its NetworkProvider.
+	// A peering's staticRoutes are written to both VNets' Vpc CRDs; the routing
+	// keys off the local VNet (the one on whose behalf the op runs). Cross-zone
+	// peering is out of scope for now — both VNets are expected in the same zone.
+	resolve       providers.Resolver
+	defaultRegion string
+	defaultZone   string
+	log           zerolog.Logger
 }
 
 // NewPeeringHandler creates a PeeringHandler with injected dependencies.
-func NewPeeringHandler(repo *db.Repository, provider providers.NetworkProvider, log zerolog.Logger) *PeeringHandler {
-	return &PeeringHandler{repo: repo, provider: provider, log: log}
+func NewPeeringHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, log zerolog.Logger) *PeeringHandler {
+	return &PeeringHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, log: log}
+}
+
+// network resolves the NetworkProvider for (region, zone). Empty values resolve
+// to the local zone (cache hit).
+func (h *PeeringHandler) network(region, zone string) (providers.NetworkProvider, error) {
+	set, err := h.resolve.For(region, zone)
+	if err != nil {
+		return nil, err
+	}
+	return set.Network, nil
 }
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
@@ -204,6 +220,15 @@ func (h *PeeringHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the network provider for the local VNet's zone before the PENDING
+	// row, so an unreachable zone fails clearly.
+	network, err := h.network(vnet.Region, vnet.Zone)
+	if err != nil {
+		h.log.Error().Err(err).Str("zone", vnet.Zone).Msg("resolve peering provider for zone")
+		writeError(w, http.StatusBadGateway, "cannot reach the VNet's zone: "+err.Error())
+		return
+	}
+
 	// Insert PENDING row.
 	projectID, projectUUID, _ := lookupProjectUUID(w, r)
 	peering := &models.Peering{
@@ -216,7 +241,7 @@ func (h *PeeringHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Name:                  req.Name,
 		AllowForwardedTraffic: req.AllowForwardedTraffic,
 		Status:                models.StatusPending,
-		ProviderType:          h.provider.Name(),
+		ProviderType:          network.Name(),
 	}
 	peering, err = h.repo.CreatePeering(r.Context(), peering)
 	if err != nil {
@@ -249,7 +274,7 @@ func (h *PeeringHandler) Create(w http.ResponseWriter, r *http.Request) {
 		PeerAddressSpace:      peerVNet.AddressSpace,
 		TransitCIDR:           transitCIDR,
 	}
-	go h.asyncProvisionPeering(peering.ID, tenantID, userID, vnet.BackendUID, peerVNet.BackendUID, spec)
+	go h.asyncProvisionPeering(network, peering.ID, tenantID, userID, vnet.BackendUID, peerVNet.BackendUID, spec)
 
 	resp := peeringToResponse(peering)
 	w.Header().Set("Content-Type", "application/json")
@@ -398,6 +423,14 @@ func (h *PeeringHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		peerCIDRs = peerVNet.AddressSpace
 	}
 
+	// Resolve the network provider for the local VNet's zone before DELETING.
+	network, err := h.network(vnet.Region, vnet.Zone)
+	if err != nil && peering.BackendUID != "" {
+		h.log.Error().Err(err).Str("zone", vnet.Zone).Msg("resolve peering provider for delete")
+		writeError(w, http.StatusBadGateway, "cannot reach the VNet's zone to delete the peering: "+err.Error())
+		return
+	}
+
 	if err := h.repo.UpdatePeeringStatus(r.Context(), peeringID, models.StatusDeleting, "deletion requested", ""); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update peering status")
 		return
@@ -413,7 +446,7 @@ func (h *PeeringHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			_ = h.repo.DeletePeering(ctx, peeringID)
 			return
 		}
-		if err := h.provider.DeletePeering(ctx, peering.BackendUID, localCIDRs, peerCIDRs); err != nil {
+		if err := network.DeletePeering(ctx, peering.BackendUID, localCIDRs, peerCIDRs); err != nil {
 			h.log.Error().Err(err).Str("backend_uid", peering.BackendUID).Msg("kubeovn DeletePeering failed")
 			_ = h.repo.UpdatePeeringStatus(ctx, peeringID, models.StatusFailed, "deletion failed: "+err.Error(), "")
 			return
@@ -434,13 +467,14 @@ func (h *PeeringHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // ── Async Provisioner ────────────────────────────────────────────────────────
 
 func (h *PeeringHandler) asyncProvisionPeering(
+	network providers.NetworkProvider,
 	peeringID uuid.UUID, tenantID, userID, vnetUID, peerVNetUID string,
 	spec models.PeeringSpec,
 ) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	providerRes, err := h.provider.CreatePeering(ctx, vnetUID, peerVNetUID, spec)
+	providerRes, err := network.CreatePeering(ctx, vnetUID, peerVNetUID, spec)
 	if err != nil {
 		h.log.Error().Err(err).Str("peering", spec.Name).Msg("kubeovn CreatePeering failed")
 		_ = h.repo.UpdatePeeringStatus(ctx, peeringID, models.StatusFailed,

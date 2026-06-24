@@ -17,6 +17,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -35,14 +36,38 @@ import (
 
 // RouteTableHandler handles all /v1/vnets/{vnet_id}/route-tables endpoints.
 type RouteTableHandler struct {
-	repo     *db.Repository
-	provider providers.NetworkProvider
-	log      zerolog.Logger
+	repo *db.Repository
+	// resolve maps the parent VNet's (region, zone) to its NetworkProvider. Route
+	// tables edit the parent Vpc CRD's staticRoutes, so they inherit the VNet zone.
+	resolve       providers.Resolver
+	defaultRegion string
+	defaultZone   string
+	log           zerolog.Logger
 }
 
 // NewRouteTableHandler creates a RouteTableHandler with injected dependencies.
-func NewRouteTableHandler(repo *db.Repository, provider providers.NetworkProvider, log zerolog.Logger) *RouteTableHandler {
-	return &RouteTableHandler{repo: repo, provider: provider, log: log}
+func NewRouteTableHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, log zerolog.Logger) *RouteTableHandler {
+	return &RouteTableHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, log: log}
+}
+
+// network resolves the NetworkProvider for the parent VNet's (region, zone).
+func (h *RouteTableHandler) network(region, zone string) (providers.NetworkProvider, error) {
+	set, err := h.resolve.For(region, zone)
+	if err != nil {
+		return nil, err
+	}
+	return set.Network, nil
+}
+
+// networkForVNetID resolves the NetworkProvider for a route table's parent VNet
+// by VNet UUID, used by handlers that only carry the VNet id. Falls back to the
+// local zone when the VNet can't be loaded.
+func (h *RouteTableHandler) networkForVNetID(ctx context.Context, vnetID uuid.UUID) (providers.NetworkProvider, error) {
+	vnet, err := h.repo.GetVNetInternal(ctx, vnetID)
+	if err != nil {
+		return h.network(h.defaultRegion, h.defaultZone)
+	}
+	return h.network(vnet.Region, vnet.Zone)
 }
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
@@ -184,6 +209,14 @@ func (h *RouteTableHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Resolve the network provider for the parent VNet's zone.
+	network, err := h.network(vnet.Region, vnet.Zone)
+	if err != nil {
+		h.log.Error().Err(err).Str("zone", vnet.Zone).Msg("resolve route-table provider for zone")
+		writeError(w, http.StatusBadGateway, "cannot reach the VNet's zone: "+err.Error())
+		return
+	}
+
 	// Insert DB row — this gives us the UUID for the composite backendUID.
 	projectID, projectUUID, _ := lookupProjectUUID(w, r)
 	rt := &models.RouteTable{
@@ -196,7 +229,7 @@ func (h *RouteTableHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Description:  req.Description,
 		Routes:       dtosToRouteRules(req.Routes),
 		Status:       models.StatusActive,
-		ProviderType: h.provider.Name(),
+		ProviderType: network.Name(),
 	}
 	rt, err = h.repo.CreateRouteTable(r.Context(), rt)
 	if err != nil {
@@ -216,7 +249,7 @@ func (h *RouteTableHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 		Routes:      dtosToRouteRules(req.Routes),
 	}
-	providerRes, err := h.provider.CreateRouteTable(r.Context(), vnet.BackendUID, rtSpec)
+	providerRes, err := network.CreateRouteTable(r.Context(), vnet.BackendUID, rtSpec)
 	if err != nil {
 		h.log.Error().Err(err).Str("route_table", req.Name).Msg("kubeovn CreateRouteTable failed")
 		_ = h.repo.DeleteRouteTable(r.Context(), rt.ID)
@@ -229,7 +262,7 @@ func (h *RouteTableHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Step 2: UpdateRouteTableRoutes to write the actual route entries.
 	if len(req.Routes) > 0 {
-		if err := h.provider.UpdateRouteTableRoutes(r.Context(), compositeUID, dtosToRouteRules(req.Routes)); err != nil {
+		if err := network.UpdateRouteTableRoutes(r.Context(), compositeUID, dtosToRouteRules(req.Routes)); err != nil {
 			h.log.Error().Err(err).Str("route_table", req.Name).Msg("kubeovn UpdateRouteTableRoutes failed")
 			// Persist the RT but mark failed so the operator can retry.
 			_ = h.repo.UpdateRouteTableRoutes(r.Context(), rt.ID, []models.RouteRule{}, "")
@@ -380,7 +413,13 @@ func (h *RouteTableHandler) UpdateRoutes(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Call driver to update routes on the VPC CRD.
-	if err := h.provider.UpdateRouteTableRoutes(r.Context(), rt.BackendUID, dtosToRouteRules(req.Routes)); err != nil {
+	network, err := h.networkForVNetID(r.Context(), vnetID)
+	if err != nil {
+		h.log.Error().Err(err).Str("rt_id", rtID.String()).Msg("resolve route-table provider for update")
+		writeError(w, http.StatusBadGateway, "cannot reach the VNet's zone: "+err.Error())
+		return
+	}
+	if err := network.UpdateRouteTableRoutes(r.Context(), rt.BackendUID, dtosToRouteRules(req.Routes)); err != nil {
 		h.log.Error().Err(err).Str("rt_id", rtID.String()).Msg("kubeovn UpdateRouteTableRoutes failed")
 		writeError(w, http.StatusInternalServerError, "failed to update routes: "+err.Error())
 		return
@@ -441,7 +480,13 @@ func (h *RouteTableHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if rt.BackendUID != "" {
-		if err := h.provider.DeleteRouteTable(r.Context(), rt.BackendUID); err != nil {
+		network, err := h.networkForVNetID(r.Context(), vnetID)
+		if err != nil {
+			h.log.Error().Err(err).Str("rt_id", rtID.String()).Msg("resolve route-table provider for delete")
+			writeError(w, http.StatusBadGateway, "cannot reach the VNet's zone: "+err.Error())
+			return
+		}
+		if err := network.DeleteRouteTable(r.Context(), rt.BackendUID); err != nil {
 			h.log.Error().Err(err).Str("backend_uid", rt.BackendUID).Msg("kubeovn DeleteRouteTable failed")
 			writeError(w, http.StatusInternalServerError, "failed to remove routes from KubeOVN: "+err.Error())
 			return
@@ -521,7 +566,9 @@ func (h *RouteTableHandler) Associate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call driver for informational association (no-op in M2 at the data plane).
-	_ = h.provider.AssociateRouteTable(r.Context(), rt.BackendUID, subnet.BackendUID)
+	if network, nErr := h.networkForVNetID(r.Context(), vnetID); nErr == nil {
+		_ = network.AssociateRouteTable(r.Context(), rt.BackendUID, subnet.BackendUID)
+	}
 
 	assoc, err := h.repo.CreateRouteTableAssociation(r.Context(), &db.RouteTableAssociation{
 		RouteTableID: rtID,
@@ -602,7 +649,9 @@ func (h *RouteTableHandler) Disassociate(w http.ResponseWriter, r *http.Request)
 
 	subnet, _ := h.repo.GetSubnet(r.Context(), assoc.SubnetID)
 	if subnet != nil {
-		_ = h.provider.DisassociateRouteTable(r.Context(), rt.BackendUID, subnet.BackendUID)
+		if network, nErr := h.networkForVNetID(r.Context(), vnetID); nErr == nil {
+			_ = network.DisassociateRouteTable(r.Context(), rt.BackendUID, subnet.BackendUID)
+		}
 	}
 
 	if err := h.repo.DeleteRouteTableAssociation(r.Context(), assocID); err != nil {

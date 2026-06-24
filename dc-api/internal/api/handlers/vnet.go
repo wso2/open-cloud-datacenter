@@ -33,17 +33,53 @@ import (
 
 // VNetHandler handles all /v1/vnets endpoints.
 type VNetHandler struct {
-	repo     *db.Repository
-	provider providers.NetworkProvider
-	nat      providers.VPCNATProvisioner // nil = SNAT disabled (e.g. in tests)
-	dns      providers.VPCDNSProvisioner // nil = F20 DNS disabled (e.g. in tests)
-	log      zerolog.Logger
+	repo *db.Repository
+	// resolve maps a VNet's (region, zone) to that zone's NetworkProvider. A VNet
+	// is a root network resource; its children (subnet/nsg/peering/dns) inherit
+	// its zone. In a single-zone deployment every lookup is a cache hit on the
+	// same local set.
+	resolve       providers.Resolver
+	defaultRegion string
+	defaultZone   string
+	// nat/dns are the LOCAL-zone VPC NAT/CoreDNS provisioners (kubeovn driver
+	// against the local kubeconfig). They have no agent path yet, so they are a
+	// documented local-only constraint: the handler only invokes them for a VNet
+	// in the local zone (see isLocalZone). nil = disabled (tests).
+	nat providers.VPCNATProvisioner // nil = SNAT disabled (e.g. in tests)
+	dns providers.VPCDNSProvisioner // nil = F20 DNS disabled (e.g. in tests)
+	log zerolog.Logger
 }
 
 // NewVNetHandler creates a VNetHandler with injected dependencies.
 // nat and dns may be nil — when nil, the respective provisioning is skipped.
-func NewVNetHandler(repo *db.Repository, provider providers.NetworkProvider, nat providers.VPCNATProvisioner, dns providers.VPCDNSProvisioner, log zerolog.Logger) *VNetHandler {
-	return &VNetHandler{repo: repo, provider: provider, nat: nat, dns: dns, log: log}
+func NewVNetHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, nat providers.VPCNATProvisioner, dns providers.VPCDNSProvisioner, log zerolog.Logger) *VNetHandler {
+	return &VNetHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, nat: nat, dns: dns, log: log}
+}
+
+// network resolves the NetworkProvider for a VNet's (region, zone). Empty
+// region/zone resolves to the local zone (cache hit).
+func (h *VNetHandler) network(region, zone string) (providers.NetworkProvider, error) {
+	set, err := h.resolve.For(region, zone)
+	if err != nil {
+		return nil, err
+	}
+	return set.Network, nil
+}
+
+// isLocalZone reports whether (region, zone) is the local zone (where dc-api
+// holds direct credentials and the local NAT/DNS provisioners apply). Empty
+// region/zone means "unspecified" → the local zone. The NAT/DNS plumbing has no
+// agent path yet, so it is only run for local-zone VNets.
+func (h *VNetHandler) isLocalZone(region, zone string) bool {
+	r := region
+	if r == "" {
+		r = h.defaultRegion
+	}
+	z := zone
+	if z == "" {
+		z = h.defaultZone
+	}
+	return r == h.defaultRegion && z == h.defaultZone
 }
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
@@ -182,6 +218,17 @@ func (h *VNetHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the VNet's network provider for its (region, default zone) before
+	// the PENDING row. A VNet is a root resource created in the local/default zone
+	// (no zone selector in the API); req.Region defaults to the local region. An
+	// unknown region/zone fails clearly here instead of stranding a PENDING row.
+	network, err := h.network(req.Region, "")
+	if err != nil {
+		h.log.Error().Err(err).Str("region", req.Region).Msg("resolve VNet provider for region")
+		writeError(w, http.StatusBadRequest, "cannot place VNet in the requested region: "+err.Error())
+		return
+	}
+
 	// Insert PENDING row.
 	vnet := &models.VNet{
 		TenantID:     tenantID,
@@ -193,7 +240,7 @@ func (h *VNetHandler) Create(w http.ResponseWriter, r *http.Request) {
 		AddressSpace: req.AddressSpace,
 		Description:  req.Description,
 		Status:       models.StatusPending,
-		ProviderType: h.provider.Name(),
+		ProviderType: network.Name(),
 	}
 	vnet, err = h.repo.CreateVNet(r.Context(), vnet)
 	if err != nil {
@@ -207,7 +254,7 @@ func (h *VNetHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 
-	go h.asyncProvisionVNet(vnet.ID, tenantID, projectID, userID, models.VNetSpec{
+	go h.asyncProvisionVNet(network, vnet.ID, tenantID, projectID, userID, models.VNetSpec{
 		Name:         req.Name,
 		AddressSpace: req.AddressSpace,
 		Region:       req.Region,
@@ -351,6 +398,18 @@ func (h *VNetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the VNet's network provider for its OWN zone before marking
+	// DELETING, so an unknown / unreachable zone surfaces clearly.
+	network, err := h.network(vnet.Region, vnet.Zone)
+	if err != nil && vnet.BackendUID != "" {
+		h.log.Error().Err(err).Str("zone", vnet.Zone).Msg("resolve VNet provider for delete")
+		writeError(w, http.StatusBadGateway, "cannot reach the VNet's zone to delete it: "+err.Error())
+		return
+	}
+	// The NAT/DNS plumbing is local-only (no agent path). Only run it for a VNet
+	// in the local zone; a remote VNet never had local NAT/DNS to clean up.
+	localZone := h.isLocalZone(vnet.Region, vnet.Zone)
+
 	// Mark DELETING.
 	if err := h.repo.UpdateVNetStatus(r.Context(), id, models.StatusDeleting, "deletion requested", ""); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update VNet status")
@@ -370,8 +429,8 @@ func (h *VNetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		// Doing it after means the VPC controller may have already torn down
 		// dependent objects, leaving orphaned NAT resources or controller confusion.
 		// No external-IP release needed — KubeOVN owns the IP and frees it when
-		// IptablesEIP is deleted.
-		if h.nat != nil {
+		// IptablesEIP is deleted. Local-zone only (NAT plumbing has no agent path).
+		if h.nat != nil && localZone {
 			if natErr := h.nat.DeleteVpcNAT(ctx, vnet.BackendUID); natErr != nil {
 				h.log.Warn().Err(natErr).Str("vpc", vnet.BackendUID).Msg("kubeovn DeleteVpcNAT failed; proceeding with VPC delete anyway")
 			}
@@ -379,14 +438,14 @@ func (h *VNetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 		// F20: remove the per-VPC CoreDNS Deployment BEFORE deleting the VPC.
 		// The Multus secondary NIC is released when the pod terminates; no
-		// separate cleanup is needed for the IP pin.
-		if h.dns != nil {
+		// separate cleanup is needed for the IP pin. Local-zone only.
+		if h.dns != nil && localZone {
 			if dnsErr := h.dns.DeleteVpcDNS(ctx, vnet.BackendUID); dnsErr != nil {
 				h.log.Warn().Err(dnsErr).Str("vpc", vnet.BackendUID).Msg("kubeovn DeleteVpcDNS failed; proceeding with VPC delete anyway")
 			}
 		}
 
-		if err := h.provider.DeleteVNet(ctx, vnet.BackendUID); err != nil {
+		if err := network.DeleteVNet(ctx, vnet.BackendUID); err != nil {
 			h.log.Error().Err(err).Str("backend_uid", vnet.BackendUID).Msg("kubeovn DeleteVNet failed")
 			_ = h.repo.UpdateVNetStatus(ctx, id, models.StatusFailed, "deletion failed: "+err.Error(), "")
 			return
@@ -399,7 +458,7 @@ func (h *VNetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // ── Async Provisioner ────────────────────────────────────────────────────────
 
-func (h *VNetHandler) asyncProvisionVNet(resourceID uuid.UUID, tenantID, projectID, userID string, spec models.VNetSpec) {
+func (h *VNetHandler) asyncProvisionVNet(network providers.NetworkProvider, resourceID uuid.UUID, tenantID, projectID, userID string, spec models.VNetSpec) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
@@ -410,7 +469,7 @@ func (h *VNetHandler) asyncProvisionVNet(resourceID uuid.UUID, tenantID, project
 	}
 
 	// ── 1. Create KubeOVN VPC ─────────────────────────────────────────────────
-	providerRes, err := h.provider.CreateVNet(ctx, tenantID, projectID, spec)
+	providerRes, err := network.CreateVNet(ctx, tenantID, projectID, spec)
 	if err != nil {
 		fail("kubeovn CreateVNet failed", err)
 		return

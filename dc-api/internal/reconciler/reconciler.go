@@ -29,26 +29,31 @@ import (
 // Reconciler polls PENDING and DELETING resources and syncs their status
 // from the provider back into PostgreSQL.
 type Reconciler struct {
-	repo            *db.Repository
-	computeProvider providers.ComputeProvider
-	clusterProvider providers.ClusterProvider
-	interval        time.Duration
-	log             zerolog.Logger
+	repo *db.Repository
+	// resolve maps a resource's (region, zone) to that zone's provider set. In a
+	// single-zone deployment every resource resolves to the same local set
+	// (pointer-identical to the providers dc-api injected before per-resource
+	// routing); in a multi-zone deployment a remote resource resolves to its own
+	// zone's agent-backed set. Resolution errors (unknown zone, remote zone with
+	// no agent) are isolated per resource so one unreachable zone never stalls
+	// reconciling resources in other zones.
+	resolve  providers.Resolver
+	interval time.Duration
+	log      zerolog.Logger
 }
 
-// New creates a Reconciler. Call Run(ctx) to start it.
+// New creates a Reconciler. Call Run(ctx) to start it. resolve is the per-zone
+// provider resolver (*providers.Registry).
 func New(
 	repo *db.Repository,
-	compute providers.ComputeProvider,
-	cluster providers.ClusterProvider,
+	resolve providers.Resolver,
 	log zerolog.Logger,
 ) *Reconciler {
 	return &Reconciler{
-		repo:            repo,
-		computeProvider: compute,
-		clusterProvider: cluster,
-		interval:        60 * time.Second,
-		log:             log.With().Str("component", "reconciler").Logger(),
+		repo:     repo,
+		resolve:  resolve,
+		interval: 60 * time.Second,
+		log:      log.With().Str("component", "reconciler").Logger(),
 	}
 }
 
@@ -116,7 +121,21 @@ func (r *Reconciler) reconcileOne(ctx context.Context, res *models.Resource) {
 		Str("name", res.Name).
 		Str("type", string(res.Type)).
 		Str("status", string(res.Status)).
+		Str("region", res.Region).
+		Str("zone", res.Zone).
 		Logger()
+
+	// Resolve the provider set for THIS resource's zone. An error here (unknown
+	// zone, or a remote zone whose agent is down) is isolated to this resource:
+	// we log a per-resource warning and return, leaving the row in its current
+	// status to be retried next tick. Because each resource is reconciled
+	// independently in the reconcileAll loop, one unreachable zone never stalls
+	// resources in other zones on the same tick.
+	set, err := r.resolve.For(res.Region, res.Zone)
+	if err != nil {
+		log.Warn().Err(err).Msg("cannot resolve provider for resource's zone — skipping this tick")
+		return
+	}
 
 	var (
 		providerStatus models.ResourceStatus
@@ -131,7 +150,7 @@ func (r *Reconciler) reconcileOne(ctx context.Context, res *models.Resource) {
 		// Bastions are KubeVirt VMs under the hood — same provider call.
 		// For bastions providerRes.MgmtIP carries the mgmt-VLAN IP; it's
 		// empty for regular VMs.
-		providerRes, err := r.computeProvider.GetVM(ctx, res.BackendUID)
+		providerRes, err := set.Compute.GetVM(ctx, res.BackendUID)
 		if err != nil {
 			if isNotFound(err) {
 				notFound = true
@@ -147,7 +166,7 @@ func (r *Reconciler) reconcileOne(ctx context.Context, res *models.Resource) {
 		}
 
 	case models.ResourceTypeCluster:
-		providerRes, err := r.clusterProvider.GetCluster(ctx, res.BackendUID)
+		providerRes, err := set.Cluster.GetCluster(ctx, res.BackendUID)
 		if err != nil {
 			if isNotFound(err) {
 				notFound = true
