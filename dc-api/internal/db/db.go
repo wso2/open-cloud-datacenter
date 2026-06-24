@@ -33,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2/dc-api/internal/audit"
 	"github.com/wso2/dc-api/internal/models"
+	"github.com/wso2/dc-api/internal/placement"
 )
 
 // Repository encapsulates all PostgreSQL operations for DC-API.
@@ -157,11 +158,10 @@ func (r *Repository) Create(ctx context.Context, res *models.Resource) (*models.
 
 	// Zone (phase 0): VPC children pass the parent VNet's zone via res.Zone;
 	// root/standalone resources leave it empty and fall back to zoneStamp()
-	// (DCAPI_LOCAL_ZONE). Mirrors how region is always regionStamp() today.
-	zone := res.Zone
-	if zone == "" {
-		zone = r.zoneStamp()
-	}
+	// (DCAPI_LOCAL_ZONE). Region is always-local. Both are now resolved by the
+	// table-driven Stamp helper (placement.VM == Cluster == Bastion here — all
+	// Child/VNET/HasModelField, so the Family value is interchangeable).
+	region, zone := r.Stamp(placement.VM, "", res.Zone)
 	row := tx.QueryRow(ctx, q,
 		res.TenantID,
 		res.TenantUUID,
@@ -177,7 +177,7 @@ func (r *Repository) Create(ctx context.Context, res *models.Resource) (*models.
 		res.VNetID,
 		res.SubnetID,
 		nilIfEmpty(res.Message),
-		r.regionStamp(),
+		region,
 		zone,
 	)
 	if err := row.Scan(&res.ID, &res.CreatedAt, &res.UpdatedAt); err != nil {

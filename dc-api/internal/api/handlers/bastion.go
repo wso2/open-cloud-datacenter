@@ -15,6 +15,7 @@ import (
 	"github.com/wso2/dc-api/internal/api/middleware"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
+	"github.com/wso2/dc-api/internal/placement"
 	"github.com/wso2/dc-api/internal/providers"
 	"github.com/wso2/dc-api/internal/rbac"
 )
@@ -218,6 +219,9 @@ func (h *BastionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// phase-0 zone inheritance from the (always present) parent VNet.
+	_, bastionZone := inheritPlacement(placement.Bastion, vnet.Region, vnet.Zone, true)
+
 	// SSH key (same flow as VM — private key returned once, never stored).
 	publicKey, privateKeyPEM, err := generateSSHKeyPair()
 	if err != nil {
@@ -250,7 +254,9 @@ func (h *BastionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ProviderType: h.provider.Name(),
 		VNetID:       &vnet.ID,
 		SubnetID:     &subnet.ID,
-		Zone:         vnet.Zone, // phase-0 zone inheritance: bastion is always a VPC child
+		// phase-0 zone inheritance: bastion is always a VPC child, so it adopts
+		// the parent VNet's zone via the table-driven helper (placement.Bastion).
+		Zone: bastionZone,
 	})
 	if err != nil {
 		h.log.Error().Err(err).Str("tenant", tenantID).Msg("create bastion resource in DB")

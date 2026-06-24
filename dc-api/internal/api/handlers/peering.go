@@ -29,6 +29,7 @@ import (
 	"github.com/wso2/dc-api/internal/api/middleware"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
+	"github.com/wso2/dc-api/internal/placement"
 	"github.com/wso2/dc-api/internal/providers"
 	"github.com/wso2/dc-api/internal/rbac"
 )
@@ -170,23 +171,13 @@ func (h *PeeringHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Same region check (multi-region peering deferred).
-	if vnet.Region != peerVNet.Region {
-		writeError(w, http.StatusBadRequest,
-			fmt.Sprintf("cross-region peering is not supported in M2 (VNet region: %s, peer VNet region: %s)",
-				vnet.Region, peerVNet.Region))
-		return
-	}
-
-	// Phase-0 same-zone check (mirrors the cross-region guard above for the
-	// sibling case; a 422 because zone disagreement is an unprocessable
-	// containment violation, not a malformed request). With the single seeded
-	// zone both VNets are 'zone-1', so this never fires today. The parent-child
-	// families rely on the existing FK containment instead of an explicit guard.
-	if vnet.Zone != peerVNet.Zone {
-		writeError(w, http.StatusUnprocessableEntity,
-			fmt.Sprintf("cross-zone peering is not supported (VNet zone: %s, peer VNet zone: %s)",
-				vnet.Zone, peerVNet.Zone))
+	// Cross-region (400) / cross-zone (422) sibling guards, routed through the
+	// shared table-driven check so the conditions are declared once. Operand
+	// order (vnet, peerVNet) is load-bearing — it sets the rendered message text.
+	// With the single seeded zone both VNets are 'zone-1', so the zone branch
+	// never fires today; the parent-child families rely on FK containment.
+	if e := placement.SamePlacement(vnet.Region, vnet.Zone, peerVNet.Region, peerVNet.Zone); e != nil {
+		writeError(w, e.Status, e.Msg)
 		return
 	}
 

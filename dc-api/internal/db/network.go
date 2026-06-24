@@ -28,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/wso2/dc-api/internal/audit"
 	"github.com/wso2/dc-api/internal/models"
+	"github.com/wso2/dc-api/internal/placement"
 )
 
 
@@ -46,9 +47,11 @@ func (r *Repository) CreateVNet(ctx context.Context, v *models.VNet) (*models.VN
 
 	// Zone (phase 0): the VNet is a root resource, so its zone is stamped from
 	// DCAPI_LOCAL_ZONE when the handler leaves it empty. Children inherit this.
-	if v.Zone == "" {
-		v.Zone = r.zoneStamp()
-	}
+	// Region passes through unchanged (placement.VNet is RegionFromModel) — the
+	// validated request region in v.Region is authoritative, never the local
+	// stamp. Resolved by the table-driven Stamp helper; v.Zone is written back so
+	// callers that read the returned VNet see the resolved zone (tests rely on it).
+	v.Region, v.Zone = r.Stamp(placement.VNet, v.Region, v.Zone)
 	row := r.pool.QueryRow(ctx, q,
 		v.TenantID,
 		v.TenantUUID,
