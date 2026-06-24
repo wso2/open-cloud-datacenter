@@ -396,6 +396,23 @@ func (s *Session) WatchStatus(
 		case p := <-progressCh:
 			deliver(p)
 		case res := <-ch:
+			// The result frame can win this select while progress frames are
+			// still buffered. The agent sends its progress frames before the
+			// terminal result, so by the time res is ready those frames are
+			// already in progressCh — but select picks a ready case at random and
+			// may take res first, abandoning buffered progress. Drain and deliver
+			// it before returning, so onSnapshot fires for every snapshot the
+			// agent sent ahead of the result and WatchStatus never reports more
+			// snapshots than the caller actually received.
+			for {
+				select {
+				case p := <-progressCh:
+					deliver(p)
+					continue
+				default:
+				}
+				break
+			}
 			if res == nil { // session closed under us
 				return zero, ErrAgentUnavailable
 			}
