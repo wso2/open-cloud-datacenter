@@ -201,48 +201,6 @@ module "vyos_tenant" {
   vyos_api_key  = var.vyos_api_key
 }
 
-# ── Consumer VM access kubeconfig (read from provisioner-created secret) ───────
-# The namespace-credential-provisioner automatically creates a "harvester-vm-kubeconfig"
-# Secret in each tenant namespace containing a namespace-scoped Harvester kubeconfig.
-# This data source surfaces it as a Terraform output so the platform team can
-# retrieve it once at onboarding and hand it to the tenant team:
-#
-#   terraform output -raw <tenant>_vm_kubeconfig > <team>.harvester.kubeconfig.secret
-#
-# Requires the kubernetes.harvester provider to be passed in (set expose_vm_kubeconfig = true
-# and configure kubernetes.harvester in the caller's provider block).
-#
-# IMPORTANT — two-pass apply required:
-# This data source races with the out-of-band reconciler. On a fresh namespace the
-# provisioner may not have created the secret yet when Terraform runs the data read.
-# Apply in two steps:
-#   1. terraform apply                  # creates namespaces; provisioner reconciles
-#   2. terraform apply                  # reads the now-present secret
-# Alternatively, run `terraform apply -target=rancher2_namespace.this` first, wait
-# for the provisioner, then run the full apply.
-
-locals {
-  # Primary workload namespace for the VM kubeconfig.
-  # Uses var.vm_access_namespace when explicitly set; falls back to the first
-  # resolved namespace (or project_name when no namespaces are configured).
-  vm_access_ns = var.vm_access_namespace != null ? var.vm_access_namespace : (
-    length(local.namespaces) > 0 ? local.namespaces[0] : var.project_name
-  )
-}
-
-data "kubernetes_secret_v1" "vm_access_kubeconfig" {
-  count    = var.expose_vm_kubeconfig ? 1 : 0
-  provider = kubernetes.harvester
-  metadata {
-    name      = "harvester-vm-kubeconfig"
-    namespace = local.vm_access_ns
-  }
-  depends_on = [rancher2_namespace.this]
-}
-
-locals {
-  vm_access_kubeconfig = var.expose_vm_kubeconfig ? data.kubernetes_secret_v1.vm_access_kubeconfig[0].data["kubeconfig"] : null
-}
 
 # ── One binding per (principal, role) pair. ───────────────────────────────────
 # Key is derived from the principal value + role so that switching principal

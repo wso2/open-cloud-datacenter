@@ -245,21 +245,6 @@ variable "shared_image_namespace" {
   }
 }
 
-variable "expose_vm_kubeconfig" {
-  type        = bool
-  description = "When true, reads the 'harvester-vm-kubeconfig' Secret created by the namespace-credential-provisioner and exposes it via the vm_access_kubeconfig output. Requires the kubernetes.harvester provider alias to be configured in the caller. The provisioner must have run before apply."
-  default     = false
-}
-
-variable "vm_access_namespace" {
-  type        = string
-  description = "Namespace from which to read the 'harvester-vm-kubeconfig' Secret when expose_vm_kubeconfig = true. Defaults to the first resolved namespace (or project_name when no namespaces are configured). Set explicitly when the tenant has multiple namespaces and the kubeconfig should target a specific one."
-  default     = null
-  validation {
-    condition     = var.vm_access_namespace == null ? true : trimspace(var.vm_access_namespace) != ""
-    error_message = "vm_access_namespace must be null or a non-empty namespace name."
-  }
-}
 
 variable "vyos_endpoint" {
   type        = string
