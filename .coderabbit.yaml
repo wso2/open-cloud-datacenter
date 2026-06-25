@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+reviews:
+  auto_review:
+    enabled: true
+    # This branch is a separate, long-lived development line with its own
+    # root tree, so CodeRabbit must be opted in here explicitly — the default
+    # branch's config does not reach it. Anchored so it matches only this branch.
+    base_branches:
+      - "^terraform-provider-dcapi$"
