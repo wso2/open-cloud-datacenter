@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit reads this file ONLY from the repository's default branch (main),
+# so all auto-review gating lives here. Our long-lived development lines are on
+# separate branches that must be opted in below; the default branch is always
+# reviewed automatically. Patterns are regex — anchored so that, e.g.,
+# "terraform" does not also match "terraform-provider-dcapi".
+reviews:
+  auto_review:
+    enabled: true
+    base_branches:
+      - "^controlplane$"
+      - "^terraform$"
+      - "^operators$"
+      - "^terraform-provider-dcapi$"
