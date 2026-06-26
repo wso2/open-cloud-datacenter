@@ -183,19 +183,19 @@ func (h *AgentWSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Msg("agent hello region/zone differs from token scope; using token scope (DCAGENT_ZONE/DCAGENT_REGION are deprecated — drop them)")
 	}
 
-	// Connect-time route-mismatch WARNING — the loud version of the
-	// colombo-vs-zone-1 incident. The token's (region, zone) is authoritative
-	// for THIS agent; (routeRegion, routeZone) is the zone dc-api ROUTES to. If
-	// routing is enabled and they disagree, this agent will register fine but
-	// will NEVER receive routed traffic (the registry only resolves a provider
-	// set + Session for the routing zone). That used to be silent. Make it loud.
-	// Observability only: the connection still succeeds and registers normally.
+	// After route-by-resource-zone, an agent whose token zone differs from the
+	// control plane's LOCAL zone is normal and fully supported: dc-api resolves a
+	// provider set and an agent Session per resource's own (region, zone), so this
+	// agent receives routed traffic for resources placed in its zone. In the
+	// earlier single-zone world only the local zone routed, so this used to be a
+	// loud "you will get no traffic" warning; that is obsolete, so it is now an
+	// informational note. Routing still only engages when the per-family toggle is
+	// on and the resource lives in this agent's zone.
 	if (h.routeReads || h.routeWrites) && (region != h.routeRegion || zone != h.routeZone) {
-		h.log.Warn().
+		h.log.Info().
 			Str("agent_token_region", region).Str("agent_token_zone", zone).
-			Str("route_region", h.routeRegion).Str("route_zone", h.routeZone).
-			Bool("reads", h.routeReads).Bool("writes", h.routeWrites).
-			Msg("agent connected for a zone that does NOT match the routing zone; this agent will NOT receive routed traffic — mint the agent token for the routing zone, or set DCAPI_LOCAL_ZONE/DCAPI_LOCAL_REGION to match this agent's token")
+			Str("local_region", h.routeRegion).Str("local_zone", h.routeZone).
+			Msg("agent connected for a remote zone (not the control plane's local zone); resources placed in this zone route to this agent")
 	}
 
 	agentID, err := h.repo.UpsertAgent(sessCtx, region, zone, hello.Version, r.RemoteAddr)
