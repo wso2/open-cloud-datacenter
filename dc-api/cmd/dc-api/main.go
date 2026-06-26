@@ -49,6 +49,13 @@ func main() {
 		l := zerolog.New(os.Stdout).With().Timestamp().Logger()
 		l.Fatal().Err(err).Msg("failed to load configuration — check DCAPI_* environment variables")
 	}
+	// DCAPI_ZONES_ENABLED gates whether the local zone needs a direct kubeconfig
+	// (single-cluster) or is agent-only like every other zone (multi-zone). Fail
+	// fast on the single-cluster-without-kubeconfig misconfiguration.
+	if err := cfg.ValidateZones(); err != nil {
+		l := zerolog.New(os.Stdout).With().Timestamp().Logger()
+		l.Fatal().Err(err).Msg("invalid zones configuration")
+	}
 
 	// ── Logging ───────────────────────────────────────────────────────────────
 	// Apply log level from config before any other log calls.
@@ -59,6 +66,9 @@ func main() {
 	zerolog.SetGlobalLevel(level)
 	log.Logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
 	log.Info().Str("listen", cfg.ListenAddr).Str("log_level", level.String()).Msg("DC-API starting")
+	if cfg.ZonesEnabled && cfg.HarvesterKubeconfig != "" {
+		log.Info().Msg("DCAPI_HARVESTER_KUBECONFIG is set but ignored (DCAPI_ZONES_ENABLED=true); agents provide cluster access")
+	}
 
 	// ── Background context with signal handling ────────────────────────────────
 	// We use a context that is cancelled when SIGINT or SIGTERM is received.
@@ -119,124 +129,171 @@ func main() {
 	// local cluster). In the single-cluster default no remote zone is ever asked
 	// for, so this is inert there. The LOCAL set below stays the eager cache hit.
 	provReg.WithZoneCatalog(repo)
-	localSet, err := provReg.For(cfg.LocalRegion, cfg.LocalZone)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to resolve local provider set")
-	}
-	computeProvider := localSet.Compute
-	clusterProvider := localSet.Cluster
-	log.Info().Str("provider", computeProvider.Name()).Msg("compute provider ready")
-	log.Info().Str("provider", clusterProvider.Name()).Msg("cluster provider ready")
 
-	// ── F32: wire cloud-provider SA bootstrap into the cluster provisioner ─────
-	// Both the harvester client (for SA creation + API info) and the rancher
-	// client (for the Steve provisioner) must be ready before we can call
-	// WithHarvesterProviders. This is the only place both exist at the same time.
-	if rancherClient, ok := clusterProvider.(*rancher.Client); ok {
-		if harvesterClient, ok := computeProvider.(*harvester.Client); ok {
-			rancherClient.WithHarvesterProviders(harvesterClient, harvesterClient)
-			log.Info().Msg("F32: cluster provisioner wired with Harvester SA bootstrap")
-		}
-	}
-
-	networkProvider := localSet.Network
-	log.Info().Str("provider", networkProvider.Name()).Msg("network provider ready")
-
-	// ── F15 VPC SNAT + F20 Per-VPC DNS bootstrap ────────────────────────────
+	// ── Local-zone provider trio + startup bootstrap ───────────────────────────
 	//
-	// Ordering invariant (F29 fix): ALL bootstrap calls (cheap, idempotent
-	// SA/ConfigMap/CRD creation) MUST complete before any backfill loop starts.
-	// Backfill loops contain per-VPC waits that can exhaust a shared context
-	// budget if a NAT gateway pod is slow to start; if that kills the context,
-	// any bootstrap step that runs afterwards sees "context canceled" on its
-	// first k8s write and crashes the process. The correct ordering is:
+	// These three locals (computeProvider/clusterProvider/networkProvider) and the
+	// two provisioners (natProvisioner/dnsProvisioner) exist ONLY for startup
+	// bootstrap (F32 cluster-SA wiring, F15 VPC NAT, F20 per-VPC DNS) and as the
+	// router-only fixed-provider fallback in RouterDeps. The handlers and the
+	// reconciler resolve providers PER RESOURCE via provReg (the providers.Resolver),
+	// NOT via these locals — so leaving them nil in zones-enabled mode is safe.
 	//
-	//   1. EnsureExternalNetworkBootstrap  (F15, cheap, 2 min budget)
-	//   2. EnsureVpcDNSBootstrap           (F20, cheap, 1 min budget)
-	//   3. runNATBackfill                  (F15, per-VPC loop, 10 min budget)
-	//   4. runDNSBackfill                  (F20, per-VPC loop, 10 min budget)
+	// Single-cluster mode (DCAPI_ZONES_ENABLED=false): eager-build the local direct
+	// set and run the full F32/F15/F20 startup bootstrap — byte-identical to before.
 	//
-	// Each step uses its OWN context.WithTimeout so a slow VPC in step 3 cannot
-	// poison steps 1/2 (which have already finished) or step 4 (which has its
-	// own independent budget). The process-root context is NOT consumed here.
+	// Multi-zone mode (DCAPI_ZONES_ENABLED=true): there is NO local cluster to
+	// bootstrap. The local zone resolves through the same catalog-gated agent-only
+	// path as any remote zone (provReg.For build-on-miss). Skip this whole block;
+	// the local F32/F15/F20 plumbing becomes deferred per-zone agent work.
+	var computeProvider providers.ComputeProvider
+	var clusterProvider providers.ClusterProvider
+	var networkProvider providers.NetworkProvider
 	var natProvisioner providers.VPCNATProvisioner
 	var dnsProvisioner providers.VPCDNSProvisioner
-	if kvClient, ok := networkProvider.(*kubeovn.Client); ok {
-		if err := cfg.ValidateF15(); err != nil {
-			log.Fatal().Err(err).Msg("F15 VPC external network config is invalid — check DCAPI_VPC_EXTERNAL_* vars")
+	if !cfg.ZonesEnabled {
+		localSet, err := provReg.For(cfg.LocalRegion, cfg.LocalZone)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to resolve local provider set")
 		}
+		computeProvider = localSet.Compute
+		clusterProvider = localSet.Cluster
+		log.Info().Str("provider", computeProvider.Name()).Msg("compute provider ready")
+		log.Info().Str("provider", clusterProvider.Name()).Msg("cluster provider ready")
 
-		kvClient.WithExternalNetwork(kubeovn.ExternalNetworkConfig{
-			Bridge:      cfg.VPCExternalBridge,
-			CIDR:        cfg.VPCExternalCIDR,
-			Gateway:     cfg.VPCExternalGateway,
-			ReservedIPs: cfg.ParseReservedIPs(),
-			VLANID:      cfg.VPCExternalVLANID,
-		})
-		natProvisioner = kvClient
-
-		// ── Step 1: F15 bootstrap (2 min budget) ──────────────────────────────
-		{
-			bsCtx, bsCancel := context.WithTimeout(ctx, 2*time.Minute)
-			err := kvClient.EnsureExternalNetworkBootstrap(bsCtx)
-			bsCancel()
-			if err != nil {
-				log.Fatal().Err(err).Msg("failed to bootstrap external network resources (ProviderNetwork/Vlan/Subnet/NAD)")
+		// ── F32: wire cloud-provider SA bootstrap into the cluster provisioner ─────
+		// Both the harvester client (for SA creation + API info) and the rancher
+		// client (for the Steve provisioner) must be ready before we can call
+		// WithHarvesterProviders. This is the only place both exist at the same time.
+		if rancherClient, ok := clusterProvider.(*rancher.Client); ok {
+			if harvesterClient, ok := computeProvider.(*harvester.Client); ok {
+				rancherClient.WithHarvesterProviders(harvesterClient, harvesterClient)
+				log.Info().Msg("F32: cluster provisioner wired with Harvester SA bootstrap")
 			}
 		}
-		log.Info().
-			Str("cidr", cfg.VPCExternalCIDR).
-			Strs("reserved_ips", cfg.ParseReservedIPs()).
-			Msg("kubeovn: F15 external network bootstrap verified")
 
-		// ── Step 2: F20 bootstrap (1 min budget) ──────────────────────────────
-		// Bootstrap BEFORE backfill so the SA/ConfigMap are present even if
-		// runNATBackfill below is slow or times out on its own context.
-		if err := cfg.ValidateF20(); err != nil {
-			log.Fatal().Err(err).Msg("F20 per-VPC DNS config is invalid — check DCAPI_VPC_DNS_FORWARDERS")
-		}
+		networkProvider = localSet.Network
+		log.Info().Str("provider", networkProvider.Name()).Msg("network provider ready")
 
-		dnsImage := cfg.VPCDNSImage
-		if dnsImage == "" {
-			dnsImage = kvClient.AutoDetectCoreDNSImage(ctx)
-		}
+		// ── F15 VPC SNAT + F20 Per-VPC DNS bootstrap ────────────────────────────
+		//
+		// Ordering invariant (F29 fix): ALL bootstrap calls (cheap, idempotent
+		// SA/ConfigMap/CRD creation) MUST complete before any backfill loop starts.
+		// Backfill loops contain per-VPC waits that can exhaust a shared context
+		// budget if a NAT gateway pod is slow to start; if that kills the context,
+		// any bootstrap step that runs afterwards sees "context canceled" on its
+		// first k8s write and crashes the process. The correct ordering is:
+		//
+		//   1. EnsureExternalNetworkBootstrap  (F15, cheap, 2 min budget)
+		//   2. EnsureVpcDNSBootstrap           (F20, cheap, 1 min budget)
+		//   3. runNATBackfill                  (F15, per-VPC loop, 10 min budget)
+		//   4. runDNSBackfill                  (F20, per-VPC loop, 10 min budget)
+		//
+		// Each step uses its OWN context.WithTimeout so a slow VPC in step 3 cannot
+		// poison steps 1/2 (which have already finished) or step 4 (which has its
+		// own independent budget). The process-root context is NOT consumed here.
+		if kvClient, ok := networkProvider.(*kubeovn.Client); ok {
+			if err := cfg.ValidateF15(); err != nil {
+				log.Fatal().Err(err).Msg("F15 VPC external network config is invalid — check DCAPI_VPC_EXTERNAL_* vars")
+			}
 
-		kvClient.WithDNSConfig(kubeovn.DNSConfig{
-			Forwarders:   cfg.ParseDNSForwarders(),
-			Image:        dnsImage,
-			SearchDomain: cfg.VPCDNSSearchDomain,
-		})
-		dnsProvisioner = kvClient
+			kvClient.WithExternalNetwork(kubeovn.ExternalNetworkConfig{
+				Bridge:      cfg.VPCExternalBridge,
+				CIDR:        cfg.VPCExternalCIDR,
+				Gateway:     cfg.VPCExternalGateway,
+				ReservedIPs: cfg.ParseReservedIPs(),
+				VLANID:      cfg.VPCExternalVLANID,
+			})
+			natProvisioner = kvClient
 
-		{
-			bsCtx, bsCancel := context.WithTimeout(ctx, 1*time.Minute)
-			err := kvClient.EnsureVpcDNSBootstrap(bsCtx)
-			bsCancel()
-			if err != nil {
-				log.Fatal().Err(err).Msg("failed to bootstrap F20 DNS resources (ServiceAccount/ConfigMap)")
+			// ── Step 1: F15 bootstrap (2 min budget) ──────────────────────────────
+			{
+				bsCtx, bsCancel := context.WithTimeout(ctx, 2*time.Minute)
+				err := kvClient.EnsureExternalNetworkBootstrap(bsCtx)
+				bsCancel()
+				if err != nil {
+					log.Fatal().Err(err).Msg("failed to bootstrap external network resources (ProviderNetwork/Vlan/Subnet/NAD)")
+				}
+			}
+			log.Info().
+				Str("cidr", cfg.VPCExternalCIDR).
+				Strs("reserved_ips", cfg.ParseReservedIPs()).
+				Msg("kubeovn: F15 external network bootstrap verified")
+
+			// ── Step 2: F20 bootstrap (1 min budget) ──────────────────────────────
+			// Bootstrap BEFORE backfill so the SA/ConfigMap are present even if
+			// runNATBackfill below is slow or times out on its own context.
+			if err := cfg.ValidateF20(); err != nil {
+				log.Fatal().Err(err).Msg("F20 per-VPC DNS config is invalid — check DCAPI_VPC_DNS_FORWARDERS")
+			}
+
+			dnsImage := cfg.VPCDNSImage
+			if dnsImage == "" {
+				dnsImage = kvClient.AutoDetectCoreDNSImage(ctx)
+			}
+
+			kvClient.WithDNSConfig(kubeovn.DNSConfig{
+				Forwarders:   cfg.ParseDNSForwarders(),
+				Image:        dnsImage,
+				SearchDomain: cfg.VPCDNSSearchDomain,
+			})
+			dnsProvisioner = kvClient
+
+			{
+				bsCtx, bsCancel := context.WithTimeout(ctx, 1*time.Minute)
+				err := kvClient.EnsureVpcDNSBootstrap(bsCtx)
+				bsCancel()
+				if err != nil {
+					log.Fatal().Err(err).Msg("failed to bootstrap F20 DNS resources (ServiceAccount/ConfigMap)")
+				}
+			}
+			log.Info().
+				Strs("forwarders", cfg.ParseDNSForwarders()).
+				Str("image", dnsImage).
+				Msg("kubeovn: F20 per-VPC DNS bootstrap verified")
+
+			// ── Step 3: F15 backfill (10 min budget) ──────────────────────────────
+			// Per-VPC loop; individual EnsureVpcNAT calls can wait up to ~90s for
+			// the NAT gateway pod. Budget must be generous enough for all existing
+			// VPCs to be processed. Don't fatal on failure — a transient
+			// kube-ovn-controller hiccup must not prevent the API from starting.
+			{
+				bfCtx, bfCancel := context.WithTimeout(ctx, 10*time.Minute)
+				runNATBackfill(bfCtx, repo, kvClient, cfg.LocalRegion, cfg.LocalZone)
+				bfCancel()
+			}
+
+			// ── Step 4: F20 backfill (10 min budget) ──────────────────────────────
+			{
+				bfCtx, bfCancel := context.WithTimeout(ctx, 10*time.Minute)
+				runDNSBackfill(bfCtx, repo, kvClient, cfg.LocalRegion, cfg.LocalZone)
+				bfCancel()
 			}
 		}
+	} else {
+		// Multi-zone (agent-only) mode: no local cluster, no local startup
+		// bootstrap. The local zone resolves through provReg's catalog-gated
+		// agent-only path exactly like a remote zone. Remote-zone support is
+		// unchanged. Per-zone NAT/DNS/SA bootstrap is deferred agent work (task #7).
 		log.Info().
-			Strs("forwarders", cfg.ParseDNSForwarders()).
-			Str("image", dnsImage).
-			Msg("kubeovn: F20 per-VPC DNS bootstrap verified")
+			Str("region", cfg.LocalRegion).Str("zone", cfg.LocalZone).
+			Msg("DCAPI_ZONES_ENABLED=true: skipping local-zone provider build + F32/F15/F20 startup bootstrap; all zones (including the control-plane host) are agent-only and resolve via the provider registry")
 
-		// ── Step 3: F15 backfill (10 min budget) ──────────────────────────────
-		// Per-VPC loop; individual EnsureVpcNAT calls can wait up to ~90s for
-		// the NAT gateway pod. Budget must be generous enough for all existing
-		// VPCs to be processed. Don't fatal on failure — a transient
-		// kube-ovn-controller hiccup must not prevent the API from starting.
-		{
-			bfCtx, bfCancel := context.WithTimeout(ctx, 10*time.Minute)
-			runNATBackfill(bfCtx, repo, kvClient, cfg.LocalRegion, cfg.LocalZone)
-			bfCancel()
-		}
-
-		// ── Step 4: F20 backfill (10 min budget) ──────────────────────────────
-		{
-			bfCtx, bfCancel := context.WithTimeout(ctx, 10*time.Minute)
-			runDNSBackfill(bfCtx, repo, kvClient, cfg.LocalRegion, cfg.LocalZone)
-			bfCancel()
+		// Best-effort: warn (do NOT block startup) if the local zone is not yet a
+		// registered zone. Until an agent is minted/connected for it, resources in
+		// this zone cannot be created.
+		zoneCtx, zoneCancel := context.WithTimeout(ctx, 5*time.Second)
+		known, err := repo.IsKnownZone(zoneCtx, cfg.LocalRegion, cfg.LocalZone)
+		zoneCancel()
+		switch {
+		case err != nil:
+			log.Warn().Err(err).
+				Str("region", cfg.LocalRegion).Str("zone", cfg.LocalZone).
+				Msg("could not verify whether the local zone is registered (catalog lookup failed) — continuing startup")
+		case !known:
+			log.Warn().
+				Str("region", cfg.LocalRegion).Str("zone", cfg.LocalZone).
+				Msg("local zone is not registered yet — mint and connect an agent for it before resources can be created in this zone")
 		}
 	}
 

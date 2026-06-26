@@ -44,7 +44,9 @@ spec:
             - { name: DCAPI_OIDC_AUDIENCE,                valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_OIDC_AUDIENCE } } }
             - { name: DCAPI_RANCHER_TOKEN,                valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_RANCHER_TOKEN } } }
             - { name: DCAPI_RANCHER_HARVESTER_CREDENTIAL, valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_RANCHER_HARVESTER_CREDENTIAL } } }
-            - { name: DCAPI_HARVESTER_KUBECONFIG,         valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_HARVESTER_KUBECONFIG } } }
+            # Optional: required only in single-cluster mode (DCAPI_ZONES_ENABLED=false).
+            # When zones are enabled, agents provide cluster access and this key may be absent.
+            - { name: DCAPI_HARVESTER_KUBECONFIG,         valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_HARVESTER_KUBECONFIG, optional: true } } }
             - { name: DCAPI_BFF_CLIENT_ID,                valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_BFF_CLIENT_ID } } }
             - { name: DCAPI_BFF_CLIENT_SECRET,            valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_BFF_CLIENT_SECRET } } }
             - { name: DCAPI_BFF_SESSION_SECRET,           valueFrom: { secretKeyRef: { name: dc-api-secrets, key: DCAPI_BFF_SESSION_SECRET } } }

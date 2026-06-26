@@ -74,3 +74,81 @@ func TestAgentRouteToggles_Independent(t *testing.T) {
 		})
 	}
 }
+
+// TestZonesEnabled_DefaultFalse asserts the flag defaults to false (single-cluster
+// mode) when DCAPI_ZONES_ENABLED is unset — byte-identical legacy behavior.
+func TestZonesEnabled_DefaultFalse(t *testing.T) {
+	setRequiredEnv(t)
+	// Intentionally do NOT set DCAPI_ZONES_ENABLED.
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.ZonesEnabled {
+		t.Error("ZonesEnabled = true by default, want false")
+	}
+}
+
+// TestZonesEnabled_True asserts the flag reads true when the env var is set.
+func TestZonesEnabled_True(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("DCAPI_ZONES_ENABLED", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if !cfg.ZonesEnabled {
+		t.Error("ZonesEnabled = false with DCAPI_ZONES_ENABLED=true, want true")
+	}
+}
+
+// TestValidateZones_DisabledRequiresKubeconfig asserts single-cluster mode fails
+// fast when the Harvester kubeconfig is empty.
+func TestValidateZones_DisabledRequiresKubeconfig(t *testing.T) {
+	setRequiredEnv(t)
+	// Clear the kubeconfig AFTER setRequiredEnv so the empty value wins.
+	t.Setenv("DCAPI_HARVESTER_KUBECONFIG", "")
+	// Zones disabled is the default; make it explicit for clarity.
+	t.Setenv("DCAPI_ZONES_ENABLED", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if err := cfg.ValidateZones(); err == nil {
+		t.Error("ValidateZones() = nil with zones disabled + empty kubeconfig, want an error")
+	}
+}
+
+// TestValidateZones_EnabledKubeconfigOptional asserts multi-zone mode accepts an
+// empty kubeconfig — agents provide cluster access.
+func TestValidateZones_EnabledKubeconfigOptional(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("DCAPI_HARVESTER_KUBECONFIG", "")
+	t.Setenv("DCAPI_ZONES_ENABLED", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if err := cfg.ValidateZones(); err != nil {
+		t.Errorf("ValidateZones() = %v with zones enabled + empty kubeconfig, want nil", err)
+	}
+}
+
+// TestValidateZones_EnabledKubeconfigIgnored asserts multi-zone mode does NOT
+// refuse a set kubeconfig — it is simply ignored (main.go logs one INFO).
+func TestValidateZones_EnabledKubeconfigIgnored(t *testing.T) {
+	setRequiredEnv(t) // sets a non-empty DCAPI_HARVESTER_KUBECONFIG
+	t.Setenv("DCAPI_ZONES_ENABLED", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if err := cfg.ValidateZones(); err != nil {
+		t.Errorf("ValidateZones() = %v with zones enabled + set kubeconfig, want nil (ignored, not refused)", err)
+	}
+}
