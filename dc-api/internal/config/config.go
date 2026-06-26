@@ -71,7 +71,13 @@ type Config struct {
 	// ── Harvester ─────────────────────────────────────────────────────────────
 	// HarvesterKubeconfig: base64-encoded kubeconfig for the Harvester cluster.
 	// Generate with: base64 < ~/.kube/harvester.yaml
-	HarvesterKubeconfig string `envconfig:"HARVESTER_KUBECONFIG" required:"true"`
+	//
+	// REQUIRED in single-cluster mode (DCAPI_ZONES_ENABLED=false) — dc-api uses
+	// it to build the local zone's direct provider set. IGNORED when zones are
+	// enabled (DCAPI_ZONES_ENABLED=true): every zone, including the
+	// control-plane-host zone, is agent-only and dc-api holds no kubeconfig. The
+	// optionality is enforced by ValidateZones(), not the envconfig tag.
+	HarvesterKubeconfig string `envconfig:"HARVESTER_KUBECONFIG" default:""`
 	HarvesterNamespace  string `envconfig:"HARVESTER_NAMESPACE"  default:"default"`
 
 	// ── Rancher ───────────────────────────────────────────────────────────────
@@ -299,6 +305,24 @@ type Config struct {
 	// zone with a connected agent whose RBAC already permits the op.
 	AgentRouteWrites bool `envconfig:"AGENT_ROUTE_WRITES" default:"false"`
 
+	// ZonesEnabled flips how the LOCAL (control-plane-host) zone is treated.
+	//
+	// Default FALSE — single-cluster mode: dc-api eager-builds a DIRECT provider
+	// set for the local zone from DCAPI_HARVESTER_KUBECONFIG (required), runs the
+	// F32 cluster-SA wiring and the F15/F20 VPC NAT + per-VPC DNS startup
+	// bootstrap, and serves the local zone over the direct dynamic client. Remote
+	// zones (if any) still resolve through the per-resource agent-routing engine.
+	// This is byte-identical to the pre-flag behavior.
+	//
+	// TRUE — multi-zone mode: there is NO inherent "local zone". EVERY zone,
+	// including the control-plane-host zone (LocalRegion/LocalZone), is agent-only
+	// and resolves through the SAME catalog-gated build-on-miss path as any remote
+	// zone — dc-api needs no kubeconfig. The DCAPI_HARVESTER_KUBECONFIG, if set, is
+	// ignored. The local F32/F15/F20 startup bootstrap is skipped (no local
+	// cluster; those become per-zone agent work). Remote zones keep working — the
+	// flag never disables remote-zone support.
+	ZonesEnabled bool `envconfig:"ZONES_ENABLED" default:"false"`
+
 	// ── Logging ───────────────────────────────────────────────────────────────
 	LogLevel string `envconfig:"LOG_LEVEL" default:"info"`
 
@@ -423,6 +447,23 @@ func (c *Config) ValidateF15() error {
 		}
 	}
 
+	return nil
+}
+
+// ValidateZones enforces the kubeconfig requirement implied by DCAPI_ZONES_ENABLED.
+//
+//   - Zones DISABLED (single-cluster, the default): DCAPI_HARVESTER_KUBECONFIG
+//     MUST be set — dc-api builds the local zone's direct provider set from it.
+//     An empty kubeconfig here is a fatal misconfiguration (the API could not
+//     serve any local resource), so we fail fast with a clear message.
+//   - Zones ENABLED (multi-zone, agent-only): the kubeconfig is OPTIONAL and
+//     ignored — agents provide cluster access for every zone. We do NOT refuse a
+//     set kubeconfig (an operator may leave the secret in place across the cutover);
+//     main.go logs one INFO noting it is ignored.
+func (c *Config) ValidateZones() error {
+	if !c.ZonesEnabled && c.HarvesterKubeconfig == "" {
+		return fmt.Errorf("DCAPI_HARVESTER_KUBECONFIG is required when DCAPI_ZONES_ENABLED=false (single-cluster mode); when zones are enabled, agents provide cluster access")
+	}
 	return nil
 }
 

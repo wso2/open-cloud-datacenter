@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 	"time"
@@ -10,8 +11,111 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/wso2/dc-api/internal/agentgw"
+	"github.com/wso2/dc-api/internal/config"
 	"github.com/wso2/dc-api/internal/providers/clusteraccess"
 )
+
+// minimalKubeconfig is a syntactically valid kubeconfig that parses into a REST
+// config without dialing anything — enough for harvester.NewClient / kubeovn.New
+// to build their dynamic clients in the zones-disabled eager-build path. No
+// cluster is contacted at construction time.
+const minimalKubeconfig = `apiVersion: v1
+kind: Config
+clusters:
+- name: test
+  cluster:
+    server: https://127.0.0.1:6443
+    insecure-skip-tls-verify: true
+contexts:
+- name: test
+  context:
+    cluster: test
+    user: test
+current-context: test
+users:
+- name: test
+  user:
+    token: test-token
+`
+
+// zonesTestConfig returns a *config.Config sufficient to build a Registry, with
+// ZonesEnabled set as requested and a valid (but unreachable) local kubeconfig.
+func zonesTestConfig(zonesEnabled bool) *config.Config {
+	return &config.Config{
+		ZonesEnabled:        zonesEnabled,
+		HarvesterKubeconfig: base64.StdEncoding.EncodeToString([]byte(minimalKubeconfig)),
+		HarvesterNamespace:  "default",
+		VMProvider:          "harvester",
+		ClusterProvider:     "rancher",
+		NetworkProvider:     "kubeovn",
+		KubeOVNNamespace:    "kube-ovn",
+		RancherURL:          "https://rancher.example.com",
+		RancherToken:        "token-xyz",
+		LocalRegion:         "lk",
+		LocalZone:           "zone-1",
+	}
+}
+
+// TestNewRegistry_ZonesDisabled_EagerBuildsLocalSet asserts that with zones
+// disabled, the local zone is eager-built and cached, so For(local) is a cache
+// hit (no catalog needed) returning the same pointer.
+func TestNewRegistry_ZonesDisabled_EagerBuildsLocalSet(t *testing.T) {
+	r, err := NewRegistry(zonesTestConfig(false), nil, zerolog.Nop())
+	if err != nil {
+		t.Fatalf("NewRegistry(zones disabled) error: %v", err)
+	}
+	// The local set must be present in the cache without any catalog wired.
+	r.mu.RLock()
+	_, cached := r.set[registryKey("lk", "zone-1")]
+	r.mu.RUnlock()
+	if !cached {
+		t.Fatal("zones disabled must eager-build and cache the local set")
+	}
+	a, err := r.For("lk", "zone-1")
+	if err != nil {
+		t.Fatalf("For(local) must be a cache hit with no catalog: %v", err)
+	}
+	b, _ := r.For("lk", "zone-1")
+	if a != b {
+		t.Error("For(local) must return the same cached pointer (no rebuild)")
+	}
+	if a.Compute == nil || a.Cluster == nil || a.Network == nil {
+		t.Error("the eager-built local set must have non-nil direct providers")
+	}
+}
+
+// TestNewRegistry_ZonesEnabled_NoEagerLocalSet asserts that with zones enabled,
+// the local zone is NOT pre-built: For(local) misses and goes through the
+// catalog-gated agent-only build-on-miss path (identical to a remote zone).
+func TestNewRegistry_ZonesEnabled_NoEagerLocalSet(t *testing.T) {
+	r, err := NewRegistry(zonesTestConfig(true), nil, zerolog.Nop())
+	if err != nil {
+		t.Fatalf("NewRegistry(zones enabled) error: %v", err)
+	}
+	// The local set must NOT be pre-populated.
+	r.mu.RLock()
+	_, cached := r.set[registryKey("lk", "zone-1")]
+	r.mu.RUnlock()
+	if cached {
+		t.Fatal("zones enabled must NOT eager-build the local set")
+	}
+	// With no catalog wired, For(local) is a build-on-miss that fails closed —
+	// proving the local zone now takes the SAME path as a remote zone.
+	if _, err := r.For("lk", "zone-1"); err == nil {
+		t.Error("with zones enabled and no catalog, For(local) must fail closed (build-on-miss path), not return a direct set")
+	}
+	// With a catalog that knows the local zone, For(local) builds the agent-only
+	// set (no kubeconfig used) and caches it.
+	cat := fakeCatalog{known: map[string]bool{"lk/zone-1": true}}
+	r.WithZoneCatalog(cat)
+	set, err := r.For("lk", "zone-1")
+	if err != nil {
+		t.Fatalf("with a catalog, For(local) must build the agent-only set: %v", err)
+	}
+	if set == nil || set.Compute == nil || set.Network == nil {
+		t.Fatal("the agent-only local set must have non-nil providers")
+	}
+}
 
 // vmGVR is the onboarded VM family GVR — the decision closure is per-family
 // (Part A), so the tests must pass a GVR. All the pre-existing VM-behaviour tests

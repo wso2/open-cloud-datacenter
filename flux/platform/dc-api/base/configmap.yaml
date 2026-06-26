@@ -13,6 +13,11 @@ data:
   DCAPI_HARVESTER_NAMESPACE: "default"
   DCAPI_VM_PROVIDER: "harvester"
   DCAPI_CLUSTER_PROVIDER: "rancher"
+  # Single-cluster (direct kubeconfig) is the default. A multi-zone overlay sets
+  # this to "true": every zone — including the control-plane-host zone — is
+  # agent-only, dc-api needs no kubeconfig, and the local F32/F15/F20 startup
+  # bootstrap is skipped.
+  DCAPI_ZONES_ENABLED: "false"
   # The ONLY IdP group dc-api interprets (platform admin). Tenant
   # membership lives in the role_assignments table, never in IdP groups.
   DCAPI_ADMIN_GROUP: "dc-admin"

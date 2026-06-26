@@ -128,6 +128,14 @@ type Registry struct {
 	// create (SSA apply) + delete first. Independent of routeReads.
 	routeWrites bool
 
+	// zonesEnabled (DCAPI_ZONES_ENABLED) flips how the LOCAL zone is treated.
+	// false (default, single-cluster): the local zone is eager-built from cfg as a
+	// DIRECT provider set and cached, so For(local) is a byte-identical cache hit.
+	// true (multi-zone): the local zone is NOT pre-built — it resolves through the
+	// SAME catalog-gated agent-only build-on-miss path as any remote zone, so
+	// dc-api needs no kubeconfig and a missing agent yields a clear error.
+	zonesEnabled bool
+
 	localRegion, localZone string
 	log                    zerolog.Logger
 
@@ -160,6 +168,7 @@ func NewRegistry(cfg *config.Config, agentGateway agentgw.SessionResolver, log z
 		agentGateway: agentGateway,
 		routeReads:   cfg.AgentRouteReads,
 		routeWrites:  cfg.AgentRouteWrites,
+		zonesEnabled: cfg.ZonesEnabled,
 		localRegion:  cfg.LocalRegion,
 		localZone:    cfg.LocalZone,
 		log:          log,
@@ -174,22 +183,39 @@ func NewRegistry(cfg *config.Config, agentGateway agentgw.SessionResolver, log z
 	}
 	r.cluster = cluster
 
-	// ── Local-zone set (direct Harvester/KubeOVN, routed seam) ─────────────────
-	localSet, err := r.buildLocalSet(cfg)
-	if err != nil {
-		return nil, err
+	// ── Local-zone set ─────────────────────────────────────────────────────────
+	// Single-cluster (zones disabled): eager-build + cache the local zone's DIRECT
+	// set from cfg (the Harvester kubeconfig + Rancher token), so For(local) is a
+	// byte-identical cache hit and the build-on-miss path is never taken.
+	//
+	// Multi-zone (zones enabled): do NOT pre-build the local set. The local zone is
+	// agent-only and resolves through the SAME catalog-gated build-on-miss path as
+	// any remote zone (buildRemoteSet / NoCreds fallback). We never read the
+	// kubeconfig here, so dc-api needs none.
+	if !r.zonesEnabled {
+		localSet, err := r.buildLocalSet(cfg)
+		if err != nil {
+			return nil, err
+		}
+		r.set[registryKey(cfg.LocalRegion, cfg.LocalZone)] = localSet
 	}
-	r.set[registryKey(cfg.LocalRegion, cfg.LocalZone)] = localSet
 
-	// One explicit "which zone do I route to" line at boot. This is the LOCAL
-	// routing target; per-resource resolution now routes other zones to their own
-	// agents. Surfacing it here makes the colombo-vs-zone-1 class of misconfig
-	// visible at startup rather than as a silent no-route at request time.
-	log.Info().
-		Str("route_region", cfg.LocalRegion).Str("route_zone", cfg.LocalZone).
-		Bool("reads", cfg.AgentRouteReads).Bool("writes", cfg.AgentRouteWrites).
-		Bool("gateway", agentGateway != nil).
-		Msg("agent routing config: the LOCAL region/zone uses the direct kubeconfig (plus the local agent when routing toggles are on); remote zones route to their own agent")
+	// One explicit "how do I reach my zones" line at boot. This makes the
+	// colombo-vs-zone-1 class of misconfig visible at startup rather than as a
+	// silent no-route at request time.
+	if r.zonesEnabled {
+		log.Info().
+			Str("local_region", cfg.LocalRegion).Str("local_zone", cfg.LocalZone).
+			Bool("reads", cfg.AgentRouteReads).Bool("writes", cfg.AgentRouteWrites).
+			Bool("gateway", agentGateway != nil).
+			Msg("agent routing config (DCAPI_ZONES_ENABLED=true): ALL zones, including the local/control-plane-host zone, are agent-only — there is no direct kubeconfig fallback; a zone with no connected agent fails clearly. Remote zones route to their own agent.")
+	} else {
+		log.Info().
+			Str("route_region", cfg.LocalRegion).Str("route_zone", cfg.LocalZone).
+			Bool("reads", cfg.AgentRouteReads).Bool("writes", cfg.AgentRouteWrites).
+			Bool("gateway", agentGateway != nil).
+			Msg("agent routing config: the LOCAL region/zone uses the direct kubeconfig (plus the local agent when routing toggles are on); remote zones route to their own agent")
+	}
 
 	if agentGateway != nil && cfg.AgentRouteReads {
 		log.Info().
@@ -309,9 +335,12 @@ func (r *Registry) buildRemoteSet(region, zone string) *ProviderSet {
 // on a miss.
 //
 // Fast path (the single-cluster / single-zone case and every repeated lookup):
-// an RLock read of the map. The LOCAL zone is always present (built eagerly in
-// NewRegistry), so For(local) is a pure cache hit returning the SAME *ProviderSet
-// pointer every time — byte-identical to today's fixed providers.
+// an RLock read of the map. With DCAPI_ZONES_ENABLED=false the LOCAL zone is
+// present (built eagerly in NewRegistry), so For(local) is a pure cache hit
+// returning the SAME *ProviderSet pointer every time — byte-identical to today's
+// fixed providers. With DCAPI_ZONES_ENABLED=true the local zone is NOT pre-built,
+// so For(local) misses and goes through the catalog-gated agent-only build-on-miss
+// path below, exactly like a remote zone.
 //
 // Build-on-miss (multi-zone): empty region/zone (pre-stamp rows) resolve to the
 // local zone. Otherwise the catalog is consulted OUTSIDE the lock (fail closed):
