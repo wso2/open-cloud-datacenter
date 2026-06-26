@@ -155,34 +155,47 @@ type Client struct {
 	dnsConf *DNSConfig
 
 	// remoteRegion/remoteZone are non-empty ONLY for a credential-free REMOTE
-	// client built by NewRemoteClient. For such a client c.dynamic is nil and the
-	// network CRD lifecycle is NOT yet routed through the agent (the network
-	// plumbing — NAD creation, ACL/route patches, NAT/CoreDNS — has no agent
-	// path), so every NetworkProvider method returns a clear local-only error
-	// naming the zone instead of dereferencing a nil dynamic client. Empty for the
-	// LOCAL client → today's behaviour. This is the documented boundary of the
-	// remote-zone build: VPC networking for a remote zone is deferred behind this
-	// explicit error rather than silently misrouting to the local cluster.
+	// client built by NewRemoteClient. For such a client c.dynamic is nil but the
+	// access seam is an agent-only Routed accessor, so the ONBOARDED CRD lifecycle
+	// (VPC/Subnet/NAD create/get/delete) DOES route through the zone's agent —
+	// every such method runs its k8s I/O through c.access, never c.dynamic. Only
+	// the VPC network plumbing (NAT/per-VPC DNS/CoreDNS, ACL/route/peering patches,
+	// NSG, namespace/quota provisioning, stuck-finalizer recovery) remains
+	// local-only for a remote zone and returns a clear localOnlyErr instead of
+	// dereferencing the nil dynamic client. Empty for the LOCAL client → today's
+	// behaviour. This is the documented boundary of the remote-zone build: the CRD
+	// lifecycle reaches the agent; the plumbing is deferred behind an explicit
+	// error rather than silently misrouting to the local cluster.
 	remoteRegion, remoteZone string
 }
 
-// localOnlyErr is returned by a REMOTE client's NetworkProvider methods. dc-api
-// holds no kubeconfig for a remote zone, and the kubeovn lifecycle still leans on
-// c.dynamic for the NAD/ACL/route/NAT/DNS plumbing that has no agent path. Per
-// the design, remote-zone VPC networking is deferred behind this clear error.
+// localOnlyErr is returned by a REMOTE client's PLUMBING methods (NAT, per-VPC
+// DNS/CoreDNS, ACL/route/peering patches, NSG, namespace/quota provisioning,
+// stuck-finalizer recovery). dc-api holds no kubeconfig for a remote zone and
+// those operations lean on c.dynamic for GVRs that the agent's mapper/RBAC do
+// not onboard. The onboarded CRD lifecycle (VPC/Subnet/NAD create/get/delete)
+// does NOT use this — it routes through c.access to the zone's agent.
 func (c *Client) localOnlyErr(op string) error {
 	return fmt.Errorf(
-		"%s is not supported for remote zone %s/%s yet: dc-api holds no direct KubeOVN credentials there and the VPC network plumbing (NAD/ACL/route/NAT/DNS) is local-only for now",
+		"%s is not supported for remote zone %s/%s yet: dc-api holds no direct KubeOVN credentials there and the VPC network plumbing (NAT/DNS/ACL/route/peering) is local-only for now (the VPC/Subnet/NAD CRD lifecycle does route through the zone's agent)",
 		op, c.remoteRegion, c.remoteZone)
 }
 
 // NewRemoteClient builds a credential-free KubeOVN client for a REMOTE zone. It
-// has NO kubeconfig and NO dynamic client; every NetworkProvider method returns
-// localOnlyErr. region/zone are carried only for clear error messages. This
-// keeps the per-zone resolver uniform (every zone yields a *ProviderSet) while
-// remote-zone networking stays explicitly gated rather than misrouted.
-func NewRemoteClient(region, zone string) *Client {
-	return &Client{remoteRegion: region, remoteZone: zone}
+// has NO kubeconfig and NO dynamic client; the onboarded CRD lifecycle
+// (CreateVNet/GetVNet/DeleteVNet, CreateSubnet/GetSubnet/DeleteSubnet and the
+// NAD create/get/delete inside them) runs through the supplied agent-only
+// Accessor (a clusteraccess.Routed whose Direct fallback is a clusteraccess.
+// NoCreds, so a missing agent fails clearly rather than hitting the local
+// cluster). The VPC network-plumbing methods return localOnlyErr. region/zone
+// are carried only for clear error messages. Mirrors harvester.NewRemoteClient.
+func NewRemoteClient(access clusteraccess.Accessor, region, zone string) *Client {
+	return &Client{
+		// dynamic + restConfig deliberately nil — guarded on plumbing methods.
+		access:       access,
+		remoteRegion: region,
+		remoteZone:   zone,
+	}
 }
 
 // New creates a KubeOVN Client.
@@ -263,6 +276,24 @@ func (c *Client) WithRoutedAccessor(build func(direct clusteraccess.Accessor) cl
 // cluster without re-parsing the kubeconfig.
 func (c *Client) RESTConfig() *rest.Config { return c.restConfig }
 
+// readObj reads an onboarded-CRD object for the readiness/wait polls inside the
+// CRD lifecycle (the NAD-ready poll in CreateSubnet, the subnet-gone poll in
+// DeleteSubnet). For the LOCAL client (c.dynamic != nil) it reads the dynamic
+// client DIRECTLY — byte-identical to the pre-seam behaviour, never inflating the
+// agent traffic with a tight readiness poll. For a REMOTE client (c.dynamic ==
+// nil) there is no local kubeconfig, so it routes the read through c.access (the
+// agent-only accessor). gvr must be an onboarded family (vpc/subnet/nad) so the
+// remote path is routable; the namespace is "" for cluster-scoped resources.
+func (c *Client) readObj(ctx context.Context, gvr schema.GroupVersionResource, ns, name string) (*unstructured.Unstructured, error) {
+	if c.dynamic != nil {
+		if ns == "" {
+			return c.dynamic.Resource(gvr).Get(ctx, name, metav1.GetOptions{})
+		}
+		return c.dynamic.Resource(gvr).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+	}
+	return c.access.Get(ctx, gvr, ns, name, metav1.GetOptions{})
+}
+
 // ── VNet ─────────────────────────────────────────────────────────────────────
 
 // CreateVNet provisions a KubeOVN Vpc CRD.
@@ -277,9 +308,8 @@ func (c *Client) RESTConfig() *rest.Config { return c.restConfig }
 // determines the Kubernetes namespace: "dc-<tenant>-<project>". The namespace
 // must already exist (created by the project handler via EnsureProjectNamespace).
 func (c *Client) CreateVNet(ctx context.Context, tenantID, projectID string, spec models.VNetSpec) (*models.VNetResource, error) {
-	if c.dynamic == nil {
-		return nil, c.localOnlyErr("CreateVNet")
-	}
+	// No c.dynamic guard: the only k8s I/O below is c.access.Create on the
+	// onboarded vpcGVR, which routes to the agent on a remote client.
 	ns := common.NamespaceForProject(tenantID, projectID)
 
 	vpc := &unstructured.Unstructured{
@@ -336,9 +366,8 @@ func (c *Client) CreateVNet(ctx context.Context, tenantID, projectID string, spe
 
 // GetVNet returns the current provider state of a VNet.
 func (c *Client) GetVNet(ctx context.Context, backendUID string) (*models.VNetResource, error) {
-	if c.dynamic == nil {
-		return nil, c.localOnlyErr("GetVNet")
-	}
+	// No c.dynamic guard: the only k8s I/O is c.access.Get on the onboarded
+	// vpcGVR, which routes to the agent on a remote client.
 	// Cluster-scoped → ns="". Routes via the agent only under DCAPI_AGENT_ROUTE_READS
 	// + a live agent; otherwise the byte-identical Direct Get.
 	obj, err := c.access.Get(ctx, vpcGVR, "", backendUID, metav1.GetOptions{})
@@ -362,9 +391,8 @@ func (c *Client) GetVNet(ctx context.Context, backendUID string) (*models.VNetRe
 // delete child subnets before calling DeleteVNet.  This driver does NOT
 // force-remove finalizers.
 func (c *Client) DeleteVNet(ctx context.Context, backendUID string) error {
-	if c.dynamic == nil {
-		return c.localOnlyErr("DeleteVNet")
-	}
+	// No c.dynamic guard: the only k8s I/O is c.access.Delete on the onboarded
+	// vpcGVR, which routes to the agent on a remote client.
 	// Cluster-scoped → ns="". Routes via the agent only under DCAPI_AGENT_ROUTE_WRITES
 	// + a live agent; otherwise the byte-identical Direct Delete.
 	err := c.access.Delete(ctx, vpcGVR, "", backendUID, metav1.DeleteOptions{})
@@ -393,12 +421,14 @@ func (c *Client) DeleteVNet(ctx context.Context, backendUID string) error {
 //
 // vnetUID is the KubeOVN Vpc CRD name (the backendUID of the parent VNet row).
 func (c *Client) CreateSubnet(ctx context.Context, vnetUID string, spec models.SubnetSpec) (*models.SubnetResource, error) {
-	if c.dynamic == nil {
-		return nil, c.localOnlyErr("CreateSubnet")
-	}
+	// No c.dynamic guard: every k8s op in the create lifecycle (parent VPC read,
+	// NAD create + readiness wait, Subnet create, rollback deletes) goes through
+	// c.access on an onboarded GVR (vpc/nad/subnet), so it routes to the agent on
+	// a remote client.
 	// Derive tenant namespace from the Vpc name ("vnet-<name>-<tenantID>" → extract tenantID).
-	// The Vpc CRD holds a dc-api/tenant label — fetch it rather than parsing.
-	vpcObj, err := c.dynamic.Resource(vpcGVR).Get(ctx, vnetUID, metav1.GetOptions{})
+	// The Vpc CRD holds a dc-api/tenant label — fetch it rather than parsing. Use
+	// c.access (vpcGVR is onboarded) so the remote client routes this read.
+	vpcObj, err := c.access.Get(ctx, vpcGVR, "", vnetUID, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("create subnet: fetch parent vpc %q: %w", vnetUID, err)
 	}
@@ -525,9 +555,8 @@ func (c *Client) CreateSubnet(ctx context.Context, vnetUID string, spec models.S
 
 // GetSubnet returns the current provider state of a Subnet.
 func (c *Client) GetSubnet(ctx context.Context, backendUID string) (*models.SubnetResource, error) {
-	if c.dynamic == nil {
-		return nil, c.localOnlyErr("GetSubnet")
-	}
+	// No c.dynamic guard: the only k8s I/O is c.access.Get on the onboarded
+	// subnetGVR, which routes to the agent on a remote client.
 	// Cluster-scoped → ns="". Routes via the agent under DCAPI_AGENT_ROUTE_READS
 	// + a live agent; otherwise the byte-identical Direct Get.
 	obj, err := c.access.Get(ctx, subnetGVR, "", backendUID, metav1.GetOptions{})
@@ -550,9 +579,12 @@ func (c *Client) GetSubnet(ctx context.Context, backendUID string) (*models.Subn
 // finalizer blocks deletion while consumers exist).  The caller ensures VMs
 // detach first; the driver patches ACLs to empty before issuing the delete.
 func (c *Client) DeleteSubnet(ctx context.Context, backendUID string) error {
-	if c.dynamic == nil {
-		return c.localOnlyErr("DeleteSubnet")
-	}
+	// No c.dynamic guard: the Subnet/NAD delete lifecycle (subnet read, subnet
+	// delete, NAD delete) runs through c.access on onboarded GVRs, so it routes to
+	// the agent on a remote client. The local-only plumbing within (ACL clear and
+	// the stuck-finalizer self-heal, which need non-onboarded ips/pods verbs and
+	// raw Patch) is each individually guarded by `c.dynamic != nil` below and is
+	// simply skipped for a remote zone.
 	// First: fetch the subnet to find the tenant namespace (for the NAD).
 	// Cluster-scoped → ns="". This Get is the leading read of the delete lifecycle,
 	// so it routes with the same accessor as the Delete below (under the reads
@@ -572,7 +604,8 @@ func (c *Client) DeleteSubnet(ctx context.Context, backendUID string) error {
 		// Read the parent VPC to get the project label.
 		parentVnet, _, _ := unstructured.NestedString(obj.Object, "metadata", "labels", "dc-api/parent-vnet")
 		if parentVnet != "" {
-			if vpcObj, err2 := c.dynamic.Resource(vpcGVR).Get(ctx, parentVnet, metav1.GetOptions{}); err2 == nil {
+			// vpcGVR is onboarded → use c.access so the remote client routes this read.
+			if vpcObj, err2 := c.access.Get(ctx, vpcGVR, "", parentVnet, metav1.GetOptions{}); err2 == nil {
 				projectID, _, _ = unstructured.NestedString(vpcObj.Object, "metadata", "labels", "dc-api/project")
 			}
 		}
@@ -585,9 +618,14 @@ func (c *Client) DeleteSubnet(ctx context.Context, backendUID string) error {
 		}
 	}
 
-	// Clear ACLs before deleting to avoid finalizer deadlock (gotcha 4).
-	if err := c.patchSubnetACLs(ctx, backendUID, []interface{}{}); err != nil {
-		log.Warn().Err(err).Str("subnet", backendUID).Msg("kubeovn: failed to clear ACLs before subnet delete; proceeding anyway")
+	// Clear ACLs before deleting to avoid finalizer deadlock (gotcha 4). This is a
+	// local-only plumbing patch (ACL Patch on the Subnet is not a routed verb), so
+	// skip it on a remote client (c.dynamic == nil) — the agent-side delete of an
+	// onboarded Subnet handles its own finalizers.
+	if c.dynamic != nil {
+		if err := c.patchSubnetACLs(ctx, backendUID, []interface{}{}); err != nil {
+			log.Warn().Err(err).Str("subnet", backendUID).Msg("kubeovn: failed to clear ACLs before subnet delete; proceeding anyway")
+		}
 	}
 
 	// Delete the Subnet CRD. Cluster-scoped → ns="". This is the PRIMARY delete verb
@@ -607,7 +645,9 @@ func (c *Client) DeleteSubnet(ctx context.Context, backendUID string) error {
 	defer cancel()
 	stuck := false
 	for {
-		_, err := c.dynamic.Resource(subnetGVR).Get(ctx, backendUID, metav1.GetOptions{})
+		// readObj: DIRECT on the local client (byte-identical), routed through the
+		// agent on a remote client (c.dynamic == nil).
+		_, err := c.readObj(ctx, subnetGVR, "", backendUID)
 		if k8serrors.IsNotFound(err) {
 			break
 		}
@@ -634,7 +674,12 @@ func (c *Client) DeleteSubnet(ctx context.Context, backendUID string) error {
 	// When the pre-check passes, the trade is debuggable orphan logical
 	// switch (scrub via `kubectl ko nbctl ls-del`) vs permanently wedged
 	// tenant namespace. We pick orphan switch.
-	if stuck {
+	//
+	// Local-only: the recovery lists ips (ipGVR, not onboarded) and raw-Patches
+	// the Subnet finalizers (Patch is not a routed verb), so it needs c.dynamic.
+	// A remote client (c.dynamic == nil) skips it; the agent-side Subnet delete is
+	// responsible for its own finalizer convergence in that zone.
+	if stuck && c.dynamic != nil {
 		// Ownership guard: only force-remove finalizers on a Subnet we created.
 		// The caller's chain (handler reads DB row, passes BackendUID) already
 		// ensures this — but a hand-crafted name collision or a future
@@ -695,11 +740,18 @@ func (c *Client) DeleteSubnet(ctx context.Context, backendUID string) error {
 	// then force-remove the NAD finalizer only when (1) the NAD didn't
 	// drain on its own, (2) it carries the dc-api/managed=true ownership
 	// label, and (3) no pod still references it via Multus annotation.
-	if err := c.forceRemoveNADFinalizerIfStuck(ctx, ns, backendUID); err != nil {
-		// Log only — primary subnet/NAD delete already issued; the namespace
-		// teardown caller will surface this if it actually blocks.
-		log.Warn().Err(err).Str("nad", backendUID).Str("ns", ns).
-			Msg("kubeovn: NAD finalizer cleanup encountered an issue")
+	//
+	// Local-only: this self-heal lists pods (podGVR, not onboarded) and raw-
+	// Patches the NAD finalizers, so it needs c.dynamic. A remote client
+	// (c.dynamic == nil) skips it; the agent-side NAD delete converges finalizers
+	// in that zone.
+	if c.dynamic != nil {
+		if err := c.forceRemoveNADFinalizerIfStuck(ctx, ns, backendUID); err != nil {
+			// Log only — primary subnet/NAD delete already issued; the namespace
+			// teardown caller will surface this if it actually blocks.
+			log.Warn().Err(err).Str("nad", backendUID).Str("ns", ns).
+				Msg("kubeovn: NAD finalizer cleanup encountered an issue")
+		}
 	}
 
 	return nil
@@ -1431,7 +1483,9 @@ func (c *Client) waitForNADReady(ctx context.Context, ns, nadName string) error 
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	for {
-		obj, err := c.dynamic.Resource(nadGVR).Namespace(ns).Get(ctx, nadName, metav1.GetOptions{})
+		// readObj: DIRECT on the local client (byte-identical readiness poll),
+		// routed through the agent on a remote client (c.dynamic == nil).
+		obj, err := c.readObj(ctx, nadGVR, ns, nadName)
 		if err != nil {
 			return fmt.Errorf("get NAD %s/%s: %w", ns, nadName, err)
 		}

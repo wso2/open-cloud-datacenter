@@ -308,12 +308,13 @@ func (r *Registry) buildLocalSet(cfg *config.Config) (*ProviderSet, error) {
 // kubeconfig for the zone, so:
 //
 //   - Compute/Network are credential-free clients (harvester.NewRemoteClient /
-//     kubeovn.NewRemoteClient). The harvester client routes the VM-object CRUD
-//     lifecycle through a Routed accessor bound to THIS zone, whose Direct
-//     fallback is a clusteraccess.NoCreds — so a missing agent yields a clear
-//     "no agent connected for zone" error, never a silent hit on the LOCAL
-//     cluster. The kubeovn remote client defers networking behind a clear
-//     local-only error (the network plumbing has no agent path yet).
+//     kubeovn.NewRemoteClient). Both are given a Routed accessor bound to THIS
+//     zone whose Direct fallback is a clusteraccess.NoCreds — so a missing agent
+//     yields a clear "no agent connected for zone" error, never a silent hit on
+//     the LOCAL cluster. The harvester client routes the VM-object CRUD lifecycle
+//     through it; the kubeovn client routes the onboarded CRD lifecycle (VPC/
+//     Subnet/NAD create/get/delete) through it, while the VPC network plumbing
+//     (NAT/DNS/ACL/route/peering) stays local-only behind a clear error.
 //   - Cluster is the SAME global Rancher client every zone shares.
 //
 // buildRemoteSet performs NO network I/O (no kubeconfig to dial), so it is safe
@@ -327,7 +328,7 @@ func (r *Registry) buildRemoteSet(region, zone string) *ProviderSet {
 	return &ProviderSet{
 		Compute: harvester.NewRemoteClient(remoteAccessor, region, zone),
 		Cluster: r.cluster, // global Rancher
-		Network: kubeovn.NewRemoteClient(region, zone),
+		Network: kubeovn.NewRemoteClient(remoteAccessor, region, zone),
 	}
 }
 
