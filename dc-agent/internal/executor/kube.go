@@ -337,6 +337,31 @@ func (k *KubeExecutor) GetStatus(ctx context.Context, ref ResourceRef) (StatusSn
 	return snapshotOf(obj)
 }
 
+// GetObject reads the referenced object once and returns it VERBATIM (the whole
+// object — spec, status, metadata — serialized exactly as the dynamic client
+// returned it), unlike GetStatus which returns only the .status subobject. A
+// missing object is success (Found=false), matching get_status's
+// not-found-is-success contract. It shares the resolve path the other
+// single-object verbs use, so a GVK NoMatch / missing name is a BAD_REQUEST.
+func (k *KubeExecutor) GetObject(ctx context.Context, ref ResourceRef) (GetObjectResult, error) {
+	ri, err := k.resolve(ref)
+	if err != nil {
+		return GetObjectResult{}, err
+	}
+	obj, err := ri.Get(ctx, ref.Name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return GetObjectResult{Found: false}, nil
+		}
+		return GetObjectResult{}, fmt.Errorf("get %s/%s/%s: %w", ref.Kind, ref.Namespace, ref.Name, err)
+	}
+	raw, err := obj.MarshalJSON()
+	if err != nil {
+		return GetObjectResult{}, fmt.Errorf("marshal %s/%s/%s object: %w", ref.Kind, ref.Namespace, ref.Name, err)
+	}
+	return GetObjectResult{Found: true, Object: raw}, nil
+}
+
 // WatchStatus opens a watch on the single named object and calls emit once per
 // observed Added/Modified event, stopping after maxSnapshots events, on
 // ctx.Done(), or when the watch channel closes/errors. It never touches the

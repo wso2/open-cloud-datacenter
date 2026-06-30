@@ -33,6 +33,8 @@ type recordingExecutor struct {
 
 	statusRef executor.ResourceRef
 
+	getObjectRef executor.ResourceRef
+
 	watchRef executor.ResourceRef
 	watchMax int
 
@@ -42,6 +44,11 @@ type recordingExecutor struct {
 func (r *recordingExecutor) List(ctx context.Context, ref executor.ListRef) (executor.ListResult, error) {
 	r.listRef = ref
 	return r.Stub.List(ctx, ref)
+}
+
+func (r *recordingExecutor) GetObject(ctx context.Context, ref executor.ResourceRef) (executor.GetObjectResult, error) {
+	r.getObjectRef = ref
+	return r.Stub.GetObject(ctx, ref)
 }
 
 func (r *recordingExecutor) Apply(ctx context.Context, manifest json.RawMessage, fm string, force bool) (executor.ApplyResult, error) {
@@ -257,6 +264,47 @@ func TestBuildDispatchers_GetStatus(t *testing.T) {
 	}
 }
 
+// TestBuildDispatchers_GetObject drives the generic full-object get op end to
+// end: the server sends a get_object req with a GVK/namespace/name, and the test
+// asserts the stub's whole-object result comes back as the res result AND that
+// the executor saw the ResourceRef decoded from the wire field names.
+func TestBuildDispatchers_GetObject(t *testing.T) {
+	object := json.RawMessage(`{"apiVersion":"kubevirt.io/v1","kind":"VirtualMachine","metadata":{"name":"vm-1","namespace":"tenant-abc"},"spec":{"running":true},"status":{"printableStatus":"Running"}}`)
+	exec := &recordingExecutor{Stub: executor.Stub{GetObjectRes: executor.GetObjectResult{Found: true, Object: object}}}
+
+	dispatchHarness(t, exec, func(t *testing.T, ctx context.Context, c *websocket.Conn) {
+		params := json.RawMessage(`{"api_version":"kubevirt.io/v1","kind":"VirtualMachine","namespace":"tenant-abc","name":"vm-1"}`)
+		res := sendReq(t, ctx, c, "id-getobj", executor.OpGetObject, params)
+		if !res.Ok {
+			t.Fatalf("get_object res not ok: %+v", res)
+		}
+		var got executor.GetObjectResult
+		if err := json.Unmarshal(res.Result, &got); err != nil {
+			t.Fatalf("unmarshal get_object result: %v", err)
+		}
+		if !got.Found {
+			t.Fatalf("get_object result Found = false, want true")
+		}
+		var obj map[string]any
+		if err := json.Unmarshal(got.Object, &obj); err != nil {
+			t.Fatalf("returned object not valid JSON: %v", err)
+		}
+		if obj["kind"] != "VirtualMachine" {
+			t.Errorf("returned object kind = %v, want VirtualMachine", obj["kind"])
+		}
+		// The whole object came back: .spec is present, not just .status.
+		spec, ok := obj["spec"].(map[string]any)
+		if !ok || spec["running"] != true {
+			t.Errorf("returned object spec = %v, want {running:true} — full object, not status-only", obj["spec"])
+		}
+	})
+
+	want := executor.ResourceRef{APIVersion: "kubevirt.io/v1", Kind: "VirtualMachine", Namespace: "tenant-abc", Name: "vm-1"}
+	if exec.getObjectRef != want {
+		t.Errorf("executor get_object ref = %+v, want %+v", exec.getObjectRef, want)
+	}
+}
+
 // TestBuildDispatchers_List drives the generic list op end to end: the server
 // sends a list req with a GVK/namespace/label selector, and the test asserts the
 // stub's collection comes back as the res result AND that the executor saw the
@@ -375,7 +423,7 @@ func TestBuildDispatchers_BadParams(t *testing.T) {
 
 	dispatchHarness(t, exec, func(t *testing.T, ctx context.Context, c *websocket.Conn) {
 		bad := json.RawMessage(`"not an object"`)
-		for _, op := range []string{executor.OpList, executor.OpApply, executor.OpDelete, executor.OpGetStatus, executor.OpWatchStatus} {
+		for _, op := range []string{executor.OpList, executor.OpGetObject, executor.OpApply, executor.OpDelete, executor.OpGetStatus, executor.OpWatchStatus} {
 			res := sendReq(t, ctx, c, "id-"+op, op, bad)
 			if res.Ok || res.Error == nil || res.Error.Code != protocol.ErrCodeBadRequest {
 				t.Errorf("%s with bad params res = %+v, want BAD_REQUEST", op, res)
@@ -449,14 +497,14 @@ func TestLoadConfig_TokenStillRequired(t *testing.T) {
 }
 
 // TestBuildDispatchers_RegistersAllOps asserts buildDispatchers wires exactly the
-// five M-B ops: the four request/response verbs in Dispatcher and watch_status in
-// StreamDispatcher. The hello advertisement (the merge of these two maps, sorted)
-// is covered in the conn package's TestAdvertisedOps; here we pin the registration
-// so a verb added to the executor without a handler is caught.
+// request/response verbs in Dispatcher and watch_status in StreamDispatcher. The
+// hello advertisement (the merge of these two maps, sorted) is covered in the
+// conn package's TestAdvertisedOps; here we pin the registration so a verb added
+// to the executor without a handler is caught.
 func TestBuildDispatchers_RegistersAllOps(t *testing.T) {
 	disp, stream := buildDispatchers(&recordingExecutor{}, zerolog.Nop())
 
-	wantRR := []string{executor.OpApply, executor.OpDelete, executor.OpGetInventory, executor.OpGetStatus, executor.OpList}
+	wantRR := []string{executor.OpApply, executor.OpDelete, executor.OpGetInventory, executor.OpGetObject, executor.OpGetStatus, executor.OpList}
 	for _, op := range wantRR {
 		if _, ok := disp[op]; !ok {
 			t.Errorf("Dispatcher missing request/response op %q", op)

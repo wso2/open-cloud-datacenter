@@ -31,6 +31,14 @@ const (
 	// selector, returning the whole collection. It is the generic analogue of the
 	// hard-coded get_inventory collection read, addressable for any GVK.
 	OpList = "list" // list objects of a GVK in a namespace, optional selector
+
+	// OpGetObject is the generic full-object GET verb: read ONE object of a GVK by
+	// namespace + name and return it VERBATIM (the whole object, spec + status +
+	// metadata), unlike get_status which returns only the .status subobject. It is
+	// the read primitive the read-modify-patch write ops (NAT/DNS/cloud-provider
+	// SA) need — they read .spec/.data to modify it. Additive and sibling to
+	// get_status; both use the same on-cluster k8s `get`.
+	OpGetObject = "get_object"
 )
 
 // Inventory is a snapshot of the zone cluster's capacity, returned by
@@ -80,6 +88,19 @@ type ListRef struct {
 // client returned it). dc-api re-hydrates them into an *unstructured.UnstructuredList.
 type ListResult struct {
 	Items []json.RawMessage `json:"items"`
+}
+
+// GetObjectResult is the result of a get_object op: the matched object
+// serialized VERBATIM as JSON (the whole object — spec, status, metadata — as
+// the dynamic client returned it), or Found=false when the object is absent.
+// dc-api re-hydrates Object into an *unstructured.Unstructured. Mirrors how
+// ListResult carries raw object JSON, but for a single object. A missing object
+// is success (Found=false, Object omitted) — the same not-found-is-success
+// contract get_status uses, so a poller can ask "gone yet?" without treating a
+// 404 as a failure.
+type GetObjectResult struct {
+	Found  bool            `json:"found"`
+	Object json.RawMessage `json:"object,omitempty"`
 }
 
 // ApplyResult is the result of a server-side apply: the applied object's
@@ -136,6 +157,12 @@ type Executor interface {
 	// returned (no paging) — the generic analogue of get_inventory's VM list.
 	List(ctx context.Context, ref ListRef) (ListResult, error)
 
+	// GetObject reads ONE referenced object and returns it VERBATIM (spec +
+	// status + metadata), unlike GetStatus which returns only .status. A missing
+	// object is success (GetObjectResult{Found:false}). It is the full-object read
+	// the read-modify-patch write ops need.
+	GetObject(ctx context.Context, ref ResourceRef) (GetObjectResult, error)
+
 	// Apply server-side-applies manifest (a complete Kubernetes object) to the
 	// agent's own cluster, owned by fieldManager (defaults to "dc-api" when
 	// empty). force takes ownership of conflicting fields.
@@ -185,12 +212,13 @@ type Stub struct {
 	Inv Inventory
 	Err error
 
-	ListRes    ListResult
-	ApplyRes   ApplyResult
-	DeleteRes  DeleteResult
-	StatusRes  StatusSnapshot
-	WatchRes   WatchResult
-	WatchEmits []StatusSnapshot // emitted in order (stage "modified") before WatchRes
+	ListRes      ListResult
+	GetObjectRes GetObjectResult
+	ApplyRes     ApplyResult
+	DeleteRes    DeleteResult
+	StatusRes    StatusSnapshot
+	WatchRes     WatchResult
+	WatchEmits   []StatusSnapshot // emitted in order (stage "modified") before WatchRes
 }
 
 // GetInventory returns the stub's configured inventory or error.
@@ -201,6 +229,11 @@ func (s Stub) GetInventory(_ context.Context) (Inventory, error) {
 // List returns the stub's configured ListRes/Err.
 func (s Stub) List(_ context.Context, _ ListRef) (ListResult, error) {
 	return s.ListRes, s.Err
+}
+
+// GetObject returns the stub's configured GetObjectRes/Err.
+func (s Stub) GetObject(_ context.Context, _ ResourceRef) (GetObjectResult, error) {
+	return s.GetObjectRes, s.Err
 }
 
 // Apply returns the stub's configured ApplyRes/Err.

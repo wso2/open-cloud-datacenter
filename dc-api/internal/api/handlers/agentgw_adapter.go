@@ -7,9 +7,9 @@
 // dependency graph (handlers → agentgw ← clusteraccess ← providers).
 //
 // The widening from *Session to agentgw.Session is free: *Session already
-// satisfies agentgw.Session structurally (its Apply/Delete/GetStatus/
-// WatchStatus signatures match). The only work is turning the concrete return
-// of Registry.Session into the interface type.
+// satisfies agentgw.Session structurally (its List/GetObject/Apply/Delete/
+// GetStatus/WatchStatus signatures match). The only work is turning the concrete
+// return of Registry.Session into the interface type.
 package handlers
 
 import "github.com/wso2/dc-api/internal/agentgw"

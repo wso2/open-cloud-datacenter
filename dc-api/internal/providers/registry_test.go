@@ -143,6 +143,9 @@ func (stubSession) Apply(context.Context, json.RawMessage, string, bool) (agentg
 func (stubSession) Delete(context.Context, agentgw.ResourceRef, string) (agentgw.DeleteResult, error) {
 	return agentgw.DeleteResult{}, nil
 }
+func (stubSession) GetObject(context.Context, agentgw.ResourceRef) (agentgw.GetObjectResult, error) {
+	return agentgw.GetObjectResult{}, nil
+}
 func (stubSession) GetStatus(context.Context, agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
 	return agentgw.StatusSnapshot{}, nil
 }

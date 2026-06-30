@@ -40,6 +40,9 @@ func (s *listStubSession) List(_ context.Context, ref agentgw.ListRef) (agentgw.
 	s.lastRef = ref
 	return agentgw.ListResult{Items: s.items}, nil
 }
+func (s *listStubSession) GetObject(context.Context, agentgw.ResourceRef) (agentgw.GetObjectResult, error) {
+	return agentgw.GetObjectResult{}, nil
+}
 func (s *listStubSession) GetStatus(context.Context, agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
 	return agentgw.StatusSnapshot{}, nil
 }

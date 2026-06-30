@@ -55,6 +55,10 @@ type netStubSession struct {
 	deleteErr    error
 }
 
+func (s *netStubSession) GetObject(context.Context, agentgw.ResourceRef) (agentgw.GetObjectResult, error) {
+	return agentgw.GetObjectResult{}, nil
+}
+
 func (s *netStubSession) GetStatus(context.Context, agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
 	return agentgw.StatusSnapshot{}, nil
 }
