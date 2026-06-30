@@ -16548,6 +16548,7 @@ type CreatePeeringResp struct {
 	JSON403      *Forbidden
 	JSON404      *NotFound
 	JSON409      *Conflict
+	JSON422      *Error
 	JSON500      *InternalError
 }
 
@@ -24761,6 +24762,13 @@ func ParseCreatePeeringResp(rsp *http.Response) (*CreatePeeringResp, error) {
 			return nil, err
 		}
 		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError

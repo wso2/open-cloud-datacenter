@@ -67,7 +67,7 @@ Every VNet carries an immutable `zone` attribute assigned at creation. If omitte
 
 1. **VNet creation** — `POST /v1/vnets` accepts an optional `zone` field. If omitted, defaults to `DCAPI_LOCAL_ZONE`. Once assigned, the zone is immutable (not updateable via PATCH).
 2. **Subnet creation** — `POST /v1/vnets/{id}/subnets` does not accept a zone field. The subnet inherits the parent VNet's zone.
-3. **VM/Cluster creation** — When attaching a VM or cluster to a VNet/subnet, the compute resource inherits the zone. Zone is validated at create time (must match the VNet's zone).
+3. **VM/Cluster creation** — A VM or cluster inherits the zone of the VNet/subnet it attaches to; the create request carries no separate zone field.
 4. **Peering** — Both VNets must have the same zone. Cross-zone peering is rejected with `422 Unprocessable Entity`.
 5. **Backend isolation** — The kubeovn driver is instantiated per-zone. A VNet in zone A always routes to the Harvester cluster and KubeOVN instance in zone A, never elsewhere.
 
