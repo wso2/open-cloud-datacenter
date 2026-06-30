@@ -23,6 +23,23 @@ output "network_namespace_id" {
   description = "Rancher namespace ID of the network namespace. Non-null when create_network_namespace = true or vlan_id is set."
 }
 
+output "common_namespace" {
+  value       = local.create_common_ns ? rancher2_namespace.common[0].name : null
+  description = "Name of the common namespace (<project_name>-common). Non-null when create_common_namespace = true."
+}
+
+output "common_namespace_id" {
+  value       = local.create_common_ns ? rancher2_namespace.common[0].id : null
+  description = "Rancher namespace ID of the common namespace. Non-null when create_common_namespace = true."
+}
+
+output "node_cloud_config_password" {
+  value       = local.create_cloud_config ? module.cloud_config[0].node_password : null
+  sensitive   = true
+  description = "Random password for the ubuntu user in the k8s-cluster-node-with-storage-network cloud-init template. Non-null when create_node_cloud_config = true."
+}
+
+
 output "network_names" {
   value       = { for id, r in harvester_network.tenant : id => "${r.namespace}/${r.name}" }
   description = "Map of VLAN ID (string) → full harvester_network reference (<namespace>/<name>) for attaching tenant VMs. Empty map when vlan_id is null or empty."
