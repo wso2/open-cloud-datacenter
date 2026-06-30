@@ -25,6 +25,9 @@ if [ ! -f "$SCAN" ]; then
   exit 0
 fi
 if command -v go >/dev/null 2>&1; then
+  # `go install` writes to $GOBIN when set, else $GOPATH/bin — prepend both.
+  GO_BIN_ENV="$(go env GOBIN 2>/dev/null)"
+  [ -n "$GO_BIN_ENV" ] && export PATH="$GO_BIN_ENV:$PATH"
   GOBIN_DIR="$(go env GOPATH 2>/dev/null)/bin"
   export PATH="$GOBIN_DIR:$PATH"
 fi
@@ -33,21 +36,53 @@ echo "[pre-push] pr-scan scanners — advisory, blocks only on secrets. Skip wit
 bash "$SCAN" 2>&1 || true
 
 # --- hard block: secrets only ---
-if command -v gitleaks >/dev/null 2>&1; then
-  base=""
-  for b in origin/controlplane upstream/controlplane origin/main; do
-    git rev-parse --verify --quiet "$b" >/dev/null 2>&1 && { base="$b"; break; }
+# Scan exactly the commits being pushed, read from the pre-push stdin protocol:
+#   <localref> <localsha> <remoteref> <remotesha>  (one line per ref)
+# Deletes (localsha all-zeros) are skipped; a new remote ref (remotesha all-zeros)
+# is scanned from the detected base's merge-base; otherwise we scan remotesha..localsha.
+# If stdin is empty (run manually), fall back to merge-base(HEAD, base)..HEAD.
+ZERO='^0\{7,\}$'   # all-zeros object id (any length)
+
+detect_mb() {  # echo the merge-base of $1 with the first available upstream base
+  _b=""
+  for _r in origin/controlplane upstream/controlplane origin/main; do
+    git rev-parse --verify --quiet "$_r" >/dev/null 2>&1 && { _b="$_r"; break; }
   done
-  mb="$(git merge-base HEAD "${base:-HEAD~1}" 2>/dev/null || echo HEAD~1)"
+  git merge-base "$1" "${_b:-HEAD~1}" 2>/dev/null || echo HEAD~1
+}
+
+scan_range() {  # $1=range (e.g. A..B); block on leaks, advisory otherwise
+  command -v gitleaks >/dev/null 2>&1 || return 0
   GL="$(mktemp)"
-  if ! gitleaks git --no-banner --redact --log-opts="$mb..HEAD" >"$GL" 2>&1; then
+  if ! gitleaks git --no-banner --redact --log-opts="$1" >"$GL" 2>&1; then
     echo
-    echo "[pre-push] BLOCKED — gitleaks flagged potential secret(s) in $mb..HEAD:"
+    echo "[pre-push] BLOCKED — gitleaks flagged potential secret(s) in $1:"
     tail -15 "$GL"
     echo "[pre-push] Remove the secret, or if it is a false positive: OCD_SKIP_PRESCAN=1 git push"
     rm -f "$GL"; exit 1
   fi
   rm -f "$GL"
+}
+
+if command -v gitleaks >/dev/null 2>&1; then
+  scanned_any=0
+  # Only consume stdin when it is piped/redirected; a manual run leaves it on the
+  # terminal, where `read` would block — fall through to the HEAD fallback instead.
+  if [ ! -t 0 ]; then
+    while read -r _localref localsha _remoteref remotesha; do
+      [ -n "${localsha:-}" ] || continue
+      # Skip branch/ref deletions — nothing local to scan.
+      expr "$localsha" : "$ZERO" >/dev/null && continue
+      if expr "${remotesha:-}" : "$ZERO" >/dev/null; then
+        scan_range "$(detect_mb "$localsha")..$localsha"   # new ref: vs merge-base
+      else
+        scan_range "$remotesha..$localsha"                 # existing ref: pushed commits
+      fi
+      scanned_any=1
+    done
+  fi
+  # Manual run / empty stdin / no non-delete refs: fall back to merge-base(HEAD)..HEAD.
+  [ "$scanned_any" -eq 0 ] && scan_range "$(detect_mb HEAD)..HEAD"
 fi
 
 echo "[pre-push] scan complete, no secrets — push proceeding."

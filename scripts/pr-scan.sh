@@ -10,8 +10,10 @@
 #
 # Usage:  scripts/pr-scan.sh [base-ref]
 #   base-ref  defaults to the first available of origin/controlplane,
-#             upstream/controlplane, origin/main, else HEAD~1. The diff is taken
-#             from the merge-base of HEAD with that ref.
+#             upstream/controlplane, origin/main, else HEAD~1. The changed-file set
+#             is the WORKING TREE (committed + staged + unstaged) diffed against the
+#             merge-base of HEAD with that ref — so it reflects what you're about to
+#             push/commit, not just committed history.
 #
 # Run it from anywhere in the repo — it roots itself at the repo top level.
 # Portable to macOS bash 3.2 (no mapfile / no associative arrays).
@@ -21,8 +23,11 @@ set -u
 REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "pr-scan: not inside a git repo"; exit 2; }
 cd "$REPO" || { echo "pr-scan: cannot cd to $REPO"; exit 2; }
 
-# Make go-installed tools (oasdiff, govulncheck) discoverable.
+# Make go-installed tools (oasdiff, govulncheck) discoverable. `go install` writes
+# to $GOBIN when set, else to $GOPATH/bin — prepend both so either layout works.
 if command -v go >/dev/null 2>&1; then
+  GO_BIN_ENV="$(go env GOBIN 2>/dev/null)"
+  [ -n "$GO_BIN_ENV" ] && case ":$PATH:" in *":$GO_BIN_ENV:"*) :;; *) PATH="$GO_BIN_ENV:$PATH";; esac
   GOBIN_DIR="$(go env GOPATH 2>/dev/null)/bin"
   case ":$PATH:" in *":$GOBIN_DIR:"*) :;; *) PATH="$GOBIN_DIR:$PATH";; esac
 fi
@@ -37,7 +42,9 @@ fi
 MB="$(git merge-base HEAD "$BASE" 2>/dev/null || echo "$BASE")"
 
 FL="$(mktemp)"; OASB="$(mktemp)"; trap 'rm -f "$FL" "$OASB"' EXIT
-git diff --name-only "$MB"...HEAD > "$FL" 2>/dev/null
+# Scan the WORKING TREE vs the merge-base (committed + staged + unstaged), since the
+# gate is meant to run before commit. Base versions are read with `git show $MB:...`.
+git diff --name-only "$MB" > "$FL" 2>/dev/null
 N=$(grep -c . "$FL" 2>/dev/null || echo 0)
 echo "== pr-scan scanners ==  base=$BASE  merge-base=${MB:0:12}  changed-files=$N"
 [ "$N" -eq 0 ] && { echo "nothing changed vs base — nothing to scan"; exit 0; }
@@ -76,14 +83,19 @@ if match 'go\.(mod|sum)$|package\.json$|pnpm-lock|yarn\.lock$'; then
   else gap "osv-scanner" "brew install osv-scanner"; fi
 fi
 
-# ---- OpenAPI: lint + breaking-change vs base ----
+# ---- OpenAPI: lint + breaking-change vs base (every changed spec, not just one) ----
 if match 'openapi\.ya?ml$'; then
-  SPEC="$(grep -iE 'openapi\.ya?ml$' "$FL" | head -1)"
-  sec "redocly lint ($SPEC)"; npx --yes @redocly/cli lint "$SPEC" 2>&1 | tail -20
-  if have oasdiff; then sec "oasdiff (OpenAPI breaking changes)"
-    if git show "$MB:$SPEC" > "$OASB" 2>/dev/null; then oasdiff breaking "$OASB" "$SPEC" 2>&1 | head -40
-    else echo "(no base version of $SPEC — treated as new)"; fi
-  else gap "oasdiff" "go install github.com/oasdiff/oasdiff@latest"; fi
+  # Record coverage gaps once, at top level (a `grep | while` body is a subshell and
+  # would lose GAPS mutations). The per-spec loop below only runs the tools.
+  have npx     || gap "redocly lint" "needs npx/node"
+  have oasdiff || gap "oasdiff" "go install github.com/oasdiff/oasdiff@latest"
+  grep -iE 'openapi\.ya?ml$' "$FL" | while IFS= read -r SPEC; do [ -n "$SPEC" ] || continue
+    if have npx; then sec "redocly lint ($SPEC)"; npx --yes @redocly/cli lint "$SPEC" 2>&1 | tail -20; fi
+    if have oasdiff; then sec "oasdiff ($SPEC, breaking changes)"
+      if git show "$MB:$SPEC" > "$OASB" 2>/dev/null; then oasdiff breaking "$OASB" "$SPEC" 2>&1 | head -40
+      else echo "(no base version of $SPEC — treated as new)"; fi
+    fi
+  done
 fi
 
 # ---- cloud-ui TS (project-local eslint + tsc) ----

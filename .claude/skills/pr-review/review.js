@@ -10,7 +10,9 @@ export const meta = {
 // args.base = review base (PR base branch / merge-base). args.repo = repo path (default: repo root).
 const base = (args && args.base) || 'HEAD~1'
 const repo = (args && args.repo) || '.'
-const diffRef = `git -C ${repo} diff ${base}...HEAD`
+// Working tree vs base (committed + staged + unstaged) — the gate runs before commit,
+// so uncommitted changes must be in scope.
+const diffRef = `git -C ${repo} diff ${base}`
 
 const SEV = ['critical', 'major', 'minor', 'trivial', 'info']
 const FINDINGS = {
@@ -41,7 +43,7 @@ const LENSES = [
   { key: 'performance', focus: 'N+1 queries, missing caching, unoptimized or unbounded loops/responses, algorithmic complexity, hot-path allocations.' },
   { key: 'maintainability-design', focus: 'Naming, structure/readability, duplication/DRY, complexity, dead code, interface/API design — and especially: does a NEW method enforce the SAME preconditions/guards as its sibling methods?' },
   { key: 'tests', focus: 'Are new branches/error paths/edge cases covered? a regression test for EACH fixed bug (the exact reported case)? are assertions real (not just no-error)?' },
-  { key: 'docs-conventions', focus: 'Stale comments/error-messages/helpers not updated to match the change; docs now contradicting the code; PR title/description quality; PLUS every applicable rule from the repo CLAUDE.md (design patterns, layering, isolation, hard rules, scrub gate) — read CLAUDE.md in the repo first.' },
+  { key: 'docs-conventions', focus: 'Stale comments/error-messages/helpers not updated to match the change; docs now contradicting the code; PLUS every applicable rule from the repo CLAUDE.md (design patterns, layering, isolation, hard rules, scrub gate) — read CLAUDE.md in the repo first.' },
 ]
 
 phase('Review')
