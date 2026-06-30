@@ -129,6 +129,13 @@ func (a *AgentBacked) ref(gvr schema.GroupVersionResource, ns, name string) (age
 // error so callers' existing IsNotFound / "not found" checks fire unchanged on
 // both seams.
 func (a *AgentBacked) Get(ctx context.Context, gvr schema.GroupVersionResource, ns, name string, _ metav1.GetOptions) (*unstructured.Unstructured, error) {
+	// Routability guard FIRST (mirrors List): a GVR can be GVK-mapped yet not be a
+	// routable family for Get — e.g. the pre-seeded virtualmachineinstances, which
+	// has no RouteVerbs. Refuse rather than issue a read the agent's SA may not be
+	// permitted to serve; the caller falls back to the direct path.
+	if verbs, ok := RoutableVerbs(gvr); !ok || !verbs[VerbGet] {
+		return nil, fmt.Errorf("clusteraccess: get of %s not routable: %w", gvr.String(), agentgw.ErrOpNotRoutable)
+	}
 	ref, err := a.ref(gvr, ns, name)
 	if err != nil {
 		return nil, err
