@@ -2816,6 +2816,7 @@ paths:
               address_space:
                 - 10.10.0.0/16
               region: lk-dev
+              zone: lk-a
               description: Production VNet
       responses:
         "202":
@@ -2836,6 +2837,7 @@ paths:
                   tenant_id: iam-platform
                   name: prod-vnet
                   region: lk-dev
+                  zone: lk-a
                   address_space: ["10.10.0.0/16"]
                   status: PENDING
                   provider_type: kubeovn
@@ -3371,6 +3373,7 @@ paths:
         - `peer_vnet_id` must belong to the same tenant
         - Both VNets must be `ACTIVE`
         - Both VNets must be in the same region (cross-region deferred)
+        - Both VNets must be in the same zone (cross-zone peering not supported)
         - Address spaces must not overlap
         - Only one peering may exist between any two VNets
 
@@ -7599,6 +7602,13 @@ components:
           type: string
           description: Region slug. Must exist in the DC-API regions table.
           example: lk-dev
+        zone:
+          type: string
+          description: |
+            Availability zone within the region to place this VNet in. If
+            omitted, defaults to the control plane's local zone. Child
+            resources (VMs, clusters, subnets) inherit this zone.
+          example: lk
         description:
           type: string
           maxLength: 256
@@ -7621,6 +7631,13 @@ components:
         region:
           type: string
           example: lk-dev
+        zone:
+          type: string
+          readOnly: true
+          description: |
+            Availability zone the VNet was placed in (assigned at create,
+            immutable). Inherited by child resources.
+          example: lk
         address_space:
           type: array
           items:

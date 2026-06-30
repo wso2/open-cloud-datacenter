@@ -2,6 +2,7 @@ import {
   Body1,
   Body2,
   Button,
+  Dropdown,
   DrawerBody,
   DrawerFooter,
   DrawerHeader,
@@ -10,6 +11,7 @@ import {
   Input,
   MessageBar,
   MessageBarBody,
+  Option,
   OverlayDrawer,
   Textarea,
   Toast,
@@ -22,10 +24,11 @@ import {
 } from '@fluentui/react-components';
 import { Dismiss24Regular, Info20Regular } from '@fluentui/react-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useApi } from '../api/useApi';
 import { useActiveProject } from '../hooks/useActiveProject';
+import { useRegionsQuery } from '../api/regions';
 import { findReservedOverlap, validateCidr } from '../lib/cidr';
 import { ReviewSummary } from './wizard/ReviewSummary';
 import { useWizard } from './wizard/CreateWizard';
@@ -98,6 +101,14 @@ export default function VnetCreateDrawer({ open, onClose, onCreated }: VnetCreat
   const { tenantId } = useParams<{ tenantId: string }>();
   const { projectId } = useActiveProject();
 
+  // Zones available for the (currently single) region, sourced from the same
+  // GET /v1/regions query the dashboard uses for region health.
+  const regionsQuery = useRegionsQuery();
+  const zones = useMemo(() => {
+    const region = regionsQuery.data?.items.find((r) => r.name === HARDCODED_REGION);
+    return region?.zones ?? [];
+  }, [regionsQuery.data]);
+
   // Stable ref so mutation callbacks can call wizard.reset() even though the
   // wizard object is declared later in the render body.
   const wizardResetRef = useRef<() => void>(() => undefined);
@@ -107,6 +118,9 @@ export default function VnetCreateDrawer({ open, onClose, onCreated }: VnetCreat
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [cidrInputs, setCidrInputs] = useState<string[]>(['10.10.0.0/16']);
+  // Empty string = unset; the server defaults the VNet to the control plane's
+  // local zone when no zone is sent.
+  const [zone, setZone] = useState('');
 
   // ── Mutation ──────────────────────────────────────────────────────────────
 
@@ -116,6 +130,7 @@ export default function VnetCreateDrawer({ open, onClose, onCreated }: VnetCreat
         name,
         address_space: cidrInputs.map((c) => c.trim()).filter(Boolean),
         region: HARDCODED_REGION,
+        zone: zone || undefined,
         description: description.trim() || undefined,
       };
       const { data, error } = await api.POST(
@@ -154,6 +169,7 @@ export default function VnetCreateDrawer({ open, onClose, onCreated }: VnetCreat
     setName('');
     setDescription('');
     setCidrInputs(['10.10.0.0/16']);
+    setZone('');
   };
 
   // ── Derived / validation ──────────────────────────────────────────────────
@@ -203,6 +219,7 @@ export default function VnetCreateDrawer({ open, onClose, onCreated }: VnetCreat
             hidden: !description,
           },
           { key: 'Region', value: HARDCODED_REGION },
+          { key: 'Zone', value: zone || 'Default (local zone)' },
           {
             key: 'Address space',
             value: (
@@ -260,6 +277,28 @@ export default function VnetCreateDrawer({ open, onClose, onCreated }: VnetCreat
             </Field>
             <Field label="Region">
               <Input value={HARDCODED_REGION} disabled />
+            </Field>
+            <Field
+              label="Zone"
+              hint="Availability zone to place this VNet in. Subnets and other resources inherit it. Leave as Default to use the control plane's local zone."
+            >
+              <Dropdown
+                value={zone || 'Default (local zone)'}
+                selectedOptions={[zone]}
+                onOptionSelect={(_, d) => setZone(d.optionValue ?? '')}
+                disabled={regionsQuery.isLoading}
+                placeholder={regionsQuery.isLoading ? 'Loading zones…' : 'Default (local zone)'}
+              >
+                <Option value="" text="Default (local zone)">
+                  Default (local zone)
+                </Option>
+                {zones.map((z) => (
+                  <Option key={z.name} value={z.name} text={z.name}>
+                    {z.name}
+                    {z.status !== 'up' ? ` (${z.status})` : ''}
+                  </Option>
+                ))}
+              </Dropdown>
             </Field>
             <MessageBar intent="info" icon={<Info20Regular />}>
               <MessageBarBody>

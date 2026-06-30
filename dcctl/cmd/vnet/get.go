@@ -79,6 +79,7 @@ func printVNetDetail(v *dcapi.VNet) {
 	row(14, "ID", v.Id.String())
 	row(14, "Name", v.Name)
 	row(14, "Region", v.Region)
+	row(14, "Zone", cliutil.Deref(v.Zone))
 	row(14, "Status", string(v.Status))
 	row(14, "Provider", v.ProviderType)
 	row(14, "Tenant", v.TenantId)

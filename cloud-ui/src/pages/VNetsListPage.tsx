@@ -53,6 +53,7 @@ interface VNet {
   id: string;
   name: string;
   region: string;
+  zone?: string;
   address_space: string[];
   description?: string;
   status: string;
@@ -248,7 +249,9 @@ export default function VNetsListPage() {
                   <TableCell className={styles.tableMonoCell}>
                     {v.address_space.join(', ')}
                   </TableCell>
-                  <TableCell className={styles.tableMutedCell}>{v.region}</TableCell>
+                  <TableCell className={styles.tableMutedCell}>
+                    {v.zone ? `${v.region} · ${v.zone}` : v.region}
+                  </TableCell>
                   <TableCell className={styles.tableMutedCell}>{fmtDate(v.created_at)}</TableCell>
                   <TableCell>
                     <RowActionsMenu>

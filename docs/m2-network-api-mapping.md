@@ -59,6 +59,33 @@ own DB. KubeOVN never sees it; only DC-API enforces against it.
 
 ---
 
+## Zone placement and inheritance
+
+Every VNet carries an immutable `zone` attribute assigned at creation. If omitted, it defaults to the control plane's local zone (the zone where dc-api itself runs). Child resources—subnets, VMs, clusters, route tables, NAT gateways—inherit their parent VNet's zone and cannot override it. This ensures all resources in a VNet are co-located in the same Harvester cluster.
+
+**Rules:**
+
+1. **VNet creation** — `POST /v1/vnets` accepts an optional `zone` field. If omitted, defaults to `DCAPI_LOCAL_ZONE`. Once assigned, the zone is immutable (not updateable via PATCH).
+2. **Subnet creation** — `POST /v1/vnets/{id}/subnets` does not accept a zone field. The subnet inherits the parent VNet's zone.
+3. **VM/Cluster creation** — When attaching a VM or cluster to a VNet/subnet, the compute resource inherits the zone. Zone is validated at create time (must match the VNet's zone).
+4. **Peering** — Both VNets must have the same zone. Cross-zone peering is rejected with `422 Unprocessable Entity`.
+5. **Backend isolation** — The kubeovn driver is instantiated per-zone. A VNet in zone A always routes to the Harvester cluster and KubeOVN instance in zone A, never elsewhere.
+
+**Example zone inheritance chain:**
+
+```
+VNet (zone: zone-1)
+  ├─ Subnet-1 (inherits: zone-1)
+  │   ├─ VM-1 (inherits: zone-1)
+  │   └─ VM-2 (inherits: zone-1)
+  └─ Subnet-2 (inherits: zone-1)
+      └─ VM-3 (inherits: zone-1)
+```
+
+All compute and network operations route through the zone's Harvester cluster. No cross-zone traffic within a VNet.
+
+---
+
 ## NSG model — design call
 
 Azure NSG combines two patterns that AWS splits:
@@ -325,7 +352,7 @@ This section records findings made while implementing
 `dc-api/internal/providers/kubeovn/client.go` (issue #149).  Update this
 section if any future driver work contradicts the assumptions below.
 
-### GVR plurals confirmed on KubeOVN v1.15 (lk-dev, 2026-05-06)
+### GVR plurals confirmed on KubeOVN v1.15 (lk, 2026-05-06)
 
 | CRD kind | Plural used in code | Notes |
 |---|---|---|

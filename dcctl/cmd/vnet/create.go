@@ -21,6 +21,7 @@ import (
 type vnetFlags struct {
 	addressSpace string
 	region       string
+	zone         string
 	outputJSON   bool
 	noWait       bool
 }
@@ -63,6 +64,7 @@ Example:
 
 	cmd.Flags().StringVar(&flags.addressSpace, "address-space", "", "Address space CIDR (e.g. 10.10.0.0/16, required)")
 	cmd.Flags().StringVar(&flags.region, "region", "", "Region name (e.g. lk, required)")
+	cmd.Flags().StringVar(&flags.zone, "zone", "", "Availability zone to place the VNet in; defaults to the control plane's local zone")
 	cmd.Flags().BoolVar(&flags.outputJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&flags.noWait, "no-wait", false, "Return immediately without waiting for the VNet to become active")
 
@@ -80,11 +82,15 @@ func runCreateVNet(ctx context.Context, tenantID, projectID, name string, flags 
 	apiClient := client.New(creds.AccessToken)
 
 	fmt.Printf("Creating VNet %q...\n", name)
-	resp, err := apiClient.Typed.CreateVNetWithResponse(ctx, tenantID, projectID, dcapi.CreateVNetRequest{
+	reqBody := dcapi.CreateVNetRequest{
 		Name:         name,
 		AddressSpace: []string{flags.addressSpace},
 		Region:       flags.region,
-	})
+	}
+	if flags.zone != "" {
+		reqBody.Zone = &flags.zone
+	}
+	resp, err := apiClient.Typed.CreateVNetWithResponse(ctx, tenantID, projectID, reqBody)
 	if err != nil {
 		return fmt.Errorf("POST /v1/tenants/%s/vnets: %w", tenantID, err)
 	}
@@ -126,6 +132,9 @@ func printVNet(v *dcapi.VNet) {
 	fmt.Printf("  ID:            %s\n", v.Id)
 	fmt.Printf("  Name:          %s\n", v.Name)
 	fmt.Printf("  Region:        %s\n", v.Region)
+	if v.Zone != nil && *v.Zone != "" {
+		fmt.Printf("  Zone:          %s\n", *v.Zone)
+	}
 	fmt.Printf("  Address Space: %s\n", strings.Join(v.AddressSpace, ", "))
 	fmt.Printf("  Status:        %s\n", v.Status)
 }
