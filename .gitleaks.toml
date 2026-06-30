@@ -1,0 +1,17 @@
+# gitleaks configuration for this repository.
+#
+# Extends the bundled default ruleset and allowlists known non-secrets. gitleaks
+# auto-loads this file from the repo root, so the pre-PR scanner gate
+# (scripts/pr-scan.sh, .githooks/pre-push) and any manual `gitleaks` run pick it
+# up automatically.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known non-secrets in this repo."
+# OCD_SKIP_PRESCAN is the pre-PR gate's own escape-hatch env var; it appears in
+# help text, scripts, and docs as `OCD_SKIP_PRESCAN=1 git push`, which the
+# generic-api-key rule otherwise flags as a KEY=value secret (false positive).
+regexes = [
+  '''OCD_SKIP_PRESCAN''',
+]

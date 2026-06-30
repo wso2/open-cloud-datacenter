@@ -30,6 +30,5 @@ replay_pid*
 *.tfvars
 .env
 
-# Claude Code
-.claude/
-CLAUDE.md
+# Claude Code — shared skills + project context (.claude/skills, CLAUDE.md) are tracked.
+.claude/settings.local.json
