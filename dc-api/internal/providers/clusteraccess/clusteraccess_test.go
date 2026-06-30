@@ -36,9 +36,11 @@ type fakeSession struct {
 
 	lastRef     agentgw.ResourceRef // captured by GetStatus/Delete
 	lastListRef agentgw.ListRef     // captured by List
+	listCalled  bool                // set true the moment List is invoked
 }
 
 func (f *fakeSession) List(_ context.Context, ref agentgw.ListRef) (agentgw.ListResult, error) {
+	f.listCalled = true
 	f.lastListRef = ref
 	if f.list != nil {
 		return f.list(ref)
@@ -148,6 +150,33 @@ func TestAgentBackedList_UnmappedGVRNotRoutable(t *testing.T) {
 	_, err := a.List(context.Background(), unknown, "ns", metav1.ListOptions{})
 	if !errors.Is(err, agentgw.ErrOpNotRoutable) {
 		t.Errorf("unmapped GVR must yield ErrOpNotRoutable, got %v", err)
+	}
+}
+
+// TestAgentBackedList_PreSeededGVKNotRoutable proves the routability guard: a GVR
+// that IS GVK-mapped (so it survives the mapper lookup) but is a pre-seeded entry
+// with no RouteVerbs — virtualmachineinstances — must be REFUSED for List with
+// ErrOpNotRoutable, and the agent's List must never be invoked. Without the guard
+// the mapped-but-direct-only VMI family would be sent to the agent, which has no
+// list grant for it (least-privilege).
+func TestAgentBackedList_PreSeededGVKNotRoutable(t *testing.T) {
+	// The pre-seeded VMI GVR from vmiCapability (kubevirt.io/v1, GVK-mapped, no
+	// RouteVerbs). Confirm it IS mapped so this test exercises the routability
+	// guard and not the unmapped-GVR path.
+	vmiGVR := schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachineinstances"}
+	if _, _, ok := DefaultGVKMapper().GVK(vmiGVR); !ok {
+		t.Fatalf("precondition: VMI GVR %s must be GVK-mapped for this test to exercise the routability guard", vmiGVR)
+	}
+
+	sess := &fakeSession{}
+	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
+
+	_, err := a.List(context.Background(), vmiGVR, "dc-t-p", metav1.ListOptions{})
+	if !errors.Is(err, agentgw.ErrOpNotRoutable) {
+		t.Errorf("mapped-but-not-routable GVR must yield ErrOpNotRoutable, got %v", err)
+	}
+	if sess.listCalled {
+		t.Error("agent List must NOT be invoked for a non-routable family")
 	}
 }
 

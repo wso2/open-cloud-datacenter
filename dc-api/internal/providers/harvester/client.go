@@ -107,11 +107,16 @@ type Client struct {
 	// remoteRegion/remoteZone are non-empty ONLY for a credential-free REMOTE
 	// client built by NewRemoteClient (multi-zone routing). For such a client
 	// c.dynamic is nil: the seam ops (CreateVM/GetVM/DeleteVM via c.access, and
-	// the list reads via c.access.List) route to that zone's agent, but the
-	// direct-only ops (the VMI IP read, image RESOLUTION/import, the cloud-provider
-	// SA bootstrap) have no direct path and return a clear local-only error naming
-	// the zone instead of panicking on a nil dynamic client. Empty for the LOCAL
-	// client → today's behaviour.
+	// the list reads via c.access.List) route to that zone's agent. The two
+	// remaining direct paths behave differently on a remote client:
+	//   - GetVM's VMI IP enrichment read DEGRADES GRACEFULLY: it is SKIPPED (the
+	//     `c.dynamic == nil` guard returns the agent-supplied VM status WITHOUT IP
+	//     enrichment — no error), so a remote VM's status is still reported.
+	//   - the genuinely local-only ops — image RESOLUTION/import, the cloud-provider
+	//     SA bootstrap, and VM create's local storageClass resolution — have no
+	//     direct path and return a clear local-only error (localOnlyErr) naming the
+	//     zone instead of panicking on a nil dynamic client.
+	// Empty for the LOCAL client → today's behaviour.
 	remoteRegion, remoteZone string
 }
 
