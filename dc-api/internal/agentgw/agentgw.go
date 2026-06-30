@@ -33,6 +33,12 @@ type Session interface {
 	// selector. The whole collection is returned as raw object JSON for the
 	// caller to re-hydrate into an *unstructured.UnstructuredList.
 	List(ctx context.Context, ref ListRef) (ListResult, error)
+	// GetObject reads the referenced object and returns it VERBATIM (the whole
+	// object — spec + status + metadata) as raw JSON for the caller to re-hydrate
+	// into an *unstructured.Unstructured. A missing object is success
+	// (GetObjectResult.Found == false), not an error. It is the full-object read
+	// (vs GetStatus's status-only read) the read-modify-patch write ops need.
+	GetObject(ctx context.Context, ref ResourceRef) (GetObjectResult, error)
 	// Apply server-side-applies manifest in the agent's zone cluster.
 	Apply(ctx context.Context, manifest json.RawMessage, fieldManager string, force bool) (ApplyResult, error)
 	// Delete removes the referenced object (a missing object is a successful,
@@ -82,6 +88,17 @@ type ListRef struct {
 // *unstructured.UnstructuredList.
 type ListResult struct {
 	Items []json.RawMessage `json:"items"`
+}
+
+// GetObjectResult is the get_object op's result: the matched object serialized
+// VERBATIM as JSON (the whole object — spec, status, metadata), or Found=false
+// when the object is absent (a 404 is success, not an error — the same
+// not-found-is-success contract get_status uses). dc-api re-hydrates Object into
+// an *unstructured.Unstructured. JSON tags are byte-identical to dc-agent's
+// executor.GetObjectResult.
+type GetObjectResult struct {
+	Found  bool            `json:"found"`
+	Object json.RawMessage `json:"object,omitempty"`
 }
 
 // ApplyResult is the apply op's result: the applied object's identity and its

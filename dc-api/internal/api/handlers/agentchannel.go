@@ -56,6 +56,12 @@ const (
 	// strings are the wire contract with dc-agent; the two are separate Go modules.
 	opList = "list"
 
+	// opGetObject is the generic full-object GET verb: read ONE object by GVK +
+	// namespace/name and return it VERBATIM (spec + status + metadata), unlike
+	// opGetStatus which returns only .status. This exact string is the wire
+	// contract with dc-agent; the two are separate Go modules.
+	opGetObject = "get_object"
+
 	// M-B mutating/status verbs (protocol v1). These exact strings are the wire
 	// contract with dc-agent; the two are separate Go modules.
 	opApply       = "apply"
@@ -123,6 +129,10 @@ type ListRef = agentgw.ListRef
 
 // ListResult is the list op's result: the matched objects as raw object JSON.
 type ListResult = agentgw.ListResult
+
+// GetObjectResult is the get_object op's result: ONE object serialized verbatim
+// as raw JSON (the whole object), or Found=false when the object is absent.
+type GetObjectResult = agentgw.GetObjectResult
 
 // ApplyResult is the apply op's result: the applied object's identity and its
 // post-apply version.
@@ -290,6 +300,27 @@ func (s *Session) List(ctx context.Context, ref ListRef) (ListResult, error) {
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return ListResult{}, err
+	}
+	return res, nil
+}
+
+// GetObject reads ONE referenced object and returns it VERBATIM (the whole
+// object — spec + status + metadata) as raw JSON, vs GetStatus's status-only
+// read. A missing object yields GetObjectResult{Found: false}, not an error. It
+// mirrors GetStatus's drive pattern: marshal the ResourceRef → Call → unmarshal
+// the raw-object result.
+func (s *Session) GetObject(ctx context.Context, ref ResourceRef) (GetObjectResult, error) {
+	var res GetObjectResult
+	params, err := json.Marshal(ref)
+	if err != nil {
+		return res, err
+	}
+	raw, err := s.Call(ctx, opGetObject, params)
+	if err != nil {
+		return res, err
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return GetObjectResult{}, err
 	}
 	return res, nil
 }

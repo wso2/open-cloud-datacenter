@@ -601,6 +601,93 @@ func TestKubeExecutorGetStatus_ClusterScoped(t *testing.T) {
 	}
 }
 
+// ── GetObject ───────────────────────────────────────────────────────────────
+
+// TestKubeExecutorGetObject_Found reads a seeded object and asserts the WHOLE
+// object (spec + status + metadata) round-trips verbatim — not just .status.
+func TestKubeExecutorGetObject_Found(t *testing.T) {
+	seed := configMap("cm-1", "tenant-abc", "Running")
+	seed.SetResourceVersion("12345")
+	_ = unstructured.SetNestedField(seed.Object, "value-1", "data", "key-1")
+	dc := dynfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), mbListKinds(), seed)
+	k := NewKubeExecutorWithMapper(fake.NewSimpleClientset(), dc, mbMapper())
+
+	res, err := k.GetObject(context.Background(), ResourceRef{APIVersion: "v1", Kind: "ConfigMap", Namespace: "tenant-abc", Name: "cm-1"})
+	if err != nil {
+		t.Fatalf("GetObject: %v", err)
+	}
+	if !res.Found {
+		t.Fatal("GetObject Found = false, want true")
+	}
+
+	obj := &unstructured.Unstructured{}
+	if err := obj.UnmarshalJSON(res.Object); err != nil {
+		t.Fatalf("object did not round-trip: %v", err)
+	}
+	if obj.GetName() != "cm-1" || obj.GetNamespace() != "tenant-abc" {
+		t.Errorf("object name/ns = %s/%s, want cm-1/tenant-abc", obj.GetName(), obj.GetNamespace())
+	}
+	if obj.GetResourceVersion() != "12345" {
+		t.Errorf("object resourceVersion = %q, want 12345", obj.GetResourceVersion())
+	}
+	// The full object carries .status AND .data — the spec-equivalent fields a
+	// read-modify-patch op needs. get_status would have dropped .data.
+	if phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase"); phase != "Running" {
+		t.Errorf("object status.phase = %q, want Running", phase)
+	}
+	if val, found, _ := unstructured.NestedString(obj.Object, "data", "key-1"); !found || val != "value-1" {
+		t.Errorf("object data.key-1 = %q (found=%v), want value-1 — full object must carry non-status fields", val, found)
+	}
+}
+
+// TestKubeExecutorGetObject_Absent reads a missing object and asserts the
+// not-found-is-success contract: Found:false, nil error (mirrors get_status).
+func TestKubeExecutorGetObject_Absent(t *testing.T) {
+	dc := dynfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), mbListKinds())
+	k := NewKubeExecutorWithMapper(fake.NewSimpleClientset(), dc, mbMapper())
+
+	res, err := k.GetObject(context.Background(), ResourceRef{APIVersion: "v1", Kind: "ConfigMap", Namespace: "tenant-abc", Name: "ghost"})
+	if err != nil {
+		t.Fatalf("GetObject of absent object returned error %v, want nil", err)
+	}
+	if res.Found {
+		t.Error("Found = true for an absent object, want false")
+	}
+	if res.Object != nil {
+		t.Errorf("absent result carries an object %s, want nil", res.Object)
+	}
+}
+
+// TestKubeExecutorGetObject_ClusterScoped reads a cluster-scoped object (namespace
+// ignored) — proves the RESTMapper scope branch on the full-object read.
+func TestKubeExecutorGetObject_ClusterScoped(t *testing.T) {
+	vpc := &unstructured.Unstructured{}
+	vpc.SetAPIVersion("kubeovn.io/v1")
+	vpc.SetKind("Vpc")
+	vpc.SetName("vpc-1")
+	_ = unstructured.SetNestedSlice(vpc.Object, []interface{}{"10.0.0.0/16"}, "spec", "namespaces")
+	dc := dynfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), mbListKinds(), vpc)
+	k := NewKubeExecutorWithMapper(fake.NewSimpleClientset(), dc, mbMapper())
+
+	res, err := k.GetObject(context.Background(), ResourceRef{APIVersion: "kubeovn.io/v1", Kind: "Vpc", Namespace: "should-be-ignored", Name: "vpc-1"})
+	if err != nil {
+		t.Fatalf("GetObject cluster-scoped: %v", err)
+	}
+	if !res.Found {
+		t.Fatal("Found = false, want true for cluster-scoped object")
+	}
+	obj := &unstructured.Unstructured{}
+	if err := obj.UnmarshalJSON(res.Object); err != nil {
+		t.Fatalf("object did not round-trip: %v", err)
+	}
+	if obj.GetName() != "vpc-1" {
+		t.Errorf("object name = %q, want vpc-1", obj.GetName())
+	}
+	if ns, found, _ := unstructured.NestedSlice(obj.Object, "spec", "namespaces"); !found || len(ns) != 1 {
+		t.Errorf("object spec.namespaces = %v (found=%v), want one entry", ns, found)
+	}
+}
+
 // ── List ─────────────────────────────────────────────────────────────────────
 
 // TestKubeExecutorList_Namespaced lists objects of a namespaced kind in one
@@ -743,6 +830,11 @@ func TestKubeExecutor_UnknownKind(t *testing.T) {
 	t.Run("get_status", func(t *testing.T) {
 		if _, err := k.GetStatus(context.Background(), ref); err == nil || !isBadRequestFault(err) {
 			t.Errorf("GetStatus unknown kind err = %v, want BAD_REQUEST fault", err)
+		}
+	})
+	t.Run("get_object", func(t *testing.T) {
+		if _, err := k.GetObject(context.Background(), ref); err == nil || !isBadRequestFault(err) {
+			t.Errorf("GetObject unknown kind err = %v, want BAD_REQUEST fault", err)
 		}
 	})
 	t.Run("watch_status", func(t *testing.T) {

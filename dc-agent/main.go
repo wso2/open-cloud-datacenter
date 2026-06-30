@@ -169,7 +169,7 @@ func main() {
 	} else {
 		dispatcher, streamDispatcher = buildDispatchers(exec, logger)
 		logger.Info().
-			Strs("ops", []string{executor.OpGetInventory, executor.OpList, executor.OpApply, executor.OpDelete, executor.OpGetStatus, executor.OpWatchStatus}).
+			Strs("ops", []string{executor.OpGetInventory, executor.OpList, executor.OpGetObject, executor.OpApply, executor.OpDelete, executor.OpGetStatus, executor.OpWatchStatus}).
 			Msg("local-cluster executor ready")
 	}
 
@@ -225,6 +225,23 @@ func buildDispatchers(exec executor.Executor, logger zerolog.Logger) (conn.Dispa
 				Str("label_selector", ref.LabelSelector).
 				Int("items", len(res.Items)).
 				Msg("listed objects")
+			return json.Marshal(res)
+		},
+		executor.OpGetObject: func(ctx context.Context, params json.RawMessage) (json.RawMessage, error) {
+			var ref executor.ResourceRef
+			if err := json.Unmarshal(params, &ref); err != nil {
+				return nil, conn.BadRequest(fmt.Errorf("get_object params: %w", err))
+			}
+			res, err := exec.GetObject(ctx, ref)
+			if err != nil {
+				return nil, err
+			}
+			logger.Info().
+				Str("op", executor.OpGetObject).
+				Str("gvk", ref.APIVersion+"/"+ref.Kind).
+				Str("object", ref.Namespace+"/"+ref.Name).
+				Bool("found", res.Found).
+				Msg("read object")
 			return json.Marshal(res)
 		},
 		executor.OpApply: func(ctx context.Context, params json.RawMessage) (json.RawMessage, error) {

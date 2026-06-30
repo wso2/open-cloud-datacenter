@@ -59,6 +59,10 @@ type writeStubSession struct {
 	deleteErr    error
 }
 
+func (s *writeStubSession) GetObject(context.Context, agentgw.ResourceRef) (agentgw.GetObjectResult, error) {
+	return agentgw.GetObjectResult{}, nil
+}
+
 func (s *writeStubSession) GetStatus(context.Context, agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
 	return agentgw.StatusSnapshot{}, nil
 }

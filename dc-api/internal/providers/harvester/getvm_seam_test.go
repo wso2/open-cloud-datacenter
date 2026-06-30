@@ -19,8 +19,8 @@ import (
 
 // This test proves the M-C equivalence guarantee: GetVM returns the SAME
 // models.Resource.Status whether its primary VirtualMachine read goes through
-// the Direct seam (fake dynamic object) or the agent seam (Session.GetStatus
-// returning the equivalent status snapshot). The VMI read stays Direct on both
+// the Direct seam (fake dynamic object) or the agent seam (Session.GetObject
+// returning the equivalent full object). The VMI read stays Direct on both
 // paths (no VMI object present → empty IP, which is fine for the status check).
 
 const (
@@ -53,18 +53,33 @@ func newFakeDynamicWithVM(t *testing.T, printableStatus string) *dynamicfake.Fak
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), gvrToListKind, vm)
 }
 
-// statusSnapshotFor builds the agent StatusSnapshot equivalent to the fake VM's
-// status — the same printableStatus the Direct path would read off the object.
-func statusSnapshotFor(printableStatus string) agentgw.StatusSnapshot {
-	status, _ := json.Marshal(map[string]interface{}{"printableStatus": printableStatus})
-	return agentgw.StatusSnapshot{Found: true, ResourceVersion: "1", Status: status}
+// fullVMObjectFor builds the full agent GetObjectResult equivalent to the fake
+// VM — the same printableStatus the Direct path reads off the object, carried in
+// a complete VM object (the shape get_object returns).
+func fullVMObjectFor(printableStatus string) agentgw.GetObjectResult {
+	obj, _ := json.Marshal(map[string]interface{}{
+		"apiVersion": "kubevirt.io/v1",
+		"kind":       "VirtualMachine",
+		"metadata": map[string]interface{}{
+			"name":            testVMName,
+			"namespace":       testVMNamespace,
+			"resourceVersion": "1",
+		},
+		"spec":   map[string]interface{}{"running": true},
+		"status": map[string]interface{}{"printableStatus": printableStatus},
+	})
+	return agentgw.GetObjectResult{Found: true, Object: obj}
 }
 
-// seamStubSession returns the given snapshot from GetStatus.
-type seamStubSession struct{ snap agentgw.StatusSnapshot }
+// seamStubSession returns the given full object from GetObject (the primary read
+// path GetVM-via-agent now takes).
+type seamStubSession struct{ obj agentgw.GetObjectResult }
 
+func (s seamStubSession) GetObject(context.Context, agentgw.ResourceRef) (agentgw.GetObjectResult, error) {
+	return s.obj, nil
+}
 func (s seamStubSession) GetStatus(context.Context, agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
-	return s.snap, nil
+	return agentgw.StatusSnapshot{}, nil
 }
 func (s seamStubSession) List(context.Context, agentgw.ListRef) (agentgw.ListResult, error) {
 	return agentgw.ListResult{}, nil
@@ -108,7 +123,7 @@ func TestGetVM_DirectAndAgentSeamsAgreeOnStatus(t *testing.T) {
 			// primary VM read is routed to a stub agent Session via a Routed
 			// accessor whose decision always allows VerbGet.
 			dynAgent := newFakeDynamicWithVM(t, tc.printable)
-			sess := seamStubSession{snap: statusSnapshotFor(tc.printable)}
+			sess := seamStubSession{obj: fullVMObjectFor(tc.printable)}
 			agentAccessor := clusteraccess.NewAgentBacked(sess, "lk", "zone-1", "dc-api", clusteraccess.DefaultGVKMapper(), zerolog.Nop())
 			routed := clusteraccess.NewRouted(
 				clusteraccess.NewDirect(dynAgent),

@@ -29,10 +29,14 @@ const agentCallTimeout = 30 * time.Second
 // depends on the neutral agentgw.Session interface, never on package handlers,
 // so there is no import cycle.
 //
-// Op coverage: the status-shaped Get maps onto Session.GetStatus (read slice);
-// Create/Update/Apply all map onto Session.Apply and Delete onto Session.Delete
-// (write slice 1 — VM create/delete); List maps onto Session.List (M-D — the
-// generic collection read). All of these verbs are IMPLEMENTED, not stubbed.
+// Op coverage: Get maps onto Session.GetObject (the full-object read — the whole
+// object, spec + status + metadata), with an OP_UNSUPPORTED fallback to
+// Session.GetStatus so an OLDER agent that predates get_object degrades to the
+// prior status-only read instead of erroring (non-breaking during a rolling
+// deploy). Create/Update/Apply all map onto Session.Apply and Delete onto
+// Session.Delete (write slice 1 — VM create/delete); List maps onto Session.List
+// (M-D — the generic collection read). All of these verbs are IMPLEMENTED, not
+// stubbed.
 //
 // NOTE on Create: the agent exposes only server-side apply (Session.Apply) as its
 // create mechanism, so AgentBacked.Create is an SSA, NOT a POST. This is the one
@@ -107,16 +111,23 @@ func (a *AgentBacked) ref(gvr schema.GroupVersionResource, ns, name string) (age
 	return agentgw.ResourceRef{APIVersion: apiVersion, Kind: kind, Namespace: ns, Name: name}, nil
 }
 
-// Get routes a STATUS-only read to Session.GetStatus and synthesizes a partial
-// *unstructured.Unstructured carrying apiVersion, kind, metadata.name/namespace,
-// metadata.resourceVersion, metadata.generation, and status.
+// Get routes a FULL-object read to Session.GetObject and re-hydrates the raw
+// object JSON the agent returns into an *unstructured.Unstructured — the whole
+// object (spec + status + metadata), the same shape Direct.Get returns. This is
+// what the read-modify-patch write ops (NAT/DNS/cloud-provider SA) need: they
+// read .spec/.data to modify it.
 //
-// IMPORTANT: this is sufficient ONLY for callers that read status (e.g. the VM
-// read slice, which reads status.printableStatus). A caller needing spec or
-// metadata beyond name/ns/rv/generation must NOT route via this accessor until a
-// full-object agent read op exists. Found==false is translated to a
-// k8serrors.NewNotFound-shaped error so callers' existing IsNotFound /
-// "not found" string checks fire unchanged on both seams.
+// COMPAT: an OLDER agent that predates get_object replies OP_UNSUPPORTED; this
+// FALLS BACK to Session.GetStatus and synthesizes the prior status-only partial
+// object (apiVersion, kind, metadata.name/namespace, resourceVersion,
+// generation, status). The behavior degrades to the prior status-only read
+// rather than erroring, keeping the change non-breaking during a rolling deploy.
+// Callers that only read status (e.g. the VM read slice's
+// status.printableStatus) are unaffected by which path served them.
+//
+// Found==false (on either path) is translated to a k8serrors.NewNotFound-shaped
+// error so callers' existing IsNotFound / "not found" checks fire unchanged on
+// both seams.
 func (a *AgentBacked) Get(ctx context.Context, gvr schema.GroupVersionResource, ns, name string, _ metav1.GetOptions) (*unstructured.Unstructured, error) {
 	ref, err := a.ref(gvr, ns, name)
 	if err != nil {
@@ -126,8 +137,21 @@ func (a *AgentBacked) Get(ctx context.Context, gvr schema.GroupVersionResource, 
 	ctx, cancel := a.bound(ctx)
 	defer cancel()
 
-	snap, err := a.sess.GetStatus(ctx, ref)
+	res, err := a.sess.GetObject(ctx, ref)
 	if err != nil {
+		// An older agent that doesn't implement get_object replies OP_UNSUPPORTED,
+		// which translateErr maps to ErrOpNotRoutable. In that one case fall back to
+		// the status-only read so a rolling deploy never errors. Any other error
+		// (agent unavailable, RBAC, timeout) propagates.
+		if errors.Is(a.translateErr(err), agentgw.ErrOpNotRoutable) {
+			a.log.Info().
+				Str("seam", "agent").
+				Str("region", a.region).Str("zone", a.zone).
+				Str("api_version", ref.APIVersion).Str("kind", ref.Kind).
+				Str("namespace", ref.Namespace).Str("name", ref.Name).
+				Msg("agent does not support get_object; falling back to status-only get_status")
+			return a.getStatusFallback(ctx, gvr, ref, ns, name)
+		}
 		return nil, a.translateErr(err)
 	}
 
@@ -138,15 +162,35 @@ func (a *AgentBacked) Get(ctx context.Context, gvr schema.GroupVersionResource, 
 		Str("region", a.region).Str("zone", a.zone).
 		Str("api_version", ref.APIVersion).Str("kind", ref.Kind).
 		Str("namespace", ref.Namespace).Str("name", ref.Name).
-		Bool("found", snap.Found).
+		Bool("found", res.Found).
 		Msg("provider read routed through agent")
 
-	if !snap.Found {
+	if !res.Found {
 		// Shape a NotFound so reconciler delete/fail branches and providers'
 		// idempotent-delete checks fire exactly as on the direct path.
 		return nil, k8serrors.NewNotFound(gvr.GroupResource(), name)
 	}
 
+	obj := &unstructured.Unstructured{}
+	if err := obj.UnmarshalJSON(res.Object); err != nil {
+		return nil, fmt.Errorf("clusteraccess: decode agent object for %s/%s: %w", ns, name, err)
+	}
+	return obj, nil
+}
+
+// getStatusFallback is the back-compat path Get takes when an older agent does
+// not implement get_object: it issues Session.GetStatus and synthesizes the
+// prior status-only partial object (apiVersion, kind, metadata.name/namespace,
+// resourceVersion, generation, status). It is intentionally the exact shape the
+// pre-get_object Get returned, so a caller that only reads status sees no change.
+func (a *AgentBacked) getStatusFallback(ctx context.Context, gvr schema.GroupVersionResource, ref agentgw.ResourceRef, ns, name string) (*unstructured.Unstructured, error) {
+	snap, err := a.sess.GetStatus(ctx, ref)
+	if err != nil {
+		return nil, a.translateErr(err)
+	}
+	if !snap.Found {
+		return nil, k8serrors.NewNotFound(gvr.GroupResource(), name)
+	}
 	obj := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": ref.APIVersion,
 		"kind":       ref.Kind,

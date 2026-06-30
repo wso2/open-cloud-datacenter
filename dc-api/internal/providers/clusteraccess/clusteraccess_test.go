@@ -23,20 +23,35 @@ var vmGVR = schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Res
 // fakeSession is a hand-written agentgw.Session that returns canned results.
 // Plain interface, no websocket harness needed.
 type fakeSession struct {
+	getObject func(ref agentgw.ResourceRef) (agentgw.GetObjectResult, error)
 	getStatus func(ref agentgw.ResourceRef) (agentgw.StatusSnapshot, error)
 	list      func(ref agentgw.ListRef) (agentgw.ListResult, error)
 	apply     func(manifest json.RawMessage, fm string, force bool) (agentgw.ApplyResult, error)
 	del       func(ref agentgw.ResourceRef, policy string) (agentgw.DeleteResult, error)
 
-	// block, when true, makes GetStatus wait on ctx.Done() and return ctx.Err()
+	// block, when true, makes GetObject wait on ctx.Done() and return ctx.Err()
 	// — modelling a connected-but-unresponsive agent (the real Session.Call only
 	// returns on a reply or ctx cancellation). Used to prove the accessor bounds
 	// every call with its own deadline.
 	block bool
 
-	lastRef     agentgw.ResourceRef // captured by GetStatus/Delete
+	lastRef     agentgw.ResourceRef // captured by GetObject/GetStatus/Delete
 	lastListRef agentgw.ListRef     // captured by List
 	listCalled  bool                // set true the moment List is invoked
+
+	getStatusCalled bool // set by GetStatus, asserts the OP_UNSUPPORTED fallback fired
+}
+
+func (f *fakeSession) GetObject(ctx context.Context, ref agentgw.ResourceRef) (agentgw.GetObjectResult, error) {
+	f.lastRef = ref
+	if f.block {
+		<-ctx.Done()
+		return agentgw.GetObjectResult{}, ctx.Err()
+	}
+	if f.getObject != nil {
+		return f.getObject(ref)
+	}
+	return agentgw.GetObjectResult{}, nil
 }
 
 func (f *fakeSession) List(_ context.Context, ref agentgw.ListRef) (agentgw.ListResult, error) {
@@ -48,12 +63,9 @@ func (f *fakeSession) List(_ context.Context, ref agentgw.ListRef) (agentgw.List
 	return agentgw.ListResult{}, nil
 }
 
-func (f *fakeSession) GetStatus(ctx context.Context, ref agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
+func (f *fakeSession) GetStatus(_ context.Context, ref agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
 	f.lastRef = ref
-	if f.block {
-		<-ctx.Done()
-		return agentgw.StatusSnapshot{}, ctx.Err()
-	}
+	f.getStatusCalled = true
 	if f.getStatus != nil {
 		return f.getStatus(ref)
 	}
@@ -194,17 +206,19 @@ func TestAgentBackedList_AgentUnavailableIsRetryable(t *testing.T) {
 	}
 }
 
-// ── AgentBacked.Get: status synthesis ─────────────────────────────────────────
+// ── AgentBacked.Get: full-object read (get_object) ────────────────────────────
 
-func TestAgentBackedGet_SynthesizesStatus(t *testing.T) {
+// fullVMObject is a complete VM object JSON (spec + status + metadata) — the
+// shape get_object returns and the read-modify-patch write ops need.
+const fullVMObject = `{"apiVersion":"kubevirt.io/v1","kind":"VirtualMachine",` +
+	`"metadata":{"name":"vm-1","namespace":"dc-t-p","resourceVersion":"12345","generation":7,"uid":"u-1"},` +
+	`"spec":{"running":true,"template":{"spec":{"domain":{"cpu":{"cores":2}}}}},` +
+	`"status":{"printableStatus":"Running"}}`
+
+func TestAgentBackedGet_ReturnsFullObject(t *testing.T) {
 	sess := &fakeSession{
-		getStatus: func(ref agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
-			return agentgw.StatusSnapshot{
-				Found:           true,
-				ResourceVersion: "12345",
-				Generation:      7,
-				Status:          json.RawMessage(`{"printableStatus":"Running"}`),
-			}, nil
+		getObject: func(ref agentgw.ResourceRef) (agentgw.GetObjectResult, error) {
+			return agentgw.GetObjectResult{Found: true, Object: json.RawMessage(fullVMObject)}, nil
 		},
 	}
 	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
@@ -221,11 +235,20 @@ func TestAgentBackedGet_SynthesizesStatus(t *testing.T) {
 	if sess.lastRef.Namespace != "dc-t-p" || sess.lastRef.Name != "vm-1" {
 		t.Errorf("agent ref ns/name = %s/%s, want dc-t-p/vm-1", sess.lastRef.Namespace, sess.lastRef.Name)
 	}
+	// The full object path must NOT have called GetStatus (no fallback).
+	if sess.getStatusCalled {
+		t.Error("Get fell back to GetStatus when get_object succeeded; it must use the full object")
+	}
 
-	// The synthesized object must carry the status the harvester driver reads.
+	// The full object round-trips: status (as before) AND spec (the new capability
+	// the read-modify-patch ops need).
 	printable, found, _ := unstructured.NestedString(obj.Object, "status", "printableStatus")
 	if !found || printable != "Running" {
 		t.Errorf("status.printableStatus = %q (found=%v), want Running", printable, found)
+	}
+	cores, found, _ := unstructured.NestedInt64(obj.Object, "spec", "template", "spec", "domain", "cpu", "cores")
+	if !found || cores != 2 {
+		t.Errorf("spec.template.spec.domain.cpu.cores = %d (found=%v), want 2 — full object must carry .spec", cores, found)
 	}
 	if rv := obj.GetResourceVersion(); rv != "12345" {
 		t.Errorf("resourceVersion = %q, want 12345", rv)
@@ -238,10 +261,52 @@ func TestAgentBackedGet_SynthesizesStatus(t *testing.T) {
 	}
 }
 
+// TestAgentBackedGet_FallsBackToStatusOnUnsupported proves the rolling-deploy
+// compat path: an OLDER agent that replies OP_UNSUPPORTED to get_object must make
+// Get fall back to GetStatus and return the prior status-only partial object —
+// not error.
+func TestAgentBackedGet_FallsBackToStatusOnUnsupported(t *testing.T) {
+	sess := &fakeSession{
+		getObject: func(ref agentgw.ResourceRef) (agentgw.GetObjectResult, error) {
+			return agentgw.GetObjectResult{}, &agentgw.AgentError{Code: agentgw.CodeOpUnsupported, Message: "unknown op"}
+		},
+		getStatus: func(ref agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
+			return agentgw.StatusSnapshot{
+				Found:           true,
+				ResourceVersion: "999",
+				Generation:      3,
+				Status:          json.RawMessage(`{"printableStatus":"Running"}`),
+			}, nil
+		},
+	}
+	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
+
+	obj, err := a.Get(context.Background(), vmGVR, "dc-t-p", "vm-1", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get must fall back to status-only on OP_UNSUPPORTED, got error: %v", err)
+	}
+	if !sess.getStatusCalled {
+		t.Error("Get did not fall back to GetStatus on OP_UNSUPPORTED")
+	}
+	// The status-only partial object still serves a status-reading caller.
+	printable, found, _ := unstructured.NestedString(obj.Object, "status", "printableStatus")
+	if !found || printable != "Running" {
+		t.Errorf("fallback status.printableStatus = %q (found=%v), want Running", printable, found)
+	}
+	if rv := obj.GetResourceVersion(); rv != "999" {
+		t.Errorf("fallback resourceVersion = %q, want 999", rv)
+	}
+	// The synthesized partial carries no .spec (status-only) — that is expected on
+	// the degraded path.
+	if _, found, _ := unstructured.NestedMap(obj.Object, "spec"); found {
+		t.Error("status-only fallback object unexpectedly carries .spec")
+	}
+}
+
 func TestAgentBackedGet_NotFoundIsK8sNotFound(t *testing.T) {
 	sess := &fakeSession{
-		getStatus: func(ref agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
-			return agentgw.StatusSnapshot{Found: false}, nil
+		getObject: func(ref agentgw.ResourceRef) (agentgw.GetObjectResult, error) {
+			return agentgw.GetObjectResult{Found: false}, nil
 		},
 	}
 	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
@@ -257,8 +322,8 @@ func TestAgentBackedGet_NotFoundIsK8sNotFound(t *testing.T) {
 
 func TestAgentBackedGet_AgentUnavailableIsRetryable(t *testing.T) {
 	sess := &fakeSession{
-		getStatus: func(ref agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
-			return agentgw.StatusSnapshot{}, agentgw.ErrAgentUnavailable
+		getObject: func(ref agentgw.ResourceRef) (agentgw.GetObjectResult, error) {
+			return agentgw.GetObjectResult{}, agentgw.ErrAgentUnavailable
 		},
 	}
 	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
