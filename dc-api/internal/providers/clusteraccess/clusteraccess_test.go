@@ -40,9 +40,11 @@ type fakeSession struct {
 	listCalled  bool                // set true the moment List is invoked
 
 	getStatusCalled bool // set by GetStatus, asserts the OP_UNSUPPORTED fallback fired
+	getObjectCalled bool // set by GetObject, asserts the routability guard fired first
 }
 
 func (f *fakeSession) GetObject(ctx context.Context, ref agentgw.ResourceRef) (agentgw.GetObjectResult, error) {
+	f.getObjectCalled = true
 	f.lastRef = ref
 	if f.block {
 		<-ctx.Done()
@@ -189,6 +191,27 @@ func TestAgentBackedList_PreSeededGVKNotRoutable(t *testing.T) {
 	}
 	if sess.listCalled {
 		t.Error("agent List must NOT be invoked for a non-routable family")
+	}
+}
+
+// TestAgentBackedGet_PreSeededGVKNotRoutable mirrors the List guard for Get: the
+// pre-seeded virtualmachineinstances GVR is GVK-mapped but has no RouteVerbs, so
+// Get must be REFUSED with ErrOpNotRoutable and the agent's GetObject never invoked.
+func TestAgentBackedGet_PreSeededGVKNotRoutable(t *testing.T) {
+	vmiGVR := schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachineinstances"}
+	if _, _, ok := DefaultGVKMapper().GVK(vmiGVR); !ok {
+		t.Fatalf("precondition: VMI GVR %s must be GVK-mapped", vmiGVR)
+	}
+
+	sess := &fakeSession{}
+	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
+
+	_, err := a.Get(context.Background(), vmiGVR, "dc-t-p", "vmi-1", metav1.GetOptions{})
+	if !errors.Is(err, agentgw.ErrOpNotRoutable) {
+		t.Errorf("mapped-but-not-routable GVR must yield ErrOpNotRoutable for Get, got %v", err)
+	}
+	if sess.getObjectCalled {
+		t.Error("agent GetObject must NOT be invoked for a non-routable family")
 	}
 }
 
