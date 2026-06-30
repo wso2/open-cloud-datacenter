@@ -1,0 +1,8 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# terraform.tfvars is safe to commit. secret.tfvars is NOT — see README.
+
+rancher_api_url        = "https://your-rancher-url"  # REPLACE
+harvester_cluster_name = "your-harvester-cluster"    # REPLACE
+ntp_server             = "pool.ntp.org"
+
+# ssh_authorized_keys is optional — add your SSH public keys here if needed
