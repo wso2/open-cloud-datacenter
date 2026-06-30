@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# pre-push hook — run the pr-scan scanner gate before pushing.
+# Enable it once with:  make hooks   (sets core.hooksPath to .githooks)
+#
+# Behavior: ADVISORY — prints all scanner findings for triage; HARD-BLOCKS only
+# on secrets (gitleaks), which are clear-cut. Everything else (lint/vuln/etc.) is
+# printed but does not block, so a pre-existing dependency CVE can't stop a push.
+#
+# Skip once (e.g. you already ran the pr-review skill, or a confirmed false
+# positive):
+#     OCD_SKIP_PRESCAN=1 git push
+#
+# Args: $1=remote name  $2=remote URL.  Stdin: <localref> <localsha> <remoteref> <remotesha>.
+set -u
+
+if [ "${OCD_SKIP_PRESCAN:-0}" = "1" ]; then
+  echo "[pre-push] OCD_SKIP_PRESCAN=1 — pr-scan skipped"
+  exit 0
+fi
+
+REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+SCAN="$REPO/scripts/pr-scan.sh"
+if [ ! -f "$SCAN" ]; then
+  echo "[pre-push] scripts/pr-scan.sh not found — skipping (nothing to gate)"
+  exit 0
+fi
+if command -v go >/dev/null 2>&1; then
+  GOBIN_DIR="$(go env GOPATH 2>/dev/null)/bin"
+  export PATH="$GOBIN_DIR:$PATH"
+fi
+
+echo "[pre-push] pr-scan scanners — advisory, blocks only on secrets. Skip with: OCD_SKIP_PRESCAN=1 git push"
+bash "$SCAN" 2>&1 || true
+
+# --- hard block: secrets only ---
+if command -v gitleaks >/dev/null 2>&1; then
+  base=""
+  for b in origin/controlplane upstream/controlplane origin/main; do
+    git rev-parse --verify --quiet "$b" >/dev/null 2>&1 && { base="$b"; break; }
+  done
+  mb="$(git merge-base HEAD "${base:-HEAD~1}" 2>/dev/null || echo HEAD~1)"
+  GL="$(mktemp)"
+  if ! gitleaks git --no-banner --redact --log-opts="$mb..HEAD" >"$GL" 2>&1; then
+    echo
+    echo "[pre-push] BLOCKED — gitleaks flagged potential secret(s) in $mb..HEAD:"
+    tail -15 "$GL"
+    echo "[pre-push] Remove the secret, or if it is a false positive: OCD_SKIP_PRESCAN=1 git push"
+    rm -f "$GL"; exit 1
+  fi
+  rm -f "$GL"
+fi
+
+echo "[pre-push] scan complete, no secrets — push proceeding."
+exit 0

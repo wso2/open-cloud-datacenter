@@ -227,6 +227,16 @@ KUBECONFIG=$HOME/.kube/config KUBE_CONTEXT=<your-harvester-context> \
 See `dc-api/test/integration/README.md` for coverage. For changes that don't touch
 those areas (CLI, docs, manifests), `go test ./...` (unit tests) is enough.
 
+**Self-review the diff before you push.** Run `make scan` — the deterministic
+scanner gate that runs the same open-source analyzers CodeRabbit runs
+(golangci-lint, gitleaks, osv-scanner, oasdiff, tflint/checkov, …), scoped to your
+diff. For a feature-sized change also run the `pr-review` skill (the LLM
+multi-lens review on top of the scanners). Fix what they flag *before* opening the
+PR, so the external review has little to add. One-time setup: `make scan-tools`
+installs the analyzers (best-effort brew + go), and `make hooks` wires an advisory
+pre-push hook (prints findings; blocks only on a detected secret — override with
+`OCD_SKIP_PRESCAN=1 git push`). See [`docs/pr-review-gate.md`](docs/pr-review-gate.md).
+
 **Spec-diff check for CR-building code.** Whenever dc-api generates a Kubernetes
 resource that mirrors a proven live object (Rancher `Cluster`, `HarvesterConfig`,
 KubeOVN `Vpc`/`Subnet`, `NetworkAttachmentDefinition`, per-VPC CoreDNS, …), the PR
