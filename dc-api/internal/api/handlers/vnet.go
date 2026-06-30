@@ -88,6 +88,7 @@ type createVNetRequest struct {
 	Name         string   `json:"name"`
 	AddressSpace []string `json:"address_space"`
 	Region       string   `json:"region"`
+	Zone         string   `json:"zone,omitempty"`
 	Description  string   `json:"description"`
 }
 
@@ -125,6 +126,7 @@ type vnetResponse struct {
 	TenantID     string   `json:"tenant_id"`
 	Name         string   `json:"name"`
 	Region       string   `json:"region"`
+	Zone         string   `json:"zone,omitempty"`
 	AddressSpace []string `json:"address_space"`
 	Description  string   `json:"description,omitempty"`
 	Status       string   `json:"status"`
@@ -140,6 +142,7 @@ func vnetToResponse(v *models.VNet) vnetResponse {
 		TenantID:     v.TenantID,
 		Name:         v.Name,
 		Region:       v.Region,
+		Zone:         v.Zone,
 		AddressSpace: v.AddressSpace,
 		Description:  v.Description,
 		Status:       string(v.Status),
@@ -194,6 +197,23 @@ func (h *VNetHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Optional zone selector: when supplied it must exist in the regions/zones
+	// catalog for the requested region. An empty zone stays empty and is stamped
+	// to the local default in CreateVNet (byte-identical to the prior behaviour).
+	if req.Zone != "" {
+		known, err := h.repo.IsKnownZone(r.Context(), req.Region, req.Zone)
+		if err != nil {
+			h.log.Error().Err(err).Str("region", req.Region).Str("zone", req.Zone).Msg("validate zone")
+			writeError(w, http.StatusInternalServerError, "failed to validate zone")
+			return
+		}
+		if !known {
+			writeError(w, http.StatusBadRequest,
+				fmt.Sprintf("zone %q is not available in region %q", req.Zone, req.Region))
+			return
+		}
+	}
+
 	tenantUUID, ok := middleware.TenantUUIDFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no tenant UUID in context")
@@ -218,18 +238,20 @@ func (h *VNetHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve the VNet's network provider for its (region, default zone) before
-	// the PENDING row. A VNet is a root resource created in the local/default zone
-	// (no zone selector in the API); req.Region defaults to the local region. An
-	// unknown region/zone fails clearly here instead of stranding a PENDING row.
-	network, err := h.network(req.Region, "")
+	// Resolve the VNet's network provider for its (region, zone) before the
+	// PENDING row. A VNet is a root resource; req.Zone is the optional caller
+	// selector (validated above) and an empty zone resolves to the local default.
+	// An unknown region/zone fails clearly here instead of stranding a PENDING row.
+	network, err := h.network(req.Region, req.Zone)
 	if err != nil {
-		h.log.Error().Err(err).Str("region", req.Region).Msg("resolve VNet provider for region")
+		h.log.Error().Err(err).Str("region", req.Region).Str("zone", req.Zone).Msg("resolve VNet provider for region/zone")
 		writeError(w, http.StatusBadRequest, "cannot place VNet in the requested region: "+err.Error())
 		return
 	}
 
-	// Insert PENDING row.
+	// Insert PENDING row. An empty Zone is stamped to the local default in
+	// CreateVNet (byte-identical to the prior behaviour); a supplied zone is
+	// persisted as-is.
 	vnet := &models.VNet{
 		TenantID:     tenantID,
 		TenantUUID:   tenantUUID,
@@ -237,6 +259,7 @@ func (h *VNetHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ProjectUUID:  projectUUID,
 		Name:         req.Name,
 		Region:       req.Region,
+		Zone:         req.Zone,
 		AddressSpace: req.AddressSpace,
 		Description:  req.Description,
 		Status:       models.StatusPending,

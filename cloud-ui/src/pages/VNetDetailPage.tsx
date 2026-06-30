@@ -87,6 +87,7 @@ interface VNet {
   tenant_id: string;
   name: string;
   region: string;
+  zone?: string;
   address_space: string[];
   description?: string;
   status: string;
@@ -270,6 +271,12 @@ export default function VNetDetailPage() {
             <dd className={styles.kvValue}><StatusPill status={v.status} /></dd>
             <dt className={styles.kvKey}>Region</dt>
             <dd className={styles.kvValue}>{v.region}</dd>
+            {v.zone && (
+              <>
+                <dt className={styles.kvKey}>Zone</dt>
+                <dd className={styles.kvValue}>{v.zone}</dd>
+              </>
+            )}
             <dt className={styles.kvKey}>Address space</dt>
             <dd className={`${styles.kvValue} ${styles.mono}`}>
               {v.address_space.map((c, i) => (

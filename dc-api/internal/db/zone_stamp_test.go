@@ -213,6 +213,90 @@ func TestZoneStamp_VNetRootDefaultsToLocalZone(t *testing.T) {
 	}
 }
 
+// TestZoneStamp_VNetHonoursCallerSuppliedZone proves a caller-selected zone is
+// persisted verbatim (not overwritten by the local-zone stamp) and surfaced on
+// read-back — the data path behind the optional `zone` selector on
+// POST /v1/vnets. The local zone is deliberately different from the selected
+// zone so an accidental local-stamp would be caught.
+func TestZoneStamp_VNetHonoursCallerSuppliedZone(t *testing.T) {
+	repo, tenantID, tenantUUID, projectUUID, teardown := setupZoneDB(t)
+	defer teardown()
+	ctx := context.Background()
+
+	// Register a second zone in the catalog and make the local zone something else.
+	if err := repo.EnsureRegionZone(ctx, "lk", "zone-5"); err != nil {
+		t.Fatalf("EnsureRegionZone: %v", err)
+	}
+	repo.SetLocalZone("zone-1")
+
+	// The catalog must report the selected zone as known (the handler's 400 guard).
+	known, err := repo.IsKnownZone(ctx, "lk", "zone-5")
+	if err != nil {
+		t.Fatalf("IsKnownZone(known): %v", err)
+	}
+	if !known {
+		t.Fatalf("IsKnownZone(lk, zone-5) = false, want true")
+	}
+
+	vnet, err := repo.CreateVNet(ctx, &models.VNet{
+		TenantID:     tenantID,
+		TenantUUID:   tenantUUID,
+		ProjectID:    "default",
+		ProjectUUID:  projectUUID,
+		Name:         "zoned-vnet",
+		Region:       "lk",
+		AddressSpace: []string{"10.55.0.0/16"},
+		Status:       models.StatusPending,
+		ProviderType: "kubeovn",
+		Zone:         "zone-5", // caller-supplied selector
+	})
+	if err != nil {
+		t.Fatalf("CreateVNet: %v", err)
+	}
+	if vnet.Zone != "zone-5" {
+		t.Errorf("returned VNet.Zone = %q, want %q (not local zone-1)", vnet.Zone, "zone-5")
+	}
+	if got := dbVNetZone(t, repo, vnet.ID); got != "zone-5" {
+		t.Errorf("persisted vnets.zone = %q, want %q (not local zone-1)", got, "zone-5")
+	}
+	rt, err := repo.GetVNet(ctx, vnet.ID, tenantUUID, projectUUID)
+	if err != nil {
+		t.Fatalf("GetVNet: %v", err)
+	}
+	if rt.Zone != "zone-5" {
+		t.Errorf("GetVNet returned zone %q, want %q", rt.Zone, "zone-5")
+	}
+}
+
+// TestZone_IsKnownZoneRejectsUnknown proves the catalog lookup behind the
+// handler's 400 guard returns false for a zone that does not exist in the
+// requested region, while returning true for the seeded one.
+func TestZone_IsKnownZoneRejectsUnknown(t *testing.T) {
+	repo, _, _, _, teardown := setupZoneDB(t)
+	defer teardown()
+	ctx := context.Background()
+
+	if err := repo.EnsureRegionZone(ctx, "lk", "zone-1"); err != nil {
+		t.Fatalf("EnsureRegionZone: %v", err)
+	}
+
+	known, err := repo.IsKnownZone(ctx, "lk", "zone-1")
+	if err != nil {
+		t.Fatalf("IsKnownZone(known): %v", err)
+	}
+	if !known {
+		t.Errorf("IsKnownZone(lk, zone-1) = false, want true")
+	}
+
+	unknown, err := repo.IsKnownZone(ctx, "lk", "no-such-zone")
+	if err != nil {
+		t.Fatalf("IsKnownZone(unknown): %v", err)
+	}
+	if unknown {
+		t.Errorf("IsKnownZone(lk, no-such-zone) = true, want false")
+	}
+}
+
 // TestZoneStamp_ChildInheritsParentVNetZone proves a child resource (VM/cluster
 // on the VPC path) takes the parent VNet's zone, NOT the local zone, exactly as
 // the handlers wire res.Zone = vnet.Zone before repo.Create.

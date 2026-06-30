@@ -86,7 +86,7 @@ before creating a VNet or Subnet.
 
 ### What is reserved
 
-- The Harvester management network (e.g. `192.168.10.0/24` in lk-dev). Overlap
+- The Harvester management network (e.g. `192.168.10.0/24` in lk). Overlap
   breaks NAT and routing in subtle ways — DNS, corporate-network reachability,
   audit traffic. Reject outright.
 - The Kubernetes service CIDR of the Harvester cluster (RKE2 default:
@@ -165,6 +165,7 @@ insight" section.
   "name": "prod-vnet",
   "address_space": ["10.1.0.0/16"],
   "region": "lk",
+  "zone": "zone-1",
   "description": "Production VNet for team-alpha"
 }
 ```
@@ -174,6 +175,7 @@ insight" section.
 | `name` | string | yes | Unique within tenant; alphanumeric + hyphen |
 | `address_space` | []string | yes | One or more RFC1918 CIDRs. At least one required. |
 | `region` | string | yes | Must match a known region (e.g. `lk`). Single-region for M2. |
+| `zone` | string | no | Availability zone within the region (e.g. `zone-1`). Defaults to the control plane's local zone. Immutable after create. Child resources (subnets, VMs, clusters) inherit this zone. |
 | `description` | string | no | Free-text; max 256 chars |
 
 ### Create response (202)
@@ -185,6 +187,7 @@ insight" section.
     "name": "prod-vnet",
     "address_space": ["10.1.0.0/16"],
     "region": "lk",
+    "zone": "zone-1",
     "description": "Production VNet for team-alpha",
     "status": "PENDING",
     "tenant_id": "team-alpha",
@@ -622,6 +625,7 @@ VNet is invisible to the requesting tenant.
 - A peering in either direction already exists between the two VNets → 409.
 - Both VNets must be in the same region for M2 (multi-region peering is out of
   scope per `m2-network-api-mapping.md`).
+- Both VNets must be in the same zone (cross-zone peering is not supported).
 
 ### Special semantics
 
@@ -731,7 +735,7 @@ gateway. The driver stores the `VpcNatGateway` name as `backend_uid`.
 
 > **Status (locked 2026-05-06):** The entire `PublicIp` resource is removed from
 > the M2 API surface. The endpoints below are documented as a forward-reference
-> for M3 implementation; they are NOT to be implemented in M2. Reason: lk-dev
+> for M3 implementation; they are NOT to be implemented in M2. Reason: lk
 > has no public IP pool. See § 14 "Public IPs and NICs — deferred to M3".
 
 A PublicIp represents an externally routable IP address from a pre-configured
@@ -1036,7 +1040,7 @@ Per-tenant quota defaults, persisted by extending the existing `quotas` table:
 |---|---|---|
 | `max_vnets` | 10 | Hard stop on `POST /v1/vnets` (HTTP 403 with quota message) |
 | `max_subnets_per_vnet` | 10 | Hard stop on `POST /v1/vnets/{id}/subnets` |
-| `max_public_ips` | 3 | Quota row reserved; enforcement deferred to M3 (no public IP pool in lk-dev) |
+| `max_public_ips` | 3 | Quota row reserved; enforcement deferred to M3 (no public IP pool in lk) |
 
 The DB migration adds three new columns to the `quotas` table with the defaults
 above (`ALTER TABLE quotas ADD COLUMN ... DEFAULT N`); existing rows get the
@@ -1045,7 +1049,7 @@ defaults automatically.
 ### Regions — DB-backed
 
 Stored in a new `regions` DB table. Operators populate rows when standing up a
-region (lk-dev, future EU, future US). The VNet handler validates the
+region (lk, future EU, future US). The VNet handler validates the
 `region` field against this table at create time
 (`SELECT 1 FROM regions WHERE name = $1`).
 
@@ -1070,7 +1074,7 @@ The earlier suggestion (`DCAPI_REGIONS` env var) was rejected because:
 
 ### Public IPs and NICs — deferred to M3
 
-- **`PublicIp` resource (Section 10):** removed from M2 API surface. lk-dev
+- **`PublicIp` resource (Section 10):** removed from M2 API surface. lk
   has no public IP pool yet; building the resource without a pool ships fake
   controls. M3 lights this up alongside the public IP pool config.
 - **NIC resource:** NIC was never first-class in M2 anyway. Its primary use

@@ -1481,6 +1481,11 @@ type CreateVNetRequest struct {
 
 	// Region Region slug. Must exist in the DC-API regions table.
 	Region string `json:"region"`
+
+	// Zone Availability zone within the region to place this VNet in. If
+	// omitted, defaults to the control plane's local zone. Child
+	// resources (VMs, clusters, subnets) inherit this zone.
+	Zone *string `json:"zone,omitempty"`
 }
 
 // CreateVirtualMachineRequest defines model for CreateVirtualMachineRequest.
@@ -1722,6 +1727,16 @@ type Image struct {
 
 	// Namespace Harvester namespace the image lives in
 	Namespace string `json:"namespace"`
+}
+
+// InventoryNode One cluster node's readiness and capacity. CPU is in milli-cores, memory in MiB; "used" is summed from pod requests.
+type InventoryNode struct {
+	CpuAllocatableM  int    `json:"cpu_allocatable_m"`
+	CpuUsedM         int    `json:"cpu_used_m"`
+	MemAllocatableMb int    `json:"mem_allocatable_mb"`
+	MemUsedMb        int    `json:"mem_used_mb"`
+	Name             string `json:"name"`
+	Ready            bool   `json:"ready"`
 }
 
 // KeyVault defines model for KeyVault.
@@ -2554,6 +2569,10 @@ type VNet struct {
 	Status    ResourceStatus `json:"status"`
 	TenantId  string         `json:"tenant_id"`
 	UpdatedAt time.Time      `json:"updated_at"`
+
+	// Zone Availability zone the VNet was placed in (assigned at create,
+	// immutable). Inherited by child resources.
+	Zone *string `json:"zone,omitempty"`
 }
 
 // VirtualMachine defines model for VirtualMachine.
@@ -2598,6 +2617,15 @@ type Zone struct {
 	// heartbeat. `up` — seen within ~90s; `degraded` — stale but within ~10m;
 	// `down` — silent beyond that; `unknown` — no agent has ever connected.
 	Status RegionStatus `json:"status"`
+}
+
+// ZoneInventory Live capacity snapshot of a zone cluster, read from the zone's dc-agent.
+// Admin-only; infrastructure-internal and never exposed to tenants.
+type ZoneInventory struct {
+	Nodes []InventoryNode `json:"nodes"`
+
+	// VmCount Number of KubeVirt VirtualMachines in the cluster.
+	VmCount int `json:"vm_count"`
 }
 
 // ProjectID defines model for ProjectID.
@@ -3206,6 +3234,9 @@ type ClientInterface interface {
 	// MintAgentToken request
 	MintAgentToken(ctx context.Context, region string, zone string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetZoneInventory request
+	GetZoneInventory(ctx context.Context, region string, zone string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// AdminCreateTenantWithBody request with any body
 	AdminCreateTenantWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -3674,6 +3705,18 @@ func (c *Client) GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (
 
 func (c *Client) MintAgentToken(ctx context.Context, region string, zone string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewMintAgentTokenRequest(c.Server, region, zone)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetZoneInventory(ctx context.Context, region string, zone string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetZoneInventoryRequest(c.Server, region, zone)
 	if err != nil {
 		return nil, err
 	}
@@ -5713,6 +5756,47 @@ func NewMintAgentTokenRequest(server string, region string, zone string) (*http.
 	}
 
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetZoneInventoryRequest generates requests for GetZoneInventory
+func NewGetZoneInventoryRequest(server string, region string, zone string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "region", region, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "zone", zone, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/admin/regions/%s/zones/%s/inventory", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -12214,6 +12298,9 @@ type ClientWithResponsesInterface interface {
 	// MintAgentTokenWithResponse request
 	MintAgentTokenWithResponse(ctx context.Context, region string, zone string, reqEditors ...RequestEditorFn) (*MintAgentTokenResp, error)
 
+	// GetZoneInventoryWithResponse request
+	GetZoneInventoryWithResponse(ctx context.Context, region string, zone string, reqEditors ...RequestEditorFn) (*GetZoneInventoryResp, error)
+
 	// AdminCreateTenantWithBodyWithResponse request with any body
 	AdminCreateTenantWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AdminCreateTenantResp, error)
 
@@ -12726,6 +12813,41 @@ func (r MintAgentTokenResp) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r MintAgentTokenResp) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetZoneInventoryResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ZoneInventory
+	JSON403      *Error
+	JSON501      *Error
+	JSON502      *Error
+	JSON503      *Error
+	JSON504      *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r GetZoneInventoryResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetZoneInventoryResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetZoneInventoryResp) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -17061,6 +17183,15 @@ func (c *ClientWithResponses) MintAgentTokenWithResponse(ctx context.Context, re
 	return ParseMintAgentTokenResp(rsp)
 }
 
+// GetZoneInventoryWithResponse request returning *GetZoneInventoryResp
+func (c *ClientWithResponses) GetZoneInventoryWithResponse(ctx context.Context, region string, zone string, reqEditors ...RequestEditorFn) (*GetZoneInventoryResp, error) {
+	rsp, err := c.GetZoneInventory(ctx, region, zone, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetZoneInventoryResp(rsp)
+}
+
 // AdminCreateTenantWithBodyWithResponse request with arbitrary body returning *AdminCreateTenantResp
 func (c *ClientWithResponses) AdminCreateTenantWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AdminCreateTenantResp, error) {
 	rsp, err := c.AdminCreateTenantWithBody(ctx, contentType, body, reqEditors...)
@@ -18560,6 +18691,67 @@ func ParseMintAgentTokenResp(rsp *http.Response) (*MintAgentTokenResp, error) {
 			return nil, err
 		}
 		response.JSON403 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetZoneInventoryResp parses an HTTP response from a GetZoneInventoryWithResponse call
+func ParseGetZoneInventoryResp(rsp *http.Response) (*GetZoneInventoryResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetZoneInventoryResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ZoneInventory
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 501:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON501 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 504:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON504 = &dest
 
 	}
 
