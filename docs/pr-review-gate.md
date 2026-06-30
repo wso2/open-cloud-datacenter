@@ -6,6 +6,29 @@ runs and adds an LLM judgment pass, so most findings are fixed before the diff i
 ever pushed. It is **not** a replacement for CodeRabbit — CodeRabbit still runs on
 the PR — it just means there's little left for it to flag.
 
+## Quick start
+
+**Using Claude Code?** Just work as normal. This repo's `CLAUDE.md` tells the agent
+to run this gate against your diff before pushing, and the `pr-review` skill gives
+it the procedure — so it runs `make scan` (and, for a feature-sized change, the LLM
+review) against your changes on its own. One-time: `make scan-tools` installs the
+analyzers; `make hooks` adds a hard pre-push backstop.
+
+**Reviewing by hand (no Claude needed):**
+
+1. **One-time:** `make scan-tools` (install the analyzers via brew + go) and,
+   recommended, `make hooks` (turn on the automatic pre-push scan).
+2. **Before every PR:** `make scan` — runs the analyzers on your changed files;
+   read what it flags and fix it.
+3. **Push.** With `make hooks` on, the scan runs automatically and **blocks only on
+   a detected secret** (everything else is advisory). Override once with
+   `OCD_SKIP_PRESCAN=1 git push`.
+
+**Terraform PRs** (any `.tf` change): `make scan` runs `terraform fmt -check`,
+tflint, checkov, and trivy. If your Terraform work is on the `terraform` branch (or
+a consumer repo), the gate must be present there too — see
+[Beyond controlplane](#beyond-controlplane) below.
+
 ## The two layers
 
 ### Layer 1 — deterministic scanners (`make scan`)
