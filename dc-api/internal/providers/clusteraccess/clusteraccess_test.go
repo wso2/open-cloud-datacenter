@@ -24,6 +24,7 @@ var vmGVR = schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Res
 // Plain interface, no websocket harness needed.
 type fakeSession struct {
 	getStatus func(ref agentgw.ResourceRef) (agentgw.StatusSnapshot, error)
+	list      func(ref agentgw.ListRef) (agentgw.ListResult, error)
 	apply     func(manifest json.RawMessage, fm string, force bool) (agentgw.ApplyResult, error)
 	del       func(ref agentgw.ResourceRef, policy string) (agentgw.DeleteResult, error)
 
@@ -33,7 +34,16 @@ type fakeSession struct {
 	// every call with its own deadline.
 	block bool
 
-	lastRef agentgw.ResourceRef // captured by GetStatus/Delete
+	lastRef     agentgw.ResourceRef // captured by GetStatus/Delete
+	lastListRef agentgw.ListRef     // captured by List
+}
+
+func (f *fakeSession) List(_ context.Context, ref agentgw.ListRef) (agentgw.ListResult, error) {
+	f.lastListRef = ref
+	if f.list != nil {
+		return f.list(ref)
+	}
+	return agentgw.ListResult{}, nil
 }
 
 func (f *fakeSession) GetStatus(ctx context.Context, ref agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
@@ -65,6 +75,94 @@ func (f *fakeSession) Delete(_ context.Context, ref agentgw.ResourceRef, policy 
 
 func (f *fakeSession) WatchStatus(context.Context, agentgw.ResourceRef, int, func(string, agentgw.StatusSnapshot)) (agentgw.WatchResult, error) {
 	return agentgw.WatchResult{}, nil
+}
+
+// ── AgentBacked.List: collection routing ──────────────────────────────────────
+
+func TestAgentBackedList_RehydratesItems(t *testing.T) {
+	item1 := `{"apiVersion":"kubevirt.io/v1","kind":"VirtualMachine","metadata":{"name":"vm-1","namespace":"dc-t-p"},"status":{"printableStatus":"Running"}}`
+	item2 := `{"apiVersion":"kubevirt.io/v1","kind":"VirtualMachine","metadata":{"name":"vm-2","namespace":"dc-t-p"},"status":{"printableStatus":"Starting"}}`
+	sess := &fakeSession{
+		list: func(ref agentgw.ListRef) (agentgw.ListResult, error) {
+			return agentgw.ListResult{Items: []json.RawMessage{
+				json.RawMessage(item1), json.RawMessage(item2),
+			}}, nil
+		},
+	}
+	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
+
+	list, err := a.List(context.Background(), vmGVR, "dc-t-p", metav1.ListOptions{LabelSelector: "dc-api/managed=true"})
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+
+	// The agent saw the correct GVK + namespace + label selector.
+	if sess.lastListRef.APIVersion != "kubevirt.io/v1" || sess.lastListRef.Kind != "VirtualMachine" {
+		t.Errorf("list ref GVK = %s/%s, want kubevirt.io/v1/VirtualMachine", sess.lastListRef.APIVersion, sess.lastListRef.Kind)
+	}
+	if sess.lastListRef.Namespace != "dc-t-p" {
+		t.Errorf("list ref namespace = %q, want dc-t-p", sess.lastListRef.Namespace)
+	}
+	if sess.lastListRef.LabelSelector != "dc-api/managed=true" {
+		t.Errorf("list ref label selector = %q, want dc-api/managed=true", sess.lastListRef.LabelSelector)
+	}
+
+	// The re-hydrated list carries both objects, with the list-kind GVK set.
+	if list.GetAPIVersion() != "kubevirt.io/v1" || list.GetKind() != "VirtualMachineList" {
+		t.Errorf("list GVK = %s/%s, want kubevirt.io/v1/VirtualMachineList", list.GetAPIVersion(), list.GetKind())
+	}
+	if len(list.Items) != 2 {
+		t.Fatalf("items = %d, want 2", len(list.Items))
+	}
+	if list.Items[0].GetName() != "vm-1" || list.Items[1].GetName() != "vm-2" {
+		t.Errorf("item names = %q,%q, want vm-1,vm-2", list.Items[0].GetName(), list.Items[1].GetName())
+	}
+	ps, _, _ := unstructured.NestedString(list.Items[0].Object, "status", "printableStatus")
+	if ps != "Running" {
+		t.Errorf("item[0] status.printableStatus = %q, want Running", ps)
+	}
+}
+
+func TestAgentBackedList_Empty(t *testing.T) {
+	sess := &fakeSession{
+		list: func(ref agentgw.ListRef) (agentgw.ListResult, error) {
+			return agentgw.ListResult{}, nil
+		},
+	}
+	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
+
+	list, err := a.List(context.Background(), vmGVR, "dc-t-p", metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if len(list.Items) != 0 {
+		t.Errorf("items = %d, want 0", len(list.Items))
+	}
+}
+
+func TestAgentBackedList_UnmappedGVRNotRoutable(t *testing.T) {
+	sess := &fakeSession{}
+	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
+
+	unknown := schema.GroupVersionResource{Group: "example.com", Version: "v1", Resource: "widgets"}
+	_, err := a.List(context.Background(), unknown, "ns", metav1.ListOptions{})
+	if !errors.Is(err, agentgw.ErrOpNotRoutable) {
+		t.Errorf("unmapped GVR must yield ErrOpNotRoutable, got %v", err)
+	}
+}
+
+func TestAgentBackedList_AgentUnavailableIsRetryable(t *testing.T) {
+	sess := &fakeSession{
+		list: func(ref agentgw.ListRef) (agentgw.ListResult, error) {
+			return agentgw.ListResult{}, agentgw.ErrAgentUnavailable
+		},
+	}
+	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
+
+	_, err := a.List(context.Background(), vmGVR, "dc-t-p", metav1.ListOptions{})
+	if !errors.Is(err, agentgw.ErrAgentUnavailable) {
+		t.Errorf("error does not wrap ErrAgentUnavailable: %v", err)
+	}
 }
 
 // ── AgentBacked.Get: status synthesis ─────────────────────────────────────────

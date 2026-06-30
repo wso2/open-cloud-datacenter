@@ -28,6 +28,11 @@ import (
 // needs. *handlers.Session satisfies this by structural match — no change to
 // agentchannel.go's method signatures is required.
 type Session interface {
+	// List returns the objects of the referenced GVK in the given namespace
+	// ("" = cluster-scoped or all namespaces), filtered by the optional label
+	// selector. The whole collection is returned as raw object JSON for the
+	// caller to re-hydrate into an *unstructured.UnstructuredList.
+	List(ctx context.Context, ref ListRef) (ListResult, error)
 	// Apply server-side-applies manifest in the agent's zone cluster.
 	Apply(ctx context.Context, manifest json.RawMessage, fieldManager string, force bool) (ApplyResult, error)
 	// Delete removes the referenced object (a missing object is a successful,
@@ -60,6 +65,23 @@ type ResourceRef struct {
 	Kind       string `json:"kind"`
 	Namespace  string `json:"namespace,omitempty"`
 	Name       string `json:"name"`
+}
+
+// ListRef identifies a collection to list: a GVK (api_version + kind), a
+// namespace ("" = cluster-scoped or all namespaces), and an optional label
+// selector. GVK form (not GVR): the agent owns the GVK→GVR resolution.
+type ListRef struct {
+	APIVersion    string `json:"api_version"`
+	Kind          string `json:"kind"`
+	Namespace     string `json:"namespace,omitempty"`
+	LabelSelector string `json:"label_selector,omitempty"`
+}
+
+// ListResult is the list op's result: the matched objects, each serialized
+// verbatim as a JSON object. dc-api re-hydrates them into an
+// *unstructured.UnstructuredList.
+type ListResult struct {
+	Items []json.RawMessage `json:"items"`
 }
 
 // ApplyResult is the apply op's result: the applied object's identity and its

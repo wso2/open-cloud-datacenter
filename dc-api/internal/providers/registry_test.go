@@ -146,6 +146,9 @@ func (stubSession) Delete(context.Context, agentgw.ResourceRef, string) (agentgw
 func (stubSession) GetStatus(context.Context, agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
 	return agentgw.StatusSnapshot{}, nil
 }
+func (stubSession) List(context.Context, agentgw.ListRef) (agentgw.ListResult, error) {
+	return agentgw.ListResult{}, nil
+}
 func (stubSession) WatchStatus(context.Context, agentgw.ResourceRef, int, func(string, agentgw.StatusSnapshot)) (agentgw.WatchResult, error) {
 	return agentgw.WatchResult{}, nil
 }
@@ -369,12 +372,16 @@ func TestAgentDecision_ToggleOn_LiveAgent_RoutesGetOnly(t *testing.T) {
 	r := decisionRegistryToggles(true, false, fakeResolver{connected: true})
 	decide := r.agentDecision("lk", "zone-1")
 
-	if _, ok := decide(clusteraccess.VerbGet, vmGVR); !ok {
-		t.Error("toggle on + live agent must route Get through the agent")
+	// Both read verbs (Get AND List) route with the read toggle on — List joined
+	// the allow-set when ListVMs was routed through the agent.
+	for _, v := range []clusteraccess.Verb{clusteraccess.VerbGet, clusteraccess.VerbList} {
+		if _, ok := decide(v, vmGVR); !ok {
+			t.Errorf("read toggle on + live agent must route read verb %v through the agent", v)
+		}
 	}
 	// With ONLY the read toggle on, no write verb may route — Create/Delete are
-	// gated by the (off) write toggle; List/Apply/Update are not in any allow-set.
-	for _, v := range []clusteraccess.Verb{clusteraccess.VerbList, clusteraccess.VerbCreate, clusteraccess.VerbApply, clusteraccess.VerbUpdate, clusteraccess.VerbDelete} {
+	// gated by the (off) write toggle; Apply/Update are not in any allow-set.
+	for _, v := range []clusteraccess.Verb{clusteraccess.VerbCreate, clusteraccess.VerbApply, clusteraccess.VerbUpdate, clusteraccess.VerbDelete} {
 		if _, ok := decide(v, vmGVR); ok {
 			t.Errorf("verb %v must NOT route with only the read toggle on", v)
 		}
@@ -400,10 +407,11 @@ func TestAgentDecision_WritesOn_LiveAgent_RoutesCreateAndDelete(t *testing.T) {
 		t.Error("read toggle off must keep Get on Direct even when writes route")
 	}
 	// VerbApply/VerbUpdate are NOT in the write allow-set (create is VerbCreate, a
-	// POST on Direct); they must never route. VerbList has no agent op.
+	// POST on Direct); they must never route. VerbList IS routable but is a READ —
+	// with the read toggle OFF here it must also stay Direct.
 	for _, v := range []clusteraccess.Verb{clusteraccess.VerbList, clusteraccess.VerbApply, clusteraccess.VerbUpdate} {
 		if _, ok := decide(v, vmGVR); ok {
-			t.Errorf("verb %v is not in the write allow-set and must NOT route", v)
+			t.Errorf("verb %v must NOT route (not a write, read toggle off)", v)
 		}
 	}
 }
@@ -441,19 +449,23 @@ func TestAgentDecision_WritesOn_NoLiveAgent_StayDirect(t *testing.T) {
 
 // TestAgentDecision_PerFamily_UnonboardedGVRStaysDirect is the Part A
 // no-over-permit guard. With BOTH toggles on AND a live agent, a GVR that is NOT
-// an onboarded routable family (here virtualmachineimages — GVK-mapped but with
+// an onboarded routable family (here virtualmachineinstances — GVK-mapped but with
 // no RouteVerbs) must NEVER route, for ANY verb. This proves the decision is
-// per-family: a verb that routes for VMs (Get/Create/Delete) does not leak to a
-// family that didn't declare it. Before Part A the verb-only union would have
+// per-family: a verb that routes for VMs (Get/List/Create/Delete) does not leak to
+// a family that didn't declare it. Before Part A the verb-only union would have
 // matched, so this is exactly the over-permit Part A closes.
+//
+// NOTE: this uses virtualmachineinstances (still GVK-only) as the unonboarded
+// family — virtualmachineimages was onboarded for the read/list path when
+// ListImages began routing through the agent.
 func TestAgentDecision_PerFamily_UnonboardedGVRStaysDirect(t *testing.T) {
 	r := decisionRegistryToggles(true, true, fakeResolver{connected: true})
 	decide := r.agentDecision("lk", "zone-1")
 
-	imgGVR := schema.GroupVersionResource{Group: "harvesterhci.io", Version: "v1beta1", Resource: "virtualmachineimages"}
-	for _, v := range []clusteraccess.Verb{clusteraccess.VerbGet, clusteraccess.VerbCreate, clusteraccess.VerbDelete} {
-		if _, ok := decide(v, imgGVR); ok {
-			t.Errorf("verb %v on an unonboarded family (virtualmachineimages) must NOT route, even with toggles+agent on", v)
+	vmiGVR := schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachineinstances"}
+	for _, v := range []clusteraccess.Verb{clusteraccess.VerbGet, clusteraccess.VerbList, clusteraccess.VerbCreate, clusteraccess.VerbDelete} {
+		if _, ok := decide(v, vmiGVR); ok {
+			t.Errorf("verb %v on an unonboarded family (virtualmachineinstances) must NOT route, even with toggles+agent on", v)
 		}
 	}
 	// Sanity: the SAME verbs DO route for the onboarded VM family under identical

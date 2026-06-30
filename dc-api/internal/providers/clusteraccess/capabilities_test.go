@@ -6,12 +6,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-// TestUnionRouteVerbs pins the registry-derived routing allow-set to today's
-// hand-maintained set EXACTLY: {VerbGet, VerbCreate, VerbDelete}. Any drift
-// (e.g. accidentally giving a pre-seeded capability RouteVerbs) fails here.
+// TestUnionRouteVerbs pins the registry-derived routing allow-set to the current
+// onboarded set EXACTLY: {VerbGet, VerbList, VerbCreate, VerbDelete}. VerbList
+// joined the union when ListVMs/ListImages/ListNetworks were routed through the
+// agent. Any further drift (e.g. accidentally routing VerbApply/VerbUpdate) fails
+// here.
 func TestUnionRouteVerbs(t *testing.T) {
 	got := UnionRouteVerbs()
-	want := map[Verb]bool{VerbGet: true, VerbCreate: true, VerbDelete: true}
+	want := map[Verb]bool{VerbGet: true, VerbList: true, VerbCreate: true, VerbDelete: true}
 
 	if len(got) != len(want) {
 		t.Fatalf("union route verbs size = %d, want %d (got %v)", len(got), len(want), got)
@@ -22,10 +24,14 @@ func TestUnionRouteVerbs(t *testing.T) {
 		}
 	}
 	// Explicitly assert the verbs that must NOT be routable.
-	for _, v := range []Verb{VerbList, VerbApply, VerbUpdate, VerbWatch} {
+	for _, v := range []Verb{VerbApply, VerbUpdate, VerbWatch} {
 		if got[v] {
 			t.Errorf("verb %v must NOT be routable but is in the union", v)
 		}
+	}
+	// VerbList classifies as a read for the reads/writes toggle split.
+	if !IsReadVerb(VerbList) {
+		t.Error("VerbList must classify as a read verb")
 	}
 }
 
@@ -52,18 +58,52 @@ func TestRoutableVerbs_VMEqualsUnionToday(t *testing.T) {
 	}
 }
 
-// TestRoutableVerbs_UnknownGVRNotRoutable proves a GVR with no RouteVerbs (e.g. a
+// TestRoutableVerbs_UnknownGVRNotRoutable proves a GVR with no RouteVerbs (a
 // pre-seeded GVK-only capability, or an unknown GVR) is NOT routable — the
 // per-family gate returns ok=false, so the decision closure falls to Direct.
 func TestRoutableVerbs_UnknownGVRNotRoutable(t *testing.T) {
-	// virtualmachineimages is GVK-mapped but has no RouteVerbs (pre-seeded).
-	imgGVR := schema.GroupVersionResource{Group: "harvesterhci.io", Version: "v1beta1", Resource: "virtualmachineimages"}
-	if _, ok := RoutableVerbs(imgGVR); ok {
-		t.Error("virtualmachineimages has no RouteVerbs and must NOT be routable")
+	// virtualmachineinstances is GVK-mapped but has no RouteVerbs (pre-seeded).
+	vmiGVR := schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachineinstances"}
+	if _, ok := RoutableVerbs(vmiGVR); ok {
+		t.Error("virtualmachineinstances has no RouteVerbs and must NOT be routable")
 	}
 	// A wholly unknown GVR is never routable.
 	if _, ok := RoutableVerbs(schema.GroupVersionResource{Group: "x", Version: "v1", Resource: "widgets"}); ok {
 		t.Error("unknown GVR must NOT be routable")
+	}
+}
+
+// TestRoutableVerbs_ListRoutedForListFamilies asserts VerbList is routable for
+// exactly the families whose harvester list ops now route through the agent: the
+// VM, NAD, and image families. The image family routes List (and Get) but NOT
+// any write verb.
+func TestRoutableVerbs_ListRoutedForListFamilies(t *testing.T) {
+	listFamilies := []schema.GroupVersionResource{
+		{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachines"},
+		{Group: "k8s.cni.cncf.io", Version: "v1", Resource: "network-attachment-definitions"},
+		{Group: "harvesterhci.io", Version: "v1beta1", Resource: "virtualmachineimages"},
+	}
+	for _, gvr := range listFamilies {
+		verbs, ok := RoutableVerbs(gvr)
+		if !ok {
+			t.Errorf("%s must be an onboarded routable family", gvr.Resource)
+			continue
+		}
+		if !verbs[VerbList] {
+			t.Errorf("%s must route VerbList", gvr.Resource)
+		}
+	}
+
+	// The image family is read/list only — it must NOT route any write verb.
+	imgGVR := schema.GroupVersionResource{Group: "harvesterhci.io", Version: "v1beta1", Resource: "virtualmachineimages"}
+	imgVerbs, _ := RoutableVerbs(imgGVR)
+	for _, w := range []Verb{VerbCreate, VerbApply, VerbUpdate, VerbDelete} {
+		if imgVerbs[w] {
+			t.Errorf("virtualmachineimages must NOT route write verb %v", w)
+		}
+	}
+	if !imgVerbs[VerbGet] || !imgVerbs[VerbList] {
+		t.Errorf("virtualmachineimages must route Get+List, got %v", imgVerbs)
 	}
 }
 

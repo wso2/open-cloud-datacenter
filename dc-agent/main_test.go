@@ -35,6 +35,13 @@ type recordingExecutor struct {
 
 	watchRef executor.ResourceRef
 	watchMax int
+
+	listRef executor.ListRef
+}
+
+func (r *recordingExecutor) List(ctx context.Context, ref executor.ListRef) (executor.ListResult, error) {
+	r.listRef = ref
+	return r.Stub.List(ctx, ref)
 }
 
 func (r *recordingExecutor) Apply(ctx context.Context, manifest json.RawMessage, fm string, force bool) (executor.ApplyResult, error) {
@@ -250,6 +257,42 @@ func TestBuildDispatchers_GetStatus(t *testing.T) {
 	}
 }
 
+// TestBuildDispatchers_List drives the generic list op end to end: the server
+// sends a list req with a GVK/namespace/label selector, and the test asserts the
+// stub's collection comes back as the res result AND that the executor saw the
+// ListRef decoded from the wire field names.
+func TestBuildDispatchers_List(t *testing.T) {
+	item := json.RawMessage(`{"apiVersion":"kubevirt.io/v1","kind":"VirtualMachine","metadata":{"name":"vm-1","namespace":"tenant-abc"}}`)
+	exec := &recordingExecutor{Stub: executor.Stub{ListRes: executor.ListResult{Items: []json.RawMessage{item}}}}
+
+	dispatchHarness(t, exec, func(t *testing.T, ctx context.Context, c *websocket.Conn) {
+		params := json.RawMessage(`{"api_version":"kubevirt.io/v1","kind":"VirtualMachine","namespace":"tenant-abc","label_selector":"dc-api/managed=true"}`)
+		res := sendReq(t, ctx, c, "id-list", executor.OpList, params)
+		if !res.Ok {
+			t.Fatalf("list res not ok: %+v", res)
+		}
+		var got executor.ListResult
+		if err := json.Unmarshal(res.Result, &got); err != nil {
+			t.Fatalf("unmarshal list result: %v", err)
+		}
+		if len(got.Items) != 1 {
+			t.Fatalf("list result items = %d, want 1", len(got.Items))
+		}
+		var obj map[string]any
+		if err := json.Unmarshal(got.Items[0], &obj); err != nil {
+			t.Fatalf("listed item not valid JSON: %v", err)
+		}
+		if obj["kind"] != "VirtualMachine" {
+			t.Errorf("listed item kind = %v, want VirtualMachine", obj["kind"])
+		}
+	})
+
+	want := executor.ListRef{APIVersion: "kubevirt.io/v1", Kind: "VirtualMachine", Namespace: "tenant-abc", LabelSelector: "dc-api/managed=true"}
+	if exec.listRef != want {
+		t.Errorf("executor list ref = %+v, want %+v", exec.listRef, want)
+	}
+}
+
 // TestBuildDispatchers_WatchStatus drives the streaming watch_status op: the stub
 // emits two snapshots, and the test asserts two progress frames (with data)
 // precede the terminal summary res, all correlated, and that max_snapshots reached
@@ -332,7 +375,7 @@ func TestBuildDispatchers_BadParams(t *testing.T) {
 
 	dispatchHarness(t, exec, func(t *testing.T, ctx context.Context, c *websocket.Conn) {
 		bad := json.RawMessage(`"not an object"`)
-		for _, op := range []string{executor.OpApply, executor.OpDelete, executor.OpGetStatus, executor.OpWatchStatus} {
+		for _, op := range []string{executor.OpList, executor.OpApply, executor.OpDelete, executor.OpGetStatus, executor.OpWatchStatus} {
 			res := sendReq(t, ctx, c, "id-"+op, op, bad)
 			if res.Ok || res.Error == nil || res.Error.Code != protocol.ErrCodeBadRequest {
 				t.Errorf("%s with bad params res = %+v, want BAD_REQUEST", op, res)
@@ -413,7 +456,7 @@ func TestLoadConfig_TokenStillRequired(t *testing.T) {
 func TestBuildDispatchers_RegistersAllOps(t *testing.T) {
 	disp, stream := buildDispatchers(&recordingExecutor{}, zerolog.Nop())
 
-	wantRR := []string{executor.OpApply, executor.OpDelete, executor.OpGetInventory, executor.OpGetStatus}
+	wantRR := []string{executor.OpApply, executor.OpDelete, executor.OpGetInventory, executor.OpGetStatus, executor.OpList}
 	for _, op := range wantRR {
 		if _, ok := disp[op]; !ok {
 			t.Errorf("Dispatcher missing request/response op %q", op)
