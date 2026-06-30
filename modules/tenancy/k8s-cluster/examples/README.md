@@ -40,7 +40,7 @@ Install the following on your local machine before starting:
 
 ### Tenant space
 
-A **tenant space** must be provisioned on the Harvester cluster before you can create a cluster. A tenant space gives your team a dedicated Rancher project, namespaces, resource quotas, RBAC, and isolated VM networks. Refer to the [tenant-space module](../tenant-space/) for how to provision one.
+A **tenant space** must be provisioned on the Harvester cluster before you can create a cluster. A tenant space gives your team a dedicated Rancher project, namespaces, resource quotas, RBAC, and isolated VM networks. Refer to the [tenant-space module](../../tenant-space/) for how to provision one.
 
 Once a tenant space exists, gather the following information before proceeding. All of these values are visible in the Rancher and Harvester UIs.
 
@@ -72,7 +72,7 @@ Your Rancher API token is the credential Terraform uses to talk to Rancher. It i
 5. Click **Create**.
 6. **Copy the token immediately** — it is only shown once. The format is:
 
-   ```
+   ```text
    token-xxxxx:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
    ```
 
@@ -91,13 +91,13 @@ Your Rancher API token is the credential Terraform uses to talk to Rancher. It i
 
 The full NAD reference used in Terraform combines the namespace and the name:
 
-```
+```text
 <network-namespace>/<name>
 ```
 
 For example, a NAD named `my-team-vlan601` in namespace `my-team-net` becomes:
 
-```
+```text
 my-team-net/my-team-vlan601
 ```
 
@@ -132,7 +132,7 @@ cp terraform.tfvars.example terraform.tfvars
 
 Then edit each file as described below.
 
-```
+```text
 my-cluster/
 ├── versions.tf        # Terraform + provider version pins
 ├── providers.tf       # Rancher provider configuration
@@ -242,7 +242,7 @@ The table below reflects the currently supported component versions. Always veri
 |-----------|-------------------|
 | RKE2 | v1.33, v1.34, v1.35 |
 | K3s | v1.33, v1.34, v1.35 |
-| Harvester | v1.8.x |
+| Harvester | v1.7.x |
 | Rancher CD | v0.15.2 |
 | Longhorn | v1.11.2 |
 
