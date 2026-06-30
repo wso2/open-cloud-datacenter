@@ -2815,7 +2815,7 @@ paths:
               name: prod-vnet
               address_space:
                 - 10.10.0.0/16
-              region: lk-dev
+              region: lk
               zone: lk-a
               description: Production VNet
       responses:
@@ -2836,7 +2836,7 @@ paths:
                   id: 3a1c2e5d-0000-0000-0000-000000000010
                   tenant_id: iam-platform
                   name: prod-vnet
-                  region: lk-dev
+                  region: lk
                   zone: lk-a
                   address_space: ["10.10.0.0/16"]
                   status: PENDING
@@ -3413,6 +3413,17 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "422":
+          description: |
+            The two VNets are not in the same region and zone. Peering is
+            supported only within a single zone (cross-zone peering is not
+            supported; cross-region is deferred).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: "both VNets must be in the same zone (cross-zone peering not supported)"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -7601,14 +7612,14 @@ components:
         region:
           type: string
           description: Region slug. Must exist in the DC-API regions table.
-          example: lk-dev
+          example: lk
         zone:
           type: string
           description: |
             Availability zone within the region to place this VNet in. If
             omitted, defaults to the control plane's local zone. Child
             resources (VMs, clusters, subnets) inherit this zone.
-          example: lk
+          example: zone-1
         description:
           type: string
           maxLength: 256
@@ -7630,14 +7641,14 @@ components:
           example: prod-vnet
         region:
           type: string
-          example: lk-dev
+          example: lk
         zone:
           type: string
           readOnly: true
           description: |
             Availability zone the VNet was placed in (assigned at create,
             immutable). Inherited by child resources.
-          example: lk
+          example: zone-1
         address_space:
           type: array
           items:
