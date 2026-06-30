@@ -73,6 +73,10 @@ func (s *netStubSession) Delete(_ context.Context, _ agentgw.ResourceRef, _ stri
 	return s.deleteResult, s.deleteErr
 }
 
+func (s *netStubSession) List(context.Context, agentgw.ListRef) (agentgw.ListResult, error) {
+	return agentgw.ListResult{}, nil
+}
+
 func (s *netStubSession) WatchStatus(context.Context, agentgw.ResourceRef, int, func(string, agentgw.StatusSnapshot)) (agentgw.WatchResult, error) {
 	return agentgw.WatchResult{}, nil
 }

@@ -105,17 +105,27 @@ func NewKubeExecutorFromConfig(kubeconfigPath string) (*KubeExecutor, error) {
 // mapper is Reset so a subsequent call re-reads discovery (handles a CRD that was
 // installed after the mapper last cached).
 func (k *KubeExecutor) resolve(ref ResourceRef) (dynamic.ResourceInterface, error) {
-	if k.mapper == nil {
-		return nil, badRequest(fmt.Errorf("no RESTMapper configured (inventory-only executor)"))
-	}
 	if ref.Name == "" {
 		return nil, badRequest(fmt.Errorf("name is required"))
 	}
-	gv, err := schema.ParseGroupVersion(ref.APIVersion)
-	if err != nil {
-		return nil, badRequest(fmt.Errorf("invalid api_version %q: %w", ref.APIVersion, err))
+	return k.resolveGVK(ref.APIVersion, ref.Kind, ref.Namespace)
+}
+
+// resolveGVK maps an (apiVersion, kind) to the dynamic ResourceInterface scoped
+// to namespace (ignored for a cluster-scoped kind, where an empty namespace also
+// lists all namespaces for a namespaced kind). It is the name-agnostic core
+// shared by resolve (single-object verbs) and List. A GVK NoMatch is a
+// BAD_REQUEST-class fault; on a NoMatch the deferred mapper is Reset so a
+// subsequent call re-reads discovery (handles a CRD installed after caching).
+func (k *KubeExecutor) resolveGVK(apiVersion, kind, namespace string) (dynamic.ResourceInterface, error) {
+	if k.mapper == nil {
+		return nil, badRequest(fmt.Errorf("no RESTMapper configured (inventory-only executor)"))
 	}
-	gvk := gv.WithKind(ref.Kind)
+	gv, err := schema.ParseGroupVersion(apiVersion)
+	if err != nil {
+		return nil, badRequest(fmt.Errorf("invalid api_version %q: %w", apiVersion, err))
+	}
+	gvk := gv.WithKind(kind)
 	mapping, err := k.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 	if err != nil {
 		if meta.IsNoMatchError(err) {
@@ -128,9 +138,36 @@ func (k *KubeExecutor) resolve(ref ResourceRef) (dynamic.ResourceInterface, erro
 	}
 	client := k.dyn.Resource(mapping.Resource)
 	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
-		return client.Namespace(ref.Namespace), nil
+		// For a namespaced kind, an empty namespace lists across all namespaces.
+		return client.Namespace(namespace), nil
 	}
 	return client, nil // cluster-scoped: namespace is ignored
+}
+
+// List lists the objects of the referenced GVK in the given namespace (empty =
+// cluster-scoped, or all namespaces for a namespaced kind) filtered by the
+// optional label selector, returning the whole collection serialized as a JSON
+// array of objects. Mirrors GetInventory's dynamic-client list + the resolve
+// path the M-B verbs use, but for an arbitrary GVK. A GVK NoMatch is a
+// BAD_REQUEST-class fault.
+func (k *KubeExecutor) List(ctx context.Context, ref ListRef) (ListResult, error) {
+	ri, err := k.resolveGVK(ref.APIVersion, ref.Kind, ref.Namespace)
+	if err != nil {
+		return ListResult{}, err
+	}
+	list, err := ri.List(ctx, metav1.ListOptions{LabelSelector: ref.LabelSelector})
+	if err != nil {
+		return ListResult{}, fmt.Errorf("list %s/%s in %q: %w", ref.APIVersion, ref.Kind, ref.Namespace, err)
+	}
+	items := make([]json.RawMessage, 0, len(list.Items))
+	for i := range list.Items {
+		raw, err := list.Items[i].MarshalJSON()
+		if err != nil {
+			return ListResult{}, fmt.Errorf("marshal listed %s/%s object: %w", ref.APIVersion, ref.Kind, err)
+		}
+		items = append(items, raw)
+	}
+	return ListResult{Items: items}, nil
 }
 
 // GetInventory lists nodes (readiness + allocatable/allocated CPU & memory) and

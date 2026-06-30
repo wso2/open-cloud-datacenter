@@ -25,6 +25,12 @@ const (
 	OpDelete      = "delete"       // delete one object (idempotent)
 	OpGetStatus   = "get_status"   // read an object's .status once
 	OpWatchStatus = "watch_status" // stream status snapshots, then terminate
+
+	// OpList is the generic LIST verb (M-D): list objects of a GVK in a
+	// namespace ("" = cluster-scoped or all namespaces) with an optional label
+	// selector, returning the whole collection. It is the generic analogue of the
+	// hard-coded get_inventory collection read, addressable for any GVK.
+	OpList = "list" // list objects of a GVK in a namespace, optional selector
 )
 
 // Inventory is a snapshot of the zone cluster's capacity, returned by
@@ -56,6 +62,24 @@ type ResourceRef struct {
 	Kind       string `json:"kind"`
 	Namespace  string `json:"namespace,omitempty"`
 	Name       string `json:"name"`
+}
+
+// ListRef identifies a collection to list: a GVK (api_version + kind), a
+// namespace ("" = cluster-scoped, or all namespaces for a namespaced kind), and
+// an optional label selector. Like ResourceRef it is GVK form, not GVR — the
+// agent owns the GVK→GVR resolution via its RESTMapper.
+type ListRef struct {
+	APIVersion    string `json:"api_version"`
+	Kind          string `json:"kind"`
+	Namespace     string `json:"namespace,omitempty"`
+	LabelSelector string `json:"label_selector,omitempty"`
+}
+
+// ListResult is the result of a list op: the matched objects serialized as a
+// JSON array of unstructured objects (each object verbatim, as the dynamic
+// client returned it). dc-api re-hydrates them into an *unstructured.UnstructuredList.
+type ListResult struct {
+	Items []json.RawMessage `json:"items"`
 }
 
 // ApplyResult is the result of a server-side apply: the applied object's
@@ -106,6 +130,12 @@ const (
 type Executor interface {
 	GetInventory(ctx context.Context) (Inventory, error)
 
+	// List returns the objects of the referenced GVK in the given namespace
+	// (empty namespace = cluster-scoped, or all namespaces for a namespaced
+	// kind), filtered by the optional label selector. The whole collection is
+	// returned (no paging) — the generic analogue of get_inventory's VM list.
+	List(ctx context.Context, ref ListRef) (ListResult, error)
+
 	// Apply server-side-applies manifest (a complete Kubernetes object) to the
 	// agent's own cluster, owned by fieldManager (defaults to "dc-api" when
 	// empty). force takes ownership of conflicting fields.
@@ -155,6 +185,7 @@ type Stub struct {
 	Inv Inventory
 	Err error
 
+	ListRes    ListResult
 	ApplyRes   ApplyResult
 	DeleteRes  DeleteResult
 	StatusRes  StatusSnapshot
@@ -165,6 +196,11 @@ type Stub struct {
 // GetInventory returns the stub's configured inventory or error.
 func (s Stub) GetInventory(_ context.Context) (Inventory, error) {
 	return s.Inv, s.Err
+}
+
+// List returns the stub's configured ListRes/Err.
+func (s Stub) List(_ context.Context, _ ListRef) (ListResult, error) {
+	return s.ListRes, s.Err
 }
 
 // Apply returns the stub's configured ApplyRes/Err.

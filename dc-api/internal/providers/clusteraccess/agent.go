@@ -31,9 +31,8 @@ const agentCallTimeout = 30 * time.Second
 //
 // Op coverage: the status-shaped Get maps onto Session.GetStatus (read slice);
 // Create/Update/Apply all map onto Session.Apply and Delete onto Session.Delete
-// (write slice 1 — VM create/delete). These verbs are IMPLEMENTED, not stubbed.
-// List has no agent op yet (M-D) and still returns ErrOpNotRoutable so Routed
-// falls back to Direct.
+// (write slice 1 — VM create/delete); List maps onto Session.List (M-D — the
+// generic collection read). All of these verbs are IMPLEMENTED, not stubbed.
 //
 // NOTE on Create: the agent exposes only server-side apply (Session.Apply) as its
 // create mechanism, so AgentBacked.Create is an SSA, NOT a POST. This is the one
@@ -172,10 +171,55 @@ func (a *AgentBacked) Get(ctx context.Context, gvr schema.GroupVersionResource, 
 	return obj, nil
 }
 
-// List is not in the M-B agent op set — no list_* op exists yet (M-D). Returns
-// ErrOpNotRoutable so Routed falls back to Direct.
-func (a *AgentBacked) List(ctx context.Context, gvr schema.GroupVersionResource, ns string, _ metav1.ListOptions) (*unstructured.UnstructuredList, error) {
-	return nil, fmt.Errorf("clusteraccess: list of %s not routable: %w", gvr.Resource, agentgw.ErrOpNotRoutable)
+// List routes a collection read to Session.List and re-hydrates the raw object
+// JSON the agent returns into an *unstructured.UnstructuredList — the same shape
+// Direct.List returns, so the provider field extraction is byte-identical across
+// seams. It mirrors how Get routes via GetStatus: resolve the GVR→GVK, issue the
+// agent op under the accessor's own deadline, translate errors. For a mapped GVR
+// this never returns ErrOpNotRoutable — only a real list failure or, transiently,
+// agent-unavailable. An unmapped GVR is a programming error (ErrOpNotRoutable).
+func (a *AgentBacked) List(ctx context.Context, gvr schema.GroupVersionResource, ns string, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	apiVersion, kind, ok := a.mapper.GVK(gvr)
+	if !ok {
+		a.log.Error().
+			Str("group", gvr.Group).Str("version", gvr.Version).Str("resource", gvr.Resource).
+			Msg("clusteraccess: no GVR→GVK mapping for agent list — refusing to route (programming error)")
+		return nil, fmt.Errorf("clusteraccess: unmapped GVR %s: %w", gvr.String(), agentgw.ErrOpNotRoutable)
+	}
+
+	ctx, cancel := a.bound(ctx)
+	defer cancel()
+
+	res, err := a.sess.List(ctx, agentgw.ListRef{
+		APIVersion:    apiVersion,
+		Kind:          kind,
+		Namespace:     ns,
+		LabelSelector: opts.LabelSelector,
+	})
+	if err != nil {
+		return nil, a.translateErr(err)
+	}
+
+	a.log.Info().
+		Str("seam", "agent").
+		Str("region", a.region).Str("zone", a.zone).
+		Str("api_version", apiVersion).Str("kind", kind).
+		Str("namespace", ns).Str("label_selector", opts.LabelSelector).
+		Int("items", len(res.Items)).
+		Msg("provider list routed through agent")
+
+	out := &unstructured.UnstructuredList{}
+	out.SetAPIVersion(apiVersion)
+	out.SetKind(kind + "List")
+	out.Items = make([]unstructured.Unstructured, 0, len(res.Items))
+	for i, raw := range res.Items {
+		obj := &unstructured.Unstructured{}
+		if err := obj.UnmarshalJSON(raw); err != nil {
+			return nil, fmt.Errorf("clusteraccess: decode agent-listed %s object [%d]: %w", kind, i, err)
+		}
+		out.Items = append(out.Items, *obj)
+	}
+	return out, nil
 }
 
 // Create / Update / Apply all map to Session.Apply (SSA is create-or-update) —

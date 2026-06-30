@@ -601,6 +601,131 @@ func TestKubeExecutorGetStatus_ClusterScoped(t *testing.T) {
 	}
 }
 
+// ── List ─────────────────────────────────────────────────────────────────────
+
+// TestKubeExecutorList_Namespaced lists objects of a namespaced kind in one
+// namespace and asserts the returned collection carries each object verbatim.
+func TestKubeExecutorList_Namespaced(t *testing.T) {
+	cm1 := configMap("cm-1", "tenant-abc", "Running")
+	cm2 := configMap("cm-2", "tenant-abc", "Pending")
+	other := configMap("cm-3", "other-ns", "Running") // must be excluded by namespace
+	dc := dynfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), mbListKinds(), cm1, cm2, other)
+	k := NewKubeExecutorWithMapper(fake.NewSimpleClientset(), dc, mbMapper())
+
+	res, err := k.List(context.Background(), ListRef{APIVersion: "v1", Kind: "ConfigMap", Namespace: "tenant-abc"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(res.Items) != 2 {
+		t.Fatalf("items = %d, want 2 (namespace-scoped)", len(res.Items))
+	}
+	names := map[string]bool{}
+	for _, raw := range res.Items {
+		obj := &unstructured.Unstructured{}
+		if err := obj.UnmarshalJSON(raw); err != nil {
+			t.Fatalf("item did not round-trip: %v", err)
+		}
+		names[obj.GetName()] = true
+		if obj.GetKind() != "ConfigMap" {
+			t.Errorf("item kind = %q, want ConfigMap", obj.GetKind())
+		}
+	}
+	if !names["cm-1"] || !names["cm-2"] || names["cm-3"] {
+		t.Errorf("listed names = %v, want exactly cm-1,cm-2", names)
+	}
+}
+
+// TestKubeExecutorList_LabelSelector filters the collection by a label selector.
+func TestKubeExecutorList_LabelSelector(t *testing.T) {
+	managed := configMap("cm-managed", "tenant-abc", "")
+	managed.SetLabels(map[string]string{"dc-api/managed": "true"})
+	unmanaged := configMap("cm-unmanaged", "tenant-abc", "")
+	dc := dynfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), mbListKinds(), managed, unmanaged)
+	k := NewKubeExecutorWithMapper(fake.NewSimpleClientset(), dc, mbMapper())
+
+	res, err := k.List(context.Background(), ListRef{
+		APIVersion:    "v1",
+		Kind:          "ConfigMap",
+		Namespace:     "tenant-abc",
+		LabelSelector: "dc-api/managed=true",
+	})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(res.Items) != 1 {
+		t.Fatalf("items = %d, want 1 (label-filtered)", len(res.Items))
+	}
+	obj := &unstructured.Unstructured{}
+	_ = obj.UnmarshalJSON(res.Items[0])
+	if obj.GetName() != "cm-managed" {
+		t.Errorf("listed name = %q, want cm-managed", obj.GetName())
+	}
+}
+
+// TestKubeExecutorList_ClusterScoped lists a cluster-scoped kind (namespace
+// ignored), exercising the cluster-scoped resolve branch.
+func TestKubeExecutorList_ClusterScoped(t *testing.T) {
+	vpc := &unstructured.Unstructured{}
+	vpc.SetAPIVersion("kubeovn.io/v1")
+	vpc.SetKind("Vpc")
+	vpc.SetName("vpc-1")
+	dc := dynfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), mbListKinds(), vpc)
+	k := NewKubeExecutorWithMapper(fake.NewSimpleClientset(), dc, mbMapper())
+
+	res, err := k.List(context.Background(), ListRef{APIVersion: "kubeovn.io/v1", Kind: "Vpc", Namespace: "ignored"})
+	if err != nil {
+		t.Fatalf("List cluster-scoped: %v", err)
+	}
+	if len(res.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(res.Items))
+	}
+}
+
+// TestKubeExecutorList_Empty returns an empty collection (no error) when nothing
+// matches.
+func TestKubeExecutorList_Empty(t *testing.T) {
+	dc := dynfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), mbListKinds())
+	k := NewKubeExecutorWithMapper(fake.NewSimpleClientset(), dc, mbMapper())
+
+	res, err := k.List(context.Background(), ListRef{APIVersion: "v1", Kind: "ConfigMap", Namespace: "tenant-abc"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(res.Items) != 0 {
+		t.Errorf("items = %d, want 0", len(res.Items))
+	}
+}
+
+// TestKubeExecutorList_UnknownKind asserts an unregistered kind is a
+// BAD_REQUEST-class fault (shared resolve path with the other verbs).
+func TestKubeExecutorList_UnknownKind(t *testing.T) {
+	dc := dynfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), mbListKinds())
+	k := NewKubeExecutorWithMapper(fake.NewSimpleClientset(), dc, mbMapper())
+
+	_, err := k.List(context.Background(), ListRef{APIVersion: "example.com/v1", Kind: "Widget", Namespace: "ns"})
+	if err == nil {
+		t.Fatal("List of an unknown kind must error")
+	}
+	if !isBadRequestFault(err) {
+		t.Errorf("unknown kind error is not BAD_REQUEST-class: %v", err)
+	}
+}
+
+// TestKubeExecutorList_NoMapper asserts an inventory-only executor (nil mapper)
+// rejects List as a BAD_REQUEST-class fault rather than panicking.
+func TestKubeExecutorList_NoMapper(t *testing.T) {
+	dc := dynfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), mbListKinds())
+	k := NewKubeExecutor(fake.NewSimpleClientset(), dc) // no mapper
+
+	_, err := k.List(context.Background(), ListRef{APIVersion: "v1", Kind: "ConfigMap", Namespace: "tenant-abc"})
+	if err == nil {
+		t.Fatal("List without a mapper must error")
+	}
+	if !isBadRequestFault(err) {
+		t.Errorf("no-mapper error is not BAD_REQUEST-class: %v", err)
+	}
+}
+
 // ── GVK resolution failures (shared by all four verbs) ──────────────────────────
 
 // TestKubeExecutor_UnknownKind asserts an unregistered kind is a BAD_REQUEST-class

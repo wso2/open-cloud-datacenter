@@ -96,32 +96,36 @@ type Client struct {
 	// access is the per-zone cluster-access seam (M-C). It defaults to a
 	// clusteraccess.Direct wrapping `dynamic` (today's behaviour, byte-identical)
 	// unless WithRoutedAccessor injects a routed accessor. The VM-object ops route
-	// through it: GetVM's primary VirtualMachine read (read slice), and CreateVM's
-	// create + DeleteVM's delete (write slice 1). Image resolution, the cloud-
-	// provider SA bootstrap, ListVMs, and the VMI read inside GetVM all still call
-	// c.dynamic directly — those GVRs are not in the agent's mapper/RBAC. The seam
-	// never leaks an agent concept past the ComputeProvider interface.
+	// through it: GetVM's primary VirtualMachine read (read slice), CreateVM's
+	// create + DeleteVM's delete (write slice 1), and the collection reads
+	// ListVMs/ListImages/ListNetworks (list slice — M-D). Image RESOLUTION (the
+	// create-time storageClass lookup), the cloud-provider SA bootstrap, and the
+	// VMI read inside GetVM still call c.dynamic directly. The seam never leaks an
+	// agent concept past the ComputeProvider interface.
 	access clusteraccess.Accessor
 
 	// remoteRegion/remoteZone are non-empty ONLY for a credential-free REMOTE
 	// client built by NewRemoteClient (multi-zone routing). For such a client
-	// c.dynamic is nil: the seam ops (CreateVM/GetVM/DeleteVM via c.access) route
-	// to that zone's agent, but the direct-only ops (ListVMs, the VMI IP read,
-	// images, ListNetworks, the cloud-provider SA bootstrap) have no direct path
-	// and return a clear local-only error naming the zone instead of panicking on
-	// a nil dynamic client. Empty for the LOCAL client → today's behaviour.
+	// c.dynamic is nil: the seam ops (CreateVM/GetVM/DeleteVM via c.access, and
+	// the list reads via c.access.List) route to that zone's agent, but the
+	// direct-only ops (the VMI IP read, image RESOLUTION/import, the cloud-provider
+	// SA bootstrap) have no direct path and return a clear local-only error naming
+	// the zone instead of panicking on a nil dynamic client. Empty for the LOCAL
+	// client → today's behaviour.
 	remoteRegion, remoteZone string
 }
 
 // localOnlyErr is returned by a REMOTE client's direct-only methods (image
-// lookup/import, ListVMs, ListNetworks, the cloud-provider SA bootstrap). These
-// touch c.dynamic, which a remote client does not have. Failing here — BEFORE a
-// PENDING row or a provisioner call — is the documented local-only constraint
-// for the remote-zone build: routing the VM-object CRUD lifecycle is in scope;
-// routing image/SA bootstrap is future work behind this explicit error.
+// resolution/import, the cloud-provider SA bootstrap, VM create which needs the
+// image storageClass resolved locally). These touch c.dynamic, which a remote
+// client does not have. Failing here — BEFORE a PENDING row or a provisioner
+// call — is the documented local-only constraint for the remote-zone build:
+// routing the VM-object CRUD lifecycle and the collection reads is in scope;
+// routing image resolution/import and the SA bootstrap is future work behind this
+// explicit error.
 func (c *Client) localOnlyErr(op string) error {
 	return fmt.Errorf(
-		"%s is not supported for remote zone %s/%s yet: dc-api holds no direct Harvester credentials there (image lookup, ListVMs/Networks, and the cloud-provider SA bootstrap are local-only for now)",
+		"%s is not supported for remote zone %s/%s yet: dc-api holds no direct Harvester credentials there (image resolution/import and the cloud-provider SA bootstrap are local-only for now)",
 		op, c.remoteRegion, c.remoteZone)
 }
 
@@ -385,16 +389,16 @@ func (c *Client) DeleteVM(ctx context.Context, backendUID string) error {
 // ListVMs returns all VMs in the tenant+project namespace.
 // projectID is the human-readable project slug.
 func (c *Client) ListVMs(ctx context.Context, tenantID, projectID string) ([]*models.Resource, error) {
-	if c.dynamic == nil {
-		return nil, c.localOnlyErr("ListVMs")
-	}
 	ns := common.NamespaceForProject(tenantID, projectID)
-	list, err := c.dynamic.
-		Resource(harvesterVMResource).
-		Namespace(ns).
-		List(ctx, metav1.ListOptions{
-			LabelSelector: "dc-api/managed=true",
-		})
+	// The VM list goes through the cluster-access seam (c.access). With the List
+	// toggle OFF (default) this resolves to the exact
+	// c.dynamic.Resource(gvr).Namespace(ns).List(...) call this method ran before
+	// — byte-identical. With it ON and a live agent for the zone, it routes to
+	// Session.List; the field extraction below operates on the returned items the
+	// same way on both seams.
+	list, err := c.access.List(ctx, harvesterVMResource, ns, metav1.ListOptions{
+		LabelSelector: "dc-api/managed=true",
+	})
 	if err != nil {
 		return nil, fmt.Errorf("harvester list VMs in %s: %w", ns, err)
 	}
@@ -691,10 +695,10 @@ func vmIPByInterfaceName(obj *unstructured.Unstructured) (ovnIP, mgmtIP string) 
 // ListImages returns all VirtualMachineImages available in Harvester across all namespaces.
 // The Image.ID field ("namespace/resource-name") is what callers pass to CreateVM.
 func (c *Client) ListImages(ctx context.Context) ([]*models.Image, error) {
-	if c.dynamic == nil {
-		return nil, c.localOnlyErr("ListImages")
-	}
-	list, err := c.dynamic.Resource(vmImageGVR).Namespace("").List(ctx, metav1.ListOptions{})
+	// Routed through the cluster-access seam (c.access): Direct (byte-identical
+	// cross-namespace dynamic List) when the toggle is OFF, Session.List when ON
+	// and an agent serves the zone. Field extraction below is seam-agnostic.
+	list, err := c.access.List(ctx, vmImageGVR, "", metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("harvester list images: %w", err)
 	}
@@ -718,10 +722,10 @@ func (c *Client) ListImages(ctx context.Context) ([]*models.Image, error) {
 // Harvester stores a human-readable label in annotation "network.harvesterhci.io/route"
 // or falls back to the resource name.
 func (c *Client) ListNetworks(ctx context.Context) ([]*models.Network, error) {
-	if c.dynamic == nil {
-		return nil, c.localOnlyErr("ListNetworks")
-	}
-	list, err := c.dynamic.Resource(networkAttachmentGVR).Namespace("").List(ctx, metav1.ListOptions{})
+	// Routed through the cluster-access seam (c.access): Direct (byte-identical
+	// cross-namespace dynamic List) when the toggle is OFF, Session.List when ON
+	// and an agent serves the zone. Field extraction below is seam-agnostic.
+	list, err := c.access.List(ctx, networkAttachmentGVR, "", metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("harvester list networks: %w", err)
 	}

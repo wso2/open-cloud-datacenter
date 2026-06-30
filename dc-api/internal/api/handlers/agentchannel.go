@@ -51,6 +51,11 @@ const (
 
 	opGetInventory = "get_inventory"
 
+	// opList is the generic LIST verb (M-D): list objects of a GVK in a namespace
+	// with an optional label selector, returning the collection. These exact
+	// strings are the wire contract with dc-agent; the two are separate Go modules.
+	opList = "list"
+
 	// M-B mutating/status verbs (protocol v1). These exact strings are the wire
 	// contract with dc-agent; the two are separate Go modules.
 	opApply       = "apply"
@@ -111,6 +116,13 @@ type wsProgress struct {
 // ResourceRef identifies one Kubernetes object by GVK + namespace/name. It is
 // embedded inline (not nested) in delete/get_status/watch_status params.
 type ResourceRef = agentgw.ResourceRef
+
+// ListRef identifies a collection to list (GVK + namespace + optional label
+// selector). It is the list op's request params.
+type ListRef = agentgw.ListRef
+
+// ListResult is the list op's result: the matched objects as raw object JSON.
+type ListResult = agentgw.ListResult
 
 // ApplyResult is the apply op's result: the applied object's identity and its
 // post-apply version.
@@ -261,6 +273,26 @@ func (s *Session) Call(ctx context.Context, op string, params json.RawMessage) (
 // Call → unmarshal result), mirroring how inventory.go drives get_inventory.
 // Errors from Call (*AgentError, ErrAgentUnavailable, ctx.Err()) pass through
 // unchanged for the caller to map to an HTTP status.
+
+// List returns the objects of the referenced GVK in the given namespace
+// (empty = cluster-scoped or all namespaces) filtered by the optional label
+// selector. It is the collection-returning op, mirroring get_inventory's drive
+// pattern: marshal params → Call → unmarshal the raw-object collection.
+func (s *Session) List(ctx context.Context, ref ListRef) (ListResult, error) {
+	var res ListResult
+	params, err := json.Marshal(ref)
+	if err != nil {
+		return res, err
+	}
+	raw, err := s.Call(ctx, opList, params)
+	if err != nil {
+		return res, err
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return ListResult{}, err
+	}
+	return res, nil
+}
 
 // Apply server-side-applies manifest in the agent's zone cluster. fieldManager
 // defaults to "dc-api" on the agent when empty; force toggles SSA

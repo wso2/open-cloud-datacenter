@@ -66,6 +66,9 @@ type seamStubSession struct{ snap agentgw.StatusSnapshot }
 func (s seamStubSession) GetStatus(context.Context, agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
 	return s.snap, nil
 }
+func (s seamStubSession) List(context.Context, agentgw.ListRef) (agentgw.ListResult, error) {
+	return agentgw.ListResult{}, nil
+}
 func (s seamStubSession) Apply(context.Context, json.RawMessage, string, bool) (agentgw.ApplyResult, error) {
 	return agentgw.ApplyResult{}, nil
 }
