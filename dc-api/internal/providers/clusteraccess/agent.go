@@ -179,6 +179,14 @@ func (a *AgentBacked) Get(ctx context.Context, gvr schema.GroupVersionResource, 
 // this never returns ErrOpNotRoutable — only a real list failure or, transiently,
 // agent-unavailable. An unmapped GVR is a programming error (ErrOpNotRoutable).
 func (a *AgentBacked) List(ctx context.Context, gvr schema.GroupVersionResource, ns string, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	// Routability guard FIRST: a GVR can be GVK-mapped (so the a.mapper.GVK check
+	// below would pass) yet not be a routable family for List — e.g. the pre-seeded
+	// virtualmachineinstances, which is in the mapper as a superset but has no
+	// RouteVerbs. Refuse to route such a family to the agent rather than issuing a
+	// list the agent's SA may not be permitted (least-privilege) to serve.
+	if verbs, ok := RoutableVerbs(gvr); !ok || !verbs[VerbList] {
+		return nil, fmt.Errorf("clusteraccess: list of %s not routable: %w", gvr.String(), agentgw.ErrOpNotRoutable)
+	}
 	apiVersion, kind, ok := a.mapper.GVK(gvr)
 	if !ok {
 		a.log.Error().

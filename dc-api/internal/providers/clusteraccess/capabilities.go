@@ -76,7 +76,7 @@ var vmCapability = AgentCapability{
 // The network families (NAD, Vpc, Subnet) are onboarded for the kubeovn CRD
 // CRUD slice (RouteVerbs/AgentVerbs filled below). vmImageCapability is onboarded
 // for the read/list path (ListImages routed via the agent — RouteVerbs={Get,List},
-// AgentVerbs={get,list,watch}). vmiCapability remains a GVK-only pre-seeded entry:
+// AgentVerbs={get,list}). vmiCapability remains a GVK-only pre-seeded entry:
 // DefaultGVKMapper still resolves its GVR (the table stays a superset the drivers
 // rely on) but RouteVerbs=nil means it contributes nothing to the routing
 // allow-set and AgentVerbs=nil means it emits no RBAC rule. Onboarding it is a
@@ -97,9 +97,10 @@ var (
 		// image catalog read through the agent (VerbList), and VerbGet rounds out
 		// the read family. No write verbs — image create/import stays local-only.
 		RouteVerbs: []Verb{VerbGet, VerbList},
-		// SA grant: get/list/watch on virtualmachineimages so the agent can serve
-		// the image catalog list (and a future per-image get/watch).
-		AgentVerbs: []Verb{VerbGet, VerbList, VerbWatch},
+		// SA grant: get/list on virtualmachineimages so the agent can serve the
+		// image catalog list (and a future per-image get). No watch — there is no
+		// routed watch path, so granting it would be unused RBAC (least-privilege).
+		AgentVerbs: []Verb{VerbGet, VerbList},
 	}
 	// nadCapability onboards the NetworkAttachmentDefinition CRUD that
 	// CreateSubnet/DeleteSubnet route through the kubeovn seam.
