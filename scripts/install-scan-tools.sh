@@ -47,6 +47,9 @@ if command -v go >/dev/null 2>&1; then
     go install "$g" || echo "   (skipped: go install $g failed — continuing)"
   done
   # Make freshly go-installed tools discoverable for the availability check below.
+  # `go install` writes to $GOBIN when set, else $GOPATH/bin — add both.
+  GO_BIN_ENV="$(go env GOBIN 2>/dev/null)"
+  [ -n "$GO_BIN_ENV" ] && case ":$PATH:" in *":$GO_BIN_ENV:"*) :;; *) PATH="$GO_BIN_ENV:$PATH";; esac
   GOBIN_DIR="$(go env GOPATH 2>/dev/null)/bin"
   case ":$PATH:" in *":$GOBIN_DIR:"*) :;; *) PATH="$GOBIN_DIR:$PATH";; esac
 else
