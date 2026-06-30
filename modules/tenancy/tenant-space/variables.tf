@@ -355,3 +355,48 @@ variable "storage_network_name" {
     error_message = "storage_network_name must be null or a non-empty string."
   }
 }
+
+# ── Common namespace — mutually exclusive with create_network_namespace ────────
+# When enabled, a <project_name>-common namespace is created for network
+# resources and cloud-init templates instead of the <project_name>-net namespace.
+# All harvester_network resources (VM, storage, VLAN) land in this namespace.
+# Cannot be combined with create_network_namespace = true.
+
+variable "create_common_namespace" {
+  type        = bool
+  description = "When true, creates a <project_name>-common namespace that hosts all network resources and cloud-init templates. Mutually exclusive with create_network_namespace. All VLAN-triggered network resources are placed here instead of the -net namespace."
+  default     = false
+}
+
+variable "common_namespace_name" {
+  type        = string
+  description = "Override the name of the common namespace. Defaults to <project_name>-common. Use when importing a brownfield namespace whose name differs from this convention."
+  default     = null
+  validation {
+    condition     = var.common_namespace_name == null ? true : trimspace(var.common_namespace_name) != ""
+    error_message = "common_namespace_name must be null or a non-empty string."
+  }
+}
+
+variable "create_node_cloud_config" {
+  type        = bool
+  description = "When true, creates a Harvester cloud-init ConfigMap (k8s-cluster-node-with-storage-network) in the common namespace via the tenant-cloud-config sub-module. Requires create_common_namespace = true. The root module must configure a default kubernetes provider pointed at the Harvester cluster."
+  default     = false
+}
+
+variable "cloud_config_ssh_authorized_keys" {
+  type        = list(string)
+  description = "SSH public keys injected into the node cloud-init template. Only used when create_node_cloud_config = true. Defaults to an empty list."
+  default     = []
+}
+
+variable "cloud_config_ntp_server" {
+  type        = string
+  description = "NTP server written into /etc/systemd/timesyncd.conf by the node cloud-init template. Only used when create_node_cloud_config = true. When null (default), the NTP section is omitted. Set per-environment via a local."
+  default     = null
+  validation {
+    condition     = var.cloud_config_ntp_server == null || trimspace(var.cloud_config_ntp_server) != ""
+    error_message = "cloud_config_ntp_server must be null or a non-empty string."
+  }
+}
+

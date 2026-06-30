@@ -4,10 +4,21 @@ locals {
   namespace_storage_limit = var.namespace_storage_limit != null ? var.namespace_storage_limit : var.storage_limit
   namespaces              = var.namespaces != null ? (var.create_default_namespace ? distinct(concat([var.project_name], var.namespaces)) : var.namespaces) : (var.create_default_namespace ? [var.project_name] : [])
 
-  # create_net_ns is true when explicitly requested, when any VLAN variable is set
-  # (all NADs live in the network namespace regardless of traffic type).
-  create_net_ns     = var.create_network_namespace || (var.vlan_id != null && length(var.vlan_id) > 0) || var.vm_network_vlan_id != null || var.storage_network_vlan_id != null
+  # Common namespace path — mutually exclusive with the network namespace path.
+  # When enabled, all network resources land here instead of the -net namespace.
+  create_common_ns    = var.create_common_namespace
+  common_namespace    = local.create_common_ns ? coalesce(var.common_namespace_name, "${var.project_name}-common") : null
+  create_cloud_config = local.create_common_ns && var.create_node_cloud_config
+
+  # create_net_ns is true when explicitly requested OR when any VLAN variable is
+  # set AND the common namespace path is NOT active. All NADs live in the active
+  # network namespace regardless of traffic type.
+  create_net_ns     = !local.create_common_ns && (var.create_network_namespace || (var.vlan_id != null && length(var.vlan_id) > 0) || var.vm_network_vlan_id != null || var.storage_network_vlan_id != null)
   network_namespace = local.create_net_ns ? coalesce(var.network_namespace_name, "${var.project_name}-net") : null
+
+  # Resolved namespace name for all harvester_network resources.
+  # Common namespace takes precedence; falls back to the -net namespace.
+  active_net_ns_name = coalesce(local.common_namespace, local.network_namespace)
 
   # VyOS path: compute a deterministic /23 subnet from 10.0.0.0/8 using the VLAN
   # index. Only relevant when vyos_endpoint is set and exactly one VLAN is given.
@@ -67,8 +78,16 @@ resource "rancher2_project" "this" {
       error_message = "VyOS IPAM uses VLAN IDs >= 1000 (index = vlan_id - 1000). Set vyos_endpoint = null for VLANs below 1000."
     }
     precondition {
-      condition     = var.vlan_id == null || length(var.vlan_id) == 0 || local.create_net_ns
-      error_message = "vlan_id requires the network namespace to exist. This should never happen since create_net_ns is always true when vlan_id is set — if you see this, do not set create_network_namespace = false alongside vlan_id."
+      condition     = var.vlan_id == null || length(var.vlan_id) == 0 || local.create_net_ns || local.create_common_ns
+      error_message = "vlan_id requires either the network namespace or the common namespace to exist. Do not set create_network_namespace = false alongside vlan_id unless create_common_namespace = true."
+    }
+    precondition {
+      condition     = !(var.create_common_namespace && var.create_network_namespace)
+      error_message = "create_common_namespace and create_network_namespace are mutually exclusive. Enable one or the other, not both."
+    }
+    precondition {
+      condition     = !var.create_node_cloud_config || var.create_common_namespace
+      error_message = "create_node_cloud_config requires create_common_namespace = true."
     }
   }
 }
@@ -128,6 +147,38 @@ resource "rancher2_namespace" "network" {
   depends_on = [rancher2_namespace.this]
 }
 
+# ── Common namespace ──────────────────────────────────────────────────────────
+# Created when create_common_namespace = true. Hosts all network resources
+# (harvester_network resources) and cloud-init templates. Mutually exclusive
+# with the -net network namespace — both cannot be active simultaneously.
+
+resource "rancher2_namespace" "common" {
+  count            = local.create_common_ns ? 1 : 0
+  name             = local.common_namespace
+  project_id       = rancher2_project.this.id
+  wait_for_cluster = false
+
+  # Zero-limit quota prevents VM workloads from being scheduled in this namespace.
+  resource_quota {
+    limit {
+      limits_cpu       = "0"
+      limits_memory    = "0Mi"
+      requests_storage = "0Gi"
+    }
+  }
+
+  labels = {
+    "field.cattle.io/projectId" = split(":", rancher2_project.this.id)[1]
+    "platform.wso2.com/role"    = "common-namespace"
+  }
+
+  lifecycle {
+    ignore_changes = [description, labels["kubernetes.io/metadata.name"]]
+  }
+
+  depends_on = [rancher2_namespace.this]
+}
+
 # ── Harvester network (whenever vlan_id is set, with or without VyOS) ─────────
 # Created directly here so it exists regardless of whether VyOS is configured.
 # Environments using physical switch VLAN assignment skip VyOS but still need
@@ -136,7 +187,7 @@ resource "rancher2_namespace" "network" {
 resource "harvester_network" "tenant" {
   for_each             = var.vlan_id != null ? toset([for id in var.vlan_id : tostring(id)]) : toset([])
   name                 = lookup(var.vlan_network_names, each.value, "${var.project_name}-vlan${each.value}")
-  namespace            = rancher2_namespace.network[0].name
+  namespace            = local.active_net_ns_name
   vlan_id              = tonumber(each.value)
   cluster_network_name = var.cluster_network_name
 
@@ -149,7 +200,7 @@ resource "harvester_network" "tenant" {
 
   # When VyOS is configured, wait for the vif/DHCP to be provisioned before
   # the network is visible to tenant VMs. for_each with empty set is a no-op.
-  depends_on = [rancher2_namespace.network, module.vyos_tenant]
+  depends_on = [rancher2_namespace.network, rancher2_namespace.common, module.vyos_tenant]
 }
 
 # ── VM network (simple path: vm_vlan_id) ──────────────────────────────────────
@@ -160,12 +211,12 @@ resource "harvester_network" "tenant" {
 resource "harvester_network" "vm" {
   count                = var.vm_network_vlan_id != null ? 1 : 0
   name                 = coalesce(var.vm_network_name, "${var.project_name}-vlan${var.vm_network_vlan_id}")
-  namespace            = rancher2_namespace.network[0].name
+  namespace            = local.active_net_ns_name
   vlan_id              = var.vm_network_vlan_id
   cluster_network_name = var.cluster_network_name
   route_mode           = "auto"
 
-  depends_on = [rancher2_namespace.network]
+  depends_on = [rancher2_namespace.network, rancher2_namespace.common]
 }
 
 # ── Storage network (only when storage_vlan_id is set) ────────────────────────
@@ -178,12 +229,12 @@ resource "harvester_network" "vm" {
 resource "harvester_network" "storage" {
   count                = var.storage_network_vlan_id != null ? 1 : 0
   name                 = coalesce(var.storage_network_name, "${var.project_name}-strg-vlan${var.storage_network_vlan_id}")
-  namespace            = rancher2_namespace.network[0].name
+  namespace            = local.active_net_ns_name
   vlan_id              = var.storage_network_vlan_id
   cluster_network_name = var.storage_cluster_network_name
   route_mode           = "auto"
 
-  depends_on = [rancher2_namespace.network]
+  depends_on = [rancher2_namespace.network, rancher2_namespace.common]
 }
 
 # ── VyOS configuration (only when vyos_endpoint is also set) ──────────────────
@@ -273,11 +324,27 @@ resource "rancher2_project_role_template_binding" "shared_image_access" {
   user_id            = each.value.user_id
 }
 
+# ── Node cloud-init template ──────────────────────────────────────────────────
+# Instantiated when create_common_namespace = true AND create_node_cloud_config = true.
+# Delegates to the tenant-cloud-config sub-module which owns the kubernetes provider.
+# The root module must configure a default `provider "kubernetes"` pointed at the
+# Harvester cluster kubeconfig — no aliased provider or providers meta-argument needed.
+
+module "cloud_config" {
+  count  = local.create_cloud_config ? 1 : 0
+  source = "../tenant-cloud-config"
+
+  namespace           = local.common_namespace
+  ntp_server          = var.cloud_config_ntp_server
+  ssh_authorized_keys = var.cloud_config_ssh_authorized_keys
+
+  depends_on = [rancher2_namespace.common]
+}
+
 # ── CI/CD bot users ───────────────────────────────────────────────────────────
 # Optional per-tenant machine identities for Terraform/CI pipelines.
 # Only instantiated when bot_users is non-empty — all existing tenant spaces
 # that omit this variable are completely unaffected.
-# Uses only the unaliased rancher2 and random providers — no kubernetes needed.
 
 module "bot_user" {
   for_each = { for b in var.bot_users : b.name => b }
