@@ -1,4 +1,4 @@
-.PHONY: help bootstrap check up down db-reset build-api build-cli build run dev gen-agent-rbac
+.PHONY: help bootstrap check up down db-reset build-api build-cli build run dev gen-agent-rbac scan scan-tools hooks
 
 # Default target — print help
 help:
@@ -13,6 +13,9 @@ help:
 	@echo "  make build       Build both"
 	@echo "  make run         Source .env and run dc-api (postgres must be up)"
 	@echo "  make dev         up + build-api + run (one command for local dev)"
+	@echo "  make scan        Run the pre-PR scanner gate on your diff (OSS analyzers)"
+	@echo "  make scan-tools  Install the analyzers make scan uses (brew + go)"
+	@echo "  make hooks       Enable the advisory pre-push scanner hook (one-time)"
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 bootstrap:
@@ -55,6 +58,21 @@ build: build-api build-cli
 # the committed file is stale.
 gen-agent-rbac:
 	cd dc-api && go run ./cmd/gen-agent-rbac -out ../flux/platform/dc-agent/base/rbac.yaml
+
+# ── Pre-PR review gate ──────────────────────────────────────────────────────
+# Run the deterministic scanner layer (the OSS analyzers CodeRabbit runs) on your
+# diff before opening a PR; `make hooks` wires it as an advisory pre-push hook.
+scan:
+	bash scripts/pr-scan.sh
+
+# Opt-in, best-effort installer for the analyzers `make scan` runs (brew + go).
+# The scan never auto-installs; run this once to widen coverage.
+scan-tools:
+	bash scripts/install-scan-tools.sh
+
+hooks:
+	git config core.hooksPath .githooks
+	@echo "pre-push gate active — scripts/pr-scan.sh runs on push (skip once: OCD_SKIP_PRESCAN=1 git push)"
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 run:
