@@ -26,8 +26,10 @@ package harvester
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -97,40 +99,43 @@ type Client struct {
 	// clusteraccess.Direct wrapping `dynamic` (today's behaviour, byte-identical)
 	// unless WithRoutedAccessor injects a routed accessor. The VM-object ops route
 	// through it: GetVM's primary VirtualMachine read (read slice), CreateVM's
-	// create + DeleteVM's delete (write slice 1), and the collection reads
-	// ListVMs/ListImages/ListNetworks (list slice — M-D). Image RESOLUTION (the
-	// create-time storageClass lookup), the cloud-provider SA bootstrap, and the
-	// VMI read inside GetVM still call c.dynamic directly. The seam never leaks an
-	// agent concept past the ComputeProvider interface.
+	// create + DeleteVM's delete (write slice 1), the collection reads
+	// ListVMs/ListImages/ListNetworks (list slice — M-D), and the image slice —
+	// CreateImage's create and resolveImage's create-time storageClass lookup. The
+	// cloud-provider SA bootstrap and the VMI read inside GetVM still call
+	// c.dynamic directly. The seam never leaks an agent concept past the
+	// ComputeProvider interface.
 	access clusteraccess.Accessor
 
 	// remoteRegion/remoteZone are non-empty ONLY for a credential-free REMOTE
 	// client built by NewRemoteClient (multi-zone routing). For such a client
-	// c.dynamic is nil: the seam ops (CreateVM/GetVM/DeleteVM via c.access, and
-	// the list reads via c.access.List) route to that zone's agent. The two
+	// c.dynamic is nil: the seam ops (CreateVM/GetVM/DeleteVM via c.access, the
+	// list reads via c.access.List, and the image slice — CreateImage's create and
+	// resolveImage's lookup — via c.access) route to that zone's agent. The two
 	// remaining direct paths behave differently on a remote client:
 	//   - GetVM's VMI IP enrichment read DEGRADES GRACEFULLY: it is SKIPPED (the
 	//     `c.dynamic == nil` guard returns the agent-supplied VM status WITHOUT IP
 	//     enrichment — no error), so a remote VM's status is still reported.
-	//   - the genuinely local-only ops — image RESOLUTION/import, the cloud-provider
-	//     SA bootstrap, and VM create's local storageClass resolution — have no
-	//     direct path and return a clear local-only error (localOnlyErr) naming the
-	//     zone instead of panicking on a nil dynamic client.
+	//   - the genuinely local-only ops — the cloud-provider SA bootstrap and VM
+	//     create's local storageClass resolution — have no direct path and return a
+	//     clear local-only error (localOnlyErr) naming the zone instead of panicking
+	//     on a nil dynamic client.
 	// Empty for the LOCAL client → today's behaviour.
 	remoteRegion, remoteZone string
 }
 
-// localOnlyErr is returned by a REMOTE client's direct-only methods (image
-// resolution/import, the cloud-provider SA bootstrap, VM create which needs the
-// image storageClass resolved locally). These touch c.dynamic, which a remote
-// client does not have. Failing here — BEFORE a PENDING row or a provisioner
-// call — is the documented local-only constraint for the remote-zone build:
-// routing the VM-object CRUD lifecycle and the collection reads is in scope;
-// routing image resolution/import and the SA bootstrap is future work behind this
-// explicit error.
+// localOnlyErr is returned by a REMOTE client's direct-only methods: VM create
+// (which resolves the image storageClass — see CreateVM's note) and the
+// cloud-provider SA bootstrap. These touch c.dynamic, which a remote client does
+// not have. Failing here — BEFORE a PENDING row or a provisioner call — is the
+// documented local-only constraint for the remote-zone build. NOTE: image
+// resolution/import (resolveImage, CreateImage) and the collection reads are NO
+// LONGER local-only — they route through the cluster-access seam (c.access), so a
+// remote client serves them via the agent; only VM create's storageClass lookup
+// and the SA bootstrap remain behind this explicit error.
 func (c *Client) localOnlyErr(op string) error {
 	return fmt.Errorf(
-		"%s is not supported for remote zone %s/%s yet: dc-api holds no direct Harvester credentials there (image resolution/import and the cloud-provider SA bootstrap are local-only for now)",
+		"%s is not supported for remote zone %s/%s yet: dc-api holds no direct Harvester credentials there (VM create's storageClass resolution and the cloud-provider SA bootstrap are local-only for now)",
 		op, c.remoteRegion, c.remoteZone)
 }
 
@@ -225,10 +230,11 @@ func (c *Client) Name() string { return "harvester" }
 // is a handler-layer bug, not a recoverable provider condition.
 func (c *Client) CreateVM(ctx context.Context, tenantID, projectID string, spec models.VMSpec) (*models.Resource, error) {
 	if c.dynamic == nil {
-		// REMOTE client: VM create needs the image template resolved against the
-		// zone's local VirtualMachineImage catalog (resolveImage → c.dynamic),
-		// which we don't have for a remote zone. Fail clearly BEFORE building the
-		// manifest so the handler surfaces a useful error rather than misrouting.
+		// REMOTE client: routing the full VM create lifecycle to a remote zone is a
+		// later slice (resolveImage now routes through c.access, but wiring the whole
+		// create — manifest build, MAC pinning, DNS injection — for a remote zone is
+		// out of scope here). Fail clearly BEFORE building the manifest so the handler
+		// surfaces a useful error rather than misrouting.
 		return nil, c.localOnlyErr("VM create")
 	}
 	ns := common.NamespaceForProject(tenantID, projectID)
@@ -753,20 +759,38 @@ func (c *Client) ListNetworks(ctx context.Context) ([]*models.Network, error) {
 // CreateImage creates a VirtualMachineImage CRD in Harvester, which triggers
 // Harvester to download the image from the given URL into Longhorn storage.
 // The image is available for VM creation once its status transitions to "active".
+//
+// The object is created through the cluster-access seam (c.access.Create): the
+// Direct path (toggle OFF) is a plain dynamic POST — byte-identical to the
+// pre-seam behaviour except that the name is now client-assigned; the agent path
+// (toggle ON + live agent) is a server-side apply, the agent's only create
+// mechanism. SSA REQUIRES a name (generateName cannot SSA), so we assign a fixed
+// "image-<rand>" name here rather than relying on the apiserver's generateName.
+// A POST accepts the explicit name fine, so both seams agree. A REMOTE client
+// (c.dynamic nil) now serves this through the agent — it no longer returns
+// localOnlyErr.
 func (c *Client) CreateImage(ctx context.Context, displayName, downloadURL string) (*models.Image, error) {
-	if c.dynamic == nil {
-		return nil, c.localOnlyErr("CreateImage")
-	}
 	// Images are created in the "default" namespace in Harvester.
 	const imageNamespace = "default"
+
+	// Client-assigned name: SSA (the agent create path) has no generateName
+	// equivalent, so we must supply metadata.name. The short crypto-random suffix
+	// mirrors what the apiserver's generateName would have produced ("image-XXXXX")
+	// and keeps names collision-resistant. resolveImage matches by full ID, name,
+	// OR displayName, so a client-assigned name is transparent to VM create.
+	suffix, err := randHexSuffix()
+	if err != nil {
+		return nil, fmt.Errorf("harvester create image %q: generate name suffix: %w", displayName, err)
+	}
+	name := "image-" + suffix
 
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "harvesterhci.io/v1beta1",
 			"kind":       "VirtualMachineImage",
 			"metadata": map[string]interface{}{
-				"generateName": "image-",
-				"namespace":    imageNamespace,
+				"name":      name,
+				"namespace": imageNamespace,
 				"labels": map[string]interface{}{
 					"dc-api/managed": "true",
 				},
@@ -779,7 +803,7 @@ func (c *Client) CreateImage(ctx context.Context, displayName, downloadURL strin
 		},
 	}
 
-	created, err := c.dynamic.Resource(vmImageGVR).Namespace(imageNamespace).Create(ctx, obj, metav1.CreateOptions{})
+	created, err := c.access.Create(ctx, vmImageGVR, imageNamespace, obj, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("harvester create image %q: %w", displayName, err)
 	}
@@ -789,6 +813,18 @@ func (c *Client) CreateImage(ctx context.Context, displayName, downloadURL strin
 		DisplayName: displayName,
 		Namespace:   imageNamespace,
 	}, nil
+}
+
+// randHexSuffix returns 8 hex characters (4 crypto-random bytes) for a
+// client-assigned image name. It mirrors the "image-XXXXX" shape the apiserver's
+// generateName produced, but is chosen here because the agent create path is a
+// server-side apply, which requires a name up front.
+func randHexSuffix() (string, error) {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // resolveImage resolves a user-supplied image string to a "namespace/resource-name" ID
@@ -802,7 +838,12 @@ func (c *Client) CreateImage(ctx context.Context, displayName, downloadURL strin
 //   - A full ID:      "default/image-abc123"  (looked up by namespace+name)
 //   - A display name: "ubuntu-22.04"          (looked up by spec.displayName)
 func (c *Client) resolveImage(ctx context.Context, nameOrID string) (imageID, storageClass string, err error) {
-	list, err := c.dynamic.Resource(vmImageGVR).Namespace("").List(ctx, metav1.ListOptions{})
+	// Routed through the cluster-access seam (c.access): Direct (byte-identical
+	// cross-namespace dynamic List) when the toggle is OFF, Session.List when ON
+	// and an agent serves the zone. This is why a REMOTE client (c.dynamic nil)
+	// can now resolve an image — the lookup no longer touches c.dynamic. Field
+	// extraction (displayName, status.storageClassName) below is seam-agnostic.
+	list, err := c.access.List(ctx, vmImageGVR, "", metav1.ListOptions{})
 	if err != nil {
 		return "", "", fmt.Errorf("list images for lookup: %w", err)
 	}

@@ -75,8 +75,7 @@ func TestRoutableVerbs_UnknownGVRNotRoutable(t *testing.T) {
 
 // TestRoutableVerbs_ListRoutedForListFamilies asserts VerbList is routable for
 // exactly the families whose harvester list ops now route through the agent: the
-// VM, NAD, and image families. The image family routes List (and Get) but NOT
-// any write verb.
+// VM, NAD, and image families.
 func TestRoutableVerbs_ListRoutedForListFamilies(t *testing.T) {
 	listFamilies := []schema.GroupVersionResource{
 		{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachines"},
@@ -93,17 +92,31 @@ func TestRoutableVerbs_ListRoutedForListFamilies(t *testing.T) {
 			t.Errorf("%s must route VerbList", gvr.Resource)
 		}
 	}
+}
 
-	// The image family is read/list only — it must NOT route any write verb.
+// TestRoutableVerbs_ImageRoutesGetListCreate pins the image family's routable set
+// to exactly {Get, List, Create}: the read/list path (resolveImage/ListImages)
+// plus CreateImage's create (the image slice). Delete/Apply/Update must NOT be
+// routable — image deletion and generic apply stay local-only.
+func TestRoutableVerbs_ImageRoutesGetListCreate(t *testing.T) {
 	imgGVR := schema.GroupVersionResource{Group: "harvesterhci.io", Version: "v1beta1", Resource: "virtualmachineimages"}
-	imgVerbs, _ := RoutableVerbs(imgGVR)
-	for _, w := range []Verb{VerbCreate, VerbApply, VerbUpdate, VerbDelete} {
-		if imgVerbs[w] {
-			t.Errorf("virtualmachineimages must NOT route write verb %v", w)
+	imgVerbs, ok := RoutableVerbs(imgGVR)
+	if !ok {
+		t.Fatal("virtualmachineimages must be an onboarded routable family")
+	}
+	for _, want := range []Verb{VerbGet, VerbList, VerbCreate} {
+		if !imgVerbs[want] {
+			t.Errorf("virtualmachineimages must route %v, got %v", want, imgVerbs)
 		}
 	}
-	if !imgVerbs[VerbGet] || !imgVerbs[VerbList] {
-		t.Errorf("virtualmachineimages must route Get+List, got %v", imgVerbs)
+	// CreateImage routes VerbCreate but NOT the other write verbs.
+	for _, w := range []Verb{VerbApply, VerbUpdate, VerbDelete} {
+		if imgVerbs[w] {
+			t.Errorf("virtualmachineimages must NOT route %v", w)
+		}
+	}
+	if len(imgVerbs) != 3 {
+		t.Errorf("virtualmachineimages routable set = %v, want exactly {Get, List, Create}", imgVerbs)
 	}
 }
 
