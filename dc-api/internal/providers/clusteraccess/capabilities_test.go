@@ -120,8 +120,55 @@ func TestRoutableVerbs_ImageRoutesGetListCreate(t *testing.T) {
 	}
 }
 
-// TestDefaultGVKMapperResolvesKnownGVRs pins the derived GVK table to the same
-// six entries (and same APIVersion/Kind) the pre-refactor literal had.
+// TestRoutableVerbs_CloudProviderSAFamilies pins the routable sets for the three
+// cloud-provider-SA bootstrap families (F32): ServiceAccount and RoleBinding
+// route exactly {Create}; Secret routes exactly {Get, Create} (Get to read the
+// populated token, Create for the token Secret). No other verb is routable for
+// these families — in particular Delete/Apply/Update/List/Watch must NOT be.
+func TestRoutableVerbs_CloudProviderSAFamilies(t *testing.T) {
+	saGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "serviceaccounts"}
+	rbGVR := schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"}
+	secGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+
+	// SA and RoleBinding: exactly {Create}.
+	for _, gvr := range []schema.GroupVersionResource{saGVR, rbGVR} {
+		verbs, ok := RoutableVerbs(gvr)
+		if !ok {
+			t.Errorf("%s must be an onboarded routable family", gvr.Resource)
+			continue
+		}
+		if !verbs[VerbCreate] {
+			t.Errorf("%s must route VerbCreate, got %v", gvr.Resource, verbs)
+		}
+		if len(verbs) != 1 {
+			t.Errorf("%s routable set = %v, want exactly {Create}", gvr.Resource, verbs)
+		}
+	}
+
+	// Secret: exactly {Get, Create}.
+	secVerbs, ok := RoutableVerbs(secGVR)
+	if !ok {
+		t.Fatal("secrets must be an onboarded routable family")
+	}
+	for _, want := range []Verb{VerbGet, VerbCreate} {
+		if !secVerbs[want] {
+			t.Errorf("secrets must route %v, got %v", want, secVerbs)
+		}
+	}
+	for _, w := range []Verb{VerbList, VerbApply, VerbUpdate, VerbDelete, VerbWatch} {
+		if secVerbs[w] {
+			t.Errorf("secrets must NOT route %v", w)
+		}
+	}
+	if len(secVerbs) != 2 {
+		t.Errorf("secrets routable set = %v, want exactly {Get, Create}", secVerbs)
+	}
+}
+
+// TestDefaultGVKMapperResolvesKnownGVRs pins the derived GVK table to the
+// onboarded entries (and same APIVersion/Kind). The six original entries plus the
+// three cloud-provider-SA bootstrap families (serviceaccounts, rolebindings,
+// secrets — F32).
 func TestDefaultGVKMapperResolvesKnownGVRs(t *testing.T) {
 	m := DefaultGVKMapper()
 	cases := []struct {
@@ -135,6 +182,9 @@ func TestDefaultGVKMapperResolvesKnownGVRs(t *testing.T) {
 		{schema.GroupVersionResource{Group: "k8s.cni.cncf.io", Version: "v1", Resource: "network-attachment-definitions"}, "k8s.cni.cncf.io/v1", "NetworkAttachmentDefinition"},
 		{schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "vpcs"}, "kubeovn.io/v1", "Vpc"},
 		{schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "subnets"}, "kubeovn.io/v1", "Subnet"},
+		{schema.GroupVersionResource{Group: "", Version: "v1", Resource: "serviceaccounts"}, "v1", "ServiceAccount"},
+		{schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"}, "rbac.authorization.k8s.io/v1", "RoleBinding"},
+		{schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}, "v1", "Secret"},
 	}
 	for _, c := range cases {
 		av, k, ok := m.GVK(c.gvr)
