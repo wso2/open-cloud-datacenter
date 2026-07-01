@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -168,8 +169,18 @@ func main() {
 		logger.Warn().Err(err).Msg("no local-cluster access; running presence-only (set DCAGENT_KUBECONFIG for local dev)")
 	} else {
 		dispatcher, streamDispatcher = buildDispatchers(exec, logger)
+		// Derive the advertised op list from the registered dispatchers so the log
+		// can't drift from what buildDispatchers actually wired up.
+		ops := make([]string, 0, len(dispatcher)+len(streamDispatcher))
+		for op := range dispatcher {
+			ops = append(ops, op)
+		}
+		for op := range streamDispatcher {
+			ops = append(ops, op)
+		}
+		sort.Strings(ops)
 		logger.Info().
-			Strs("ops", []string{executor.OpGetInventory, executor.OpList, executor.OpGetObject, executor.OpApply, executor.OpDelete, executor.OpGetStatus, executor.OpWatchStatus}).
+			Strs("ops", ops).
 			Msg("local-cluster executor ready")
 	}
 
