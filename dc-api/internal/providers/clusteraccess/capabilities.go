@@ -75,8 +75,10 @@ var vmCapability = AgentCapability{
 
 // The network families (NAD, Vpc, Subnet) are onboarded for the kubeovn CRD
 // CRUD slice (RouteVerbs/AgentVerbs filled below). vmImageCapability is onboarded
-// for the read/list path (ListImages routed via the agent — RouteVerbs={Get,List},
-// AgentVerbs={get,list}). vmiCapability remains a GVK-only pre-seeded entry:
+// for the read/list path AND image create (ListImages/resolveImage/CreateImage
+// routed via the agent — RouteVerbs={Get,List,Create}, AgentVerbs={get,list,
+// create,patch}; create+patch because SSA is the agent's create mechanism).
+// vmiCapability remains a GVK-only pre-seeded entry:
 // DefaultGVKMapper still resolves its GVR (the table stays a superset the drivers
 // rely on) but RouteVerbs=nil means it contributes nothing to the routing
 // allow-set and AgentVerbs=nil means it emits no RBAC rule. Onboarding it is a
@@ -93,14 +95,17 @@ var (
 		APIVersion: "harvesterhci.io/v1beta1",
 		Kind:       "VirtualMachineImage",
 		Namespaced: true,
-		// Onboarded for the read path only: ListImages routes the cross-namespace
-		// image catalog read through the agent (VerbList), and VerbGet rounds out
-		// the read family. No write verbs — image create/import stays local-only.
-		RouteVerbs: []Verb{VerbGet, VerbList},
-		// SA grant: get/list on virtualmachineimages so the agent can serve the
-		// image catalog list (and a future per-image get). No watch — there is no
-		// routed watch path, so granting it would be unused RBAC (least-privilege).
-		AgentVerbs: []Verb{VerbGet, VerbList},
+		// Onboarded for the read/list path AND image create: ListImages routes the
+		// cross-namespace catalog read (VerbList) and resolveImage the create-time
+		// storageClass lookup, VerbGet rounds out the read family, and CreateImage
+		// routes the image import (VerbCreate). No delete — image deletion stays
+		// local-only for now.
+		RouteVerbs: []Verb{VerbGet, VerbList, VerbCreate},
+		// SA grant: get/list to serve the catalog read + resolveImage lookup, plus
+		// create+patch because the AgentBacked create is a server-side apply
+		// (VerbApply→patch). Mirrors vmCapability/nadCapability's write grant. No
+		// watch — there is no routed watch path, so granting it would be unused RBAC.
+		AgentVerbs: []Verb{VerbGet, VerbList, VerbCreate, VerbApply},
 	}
 	// nadCapability onboards the NetworkAttachmentDefinition CRUD that
 	// CreateSubnet/DeleteSubnet route through the kubeovn seam.
@@ -142,7 +147,7 @@ var (
 //
 // Onboarded (RouteVerbs + AgentVerbs set): vmCapability, the three network
 // families nadCapability/vpcCapability/subnetCapability (the kubeovn CRD CRUD
-// slice), and vmImageCapability (read/list path). vmiCapability stays a GVK-only
+// slice), and vmImageCapability (read/list path + image create). vmiCapability stays a GVK-only
 // pre-seeded entry that keeps the wire mapper a superset without granting any
 // routing or RBAC. New families are added here (one struct each) in later
 // phases — never by editing the mapper, the allow-set switch, or the RBAC YAML
@@ -190,7 +195,9 @@ func buildDerived() {
 // set of seam Verbs that MAY route to the agent for ANY family. With the VM,
 // network, and image families onboarded this equals
 // {VerbGet, VerbList, VerbCreate, VerbDelete} (List added when ListVMs/Images/
-// Networks were routed through the agent). agentDecision consults this for
+// Networks were routed through the agent; the image family also routes VerbCreate
+// for CreateImage, but VM/NAD already contribute it so the union is unchanged).
+// agentDecision consults this for
 // membership, then gates reads vs writes by the per-family env toggles
 // (VerbList falls on the read side — see IsReadVerb).
 //

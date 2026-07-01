@@ -128,6 +128,13 @@ type countingAccessor struct {
 	createCalls int
 	applyCalls  int
 	deleteCalls int
+
+	// listDelegate, when non-nil, serves List. CreateVM now resolves the image via
+	// c.access.List (the image slice routed resolveImage through the seam), so the
+	// Direct fallback in a CreateVM routing test must reach the seeded image store.
+	// Tests that don't exercise CreateVM leave it nil (List returns empty). It never
+	// affects create/delete counting.
+	listDelegate clusteraccess.Accessor
 }
 
 var _ clusteraccess.Accessor = (*countingAccessor)(nil)
@@ -139,7 +146,10 @@ func (c *countingAccessor) Get(_ context.Context, _ schema.GroupVersionResource,
 	}}, nil
 }
 
-func (c *countingAccessor) List(_ context.Context, _ schema.GroupVersionResource, _ string, _ metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+func (c *countingAccessor) List(ctx context.Context, gvr schema.GroupVersionResource, ns string, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	if c.listDelegate != nil {
+		return c.listDelegate.List(ctx, gvr, ns, opts)
+	}
 	return &unstructured.UnstructuredList{}, nil
 }
 
@@ -200,8 +210,9 @@ func (c *countingAccessor) deleteCount() int {
 
 // newEmptyFakeDynamic returns a fake dynamic client with NO objects, so a DeleteVM
 // sees no object (and CreateVM, when it reaches a real store, would be a fresh
-// create). resolveImage does NOT go through the seam, so CreateVM tests pre-seed
-// an image object via newFakeDynamicWithImage instead.
+// create). resolveImage now lists via the seam (c.access.List), so CreateVM tests
+// seed the image via newFakeDynamicWithImage and delegate the Direct fallback's
+// List to it (countingAccessor.listDelegate).
 func newEmptyFakeDynamic() *dynamicfake.FakeDynamicClient {
 	gvrToListKind := map[schema.GroupVersionResource]string{
 		harvesterVMResource:  "VirtualMachineList",
@@ -212,7 +223,9 @@ func newEmptyFakeDynamic() *dynamicfake.FakeDynamicClient {
 }
 
 // newFakeDynamicWithImage seeds a ready VirtualMachineImage (status.storageClassName
-// populated) so resolveImage — which always runs on c.dynamic — succeeds. The VM
+// populated) so resolveImage succeeds. resolveImage lists via c.access.List, so a
+// CreateVM test wires this store into the accessor (either as the client's own
+// Direct, or via countingAccessor.listDelegate on the Direct fallback). The VM
 // store itself stays empty.
 func newFakeDynamicWithImage(imageName, storageClass string) *dynamicfake.FakeDynamicClient {
 	img := &unstructured.Unstructured{Object: map[string]interface{}{
@@ -274,7 +287,9 @@ func writeRouted(direct clusteraccess.Accessor, agent clusteraccess.Accessor, al
 
 func TestCreateVM_ToggleOff_UsesDirect_AgentUntouched(t *testing.T) {
 	dyn := newFakeDynamicWithImage("ubuntu-22.04", "harvester-longhorn-default-image-abc123")
-	direct := &countingAccessor{}
+	// resolveImage now lists images via c.access.List; the Direct fallback must
+	// reach the seeded image store, so delegate List to a real Direct over `dyn`.
+	direct := &countingAccessor{listDelegate: clusteraccess.NewDirect(dyn)}
 	sess := &writeStubSession{}
 	agent := clusteraccess.NewAgentBacked(sess, "lk", "zone-1", "dc-api", clusteraccess.DefaultGVKMapper(), zerolog.Nop())
 
@@ -332,7 +347,9 @@ func TestDeleteVM_ToggleOff_UsesDirect_AgentUntouched(t *testing.T) {
 
 func TestCreateVM_ToggleOn_RoutesToAgentApply(t *testing.T) {
 	dyn := newFakeDynamicWithImage("ubuntu-22.04", "harvester-longhorn-default-image-abc123")
-	direct := &countingAccessor{}
+	// VerbList is NOT in this test's agent allow-set, so resolveImage's List falls
+	// to Direct — delegate it to the seeded image store.
+	direct := &countingAccessor{listDelegate: clusteraccess.NewDirect(dyn)}
 	sess := &writeStubSession{
 		applyResult: agentgw.ApplyResult{
 			APIVersion:      "kubevirt.io/v1",
@@ -438,7 +455,9 @@ func TestCreateVM_ToggleOn_AgentError_SurfacesNoDirectFallback(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dyn := newFakeDynamicWithImage("ubuntu-22.04", "harvester-longhorn-default-image-abc123")
-			direct := &countingAccessor{}
+			// resolveImage runs before the routed create; its List falls to Direct
+			// here (VerbList not activated), so delegate it to the seeded store.
+			direct := &countingAccessor{listDelegate: clusteraccess.NewDirect(dyn)}
 			sess := &writeStubSession{applyErr: tc.applyErr}
 			agent := clusteraccess.NewAgentBacked(sess, "lk", "zone-1", "dc-api", clusteraccess.DefaultGVKMapper(), zerolog.Nop())
 
@@ -511,7 +530,9 @@ func TestDeleteVM_ToggleOn_AgentError_SurfacesNoDirectFallback(t *testing.T) {
 // flipping the env var can never strand the zone when the agent is down.
 func TestCreateVM_NoConnectedAgent_UsesDirect(t *testing.T) {
 	dyn := newFakeDynamicWithImage("ubuntu-22.04", "harvester-longhorn-default-image-abc123")
-	direct := &countingAccessor{}
+	// No agent → everything (incl. resolveImage's List) is Direct; delegate List
+	// to the seeded image store.
+	direct := &countingAccessor{listDelegate: clusteraccess.NewDirect(dyn)}
 	sess := &writeStubSession{}
 	agent := clusteraccess.NewAgentBacked(sess, "lk", "zone-1", "dc-api", clusteraccess.DefaultGVKMapper(), zerolog.Nop())
 
