@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -323,6 +324,46 @@ func TestAgentBackedGet_FallsBackToStatusOnUnsupported(t *testing.T) {
 	// the degraded path.
 	if _, found, _ := unstructured.NestedMap(obj.Object, "spec"); found {
 		t.Error("status-only fallback object unexpectedly carries .spec")
+	}
+}
+
+// TestAgentBackedGet_FullObjectFamilyErrorsOnUnsupported proves the other half of
+// the compat gate: a FULL-object family (Secrets — StatusFallbackOK=false) whose
+// caller needs .data must NOT degrade to the status-only partial on an older
+// agent. Get returns a clear error (still wrapping ErrOpNotRoutable) and never
+// calls GetStatus — so the cloud-provider SA bootstrap fails fast instead of
+// polling a token-less Secret until timeout.
+func TestAgentBackedGet_FullObjectFamilyErrorsOnUnsupported(t *testing.T) {
+	secretsGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+	if verbs, ok := RoutableVerbs(secretsGVR); !ok || !verbs[VerbGet] {
+		t.Fatal("precondition: secrets Get must be a routable family")
+	}
+	if StatusFallbackOK(secretsGVR) {
+		t.Fatal("precondition: secrets must NOT permit the status-only fallback")
+	}
+	sess := &fakeSession{
+		getObject: func(ref agentgw.ResourceRef) (agentgw.GetObjectResult, error) {
+			return agentgw.GetObjectResult{}, &agentgw.AgentError{Code: agentgw.CodeOpUnsupported, Message: "unknown op"}
+		},
+		getStatus: func(ref agentgw.ResourceRef) (agentgw.StatusSnapshot, error) {
+			t.Error("full-object family must NOT fall back to GetStatus")
+			return agentgw.StatusSnapshot{}, nil
+		},
+	}
+	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
+
+	_, err := a.Get(context.Background(), secretsGVR, "dc-t-p", "sa-token", metav1.GetOptions{})
+	if err == nil {
+		t.Fatal("Get must return an error for a full-object family on OP_UNSUPPORTED, got nil")
+	}
+	if !errors.Is(err, agentgw.ErrOpNotRoutable) {
+		t.Errorf("error must wrap ErrOpNotRoutable for callers' errors.Is checks, got %v", err)
+	}
+	if sess.getStatusCalled {
+		t.Error("Get fell back to GetStatus for a full-object family; it must error instead")
+	}
+	if !strings.Contains(err.Error(), "get_object") {
+		t.Errorf("error should mention get_object upgrade guidance, got %q", err.Error())
 	}
 }
 

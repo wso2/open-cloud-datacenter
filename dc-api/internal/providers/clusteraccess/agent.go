@@ -117,13 +117,14 @@ func (a *AgentBacked) ref(gvr schema.GroupVersionResource, ns, name string) (age
 // what the read-modify-patch write ops (NAT/DNS/cloud-provider SA) need: they
 // read .spec/.data to modify it.
 //
-// COMPAT: an OLDER agent that predates get_object replies OP_UNSUPPORTED; this
-// FALLS BACK to Session.GetStatus and synthesizes the prior status-only partial
-// object (apiVersion, kind, metadata.name/namespace, resourceVersion,
-// generation, status). The behavior degrades to the prior status-only read
-// rather than erroring, keeping the change non-breaking during a rolling deploy.
-// Callers that only read status (e.g. the VM read slice's
-// status.printableStatus) are unaffected by which path served them.
+// COMPAT: an OLDER agent that predates get_object replies OP_UNSUPPORTED. For a
+// family whose Get consumers read status alone (StatusFallbackOK — the VM read
+// slice), this FALLS BACK to Session.GetStatus and synthesizes the prior
+// status-only partial object, keeping that read non-breaking during a rolling
+// deploy. For a FULL-object family (a Secret's .data, the KubeOVN .spec/.labels
+// read-modify-patch ops) the status-only partial would drop the fields the caller
+// needs, so a CLEAR error is returned instead of a silent partial — the zone's
+// agent must be upgraded. See AgentCapability.StatusFallbackOK.
 //
 // Found==false (on either path) is translated to a k8serrors.NewNotFound-shaped
 // error so callers' existing IsNotFound / "not found" checks fire unchanged on
@@ -152,13 +153,26 @@ func (a *AgentBacked) Get(ctx context.Context, gvr schema.GroupVersionResource, 
 		// (agent unavailable, RBAC, timeout) propagates.
 		terr := a.translateErr(err)
 		if errors.Is(terr, agentgw.ErrOpNotRoutable) {
-			a.log.Info().
-				Str("seam", "agent").
-				Str("region", a.region).Str("zone", a.zone).
-				Str("api_version", ref.APIVersion).Str("kind", ref.Kind).
-				Str("namespace", ref.Namespace).Str("name", ref.Name).
-				Msg("agent does not support get_object; falling back to status-only get_status")
-			return a.getStatusFallback(ctx, gvr, ref, ns, name)
+			// OP_UNSUPPORTED: the agent predates get_object. Degrading to the
+			// status-only get_status is valid ONLY for families whose Get consumers
+			// read status alone (VMs). For a full-object consumer (a Secret's
+			// .data.token, the KubeOVN read-modify-patch ops' .spec/.metadata.labels)
+			// the synthesized partial would silently drop the very fields the caller
+			// needs — e.g. the cloud-provider SA bootstrap would poll a token-less
+			// Secret until it times out. So gate the fallback on the family's
+			// StatusFallbackOK; otherwise surface a clear, immediate error (Routed.Get
+			// is terminal on agent activation, so this propagates rather than silently
+			// degrading). ErrOpNotRoutable stays wrapped for callers' errors.Is checks.
+			if StatusFallbackOK(gvr) {
+				a.log.Info().
+					Str("seam", "agent").
+					Str("region", a.region).Str("zone", a.zone).
+					Str("api_version", ref.APIVersion).Str("kind", ref.Kind).
+					Str("namespace", ref.Namespace).Str("name", ref.Name).
+					Msg("agent does not support get_object; falling back to status-only get_status")
+				return a.getStatusFallback(ctx, gvr, ref, ns, name)
+			}
+			return nil, fmt.Errorf("clusteraccess: full-object read of %s in zone %s/%s requires an agent that supports get_object, but the zone's agent predates it (upgrade the agent): %w", gvr.String(), a.region, a.zone, terr)
 		}
 		return nil, terr
 	}

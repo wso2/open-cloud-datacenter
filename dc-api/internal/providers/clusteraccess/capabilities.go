@@ -48,6 +48,18 @@ type AgentCapability struct {
 	// get_status/watch_status read+watch, and SSA-create needs create+patch. A
 	// capability that grants no RBAC (pre-seeded GVK-only) leaves this nil.
 	AgentVerbs []Verb
+	// StatusFallbackOK allows AgentBacked.Get to degrade to a status-only read
+	// (Session.GetStatus) when an OLDER agent predates full-object get_object and
+	// replies OP_UNSUPPORTED. Set it ONLY for families whose Get consumers read
+	// status alone (the VM read slice's status.printableStatus). Families whose Get
+	// consumers need the full object — Secrets (.data.token) and the KubeOVN
+	// read-modify-patch ops that read .spec / .metadata.labels — MUST leave this
+	// false: the status-only partial the fallback synthesizes drops .spec/.data/
+	// .labels, so degrading to it would silently return a useless object (the
+	// cloud-provider SA bootstrap would poll a token-less Secret until timeout).
+	// With the flag false, an old agent yields a clear error instead — see
+	// AgentBacked.Get.
+	StatusFallbackOK bool
 }
 
 // vmCapability is the one truly onboarded capability in phase 1.
@@ -71,6 +83,11 @@ var vmCapability = AgentCapability{
 	// needs create+patch. Reproduces the old rule verbatim:
 	// get,list,watch,create,patch,delete.
 	AgentVerbs: []Verb{VerbGet, VerbList, VerbWatch, VerbCreate, VerbApply, VerbDelete},
+	// GetVM reads only status.printableStatus, so the status-only fallback is a
+	// valid degrade for an older agent without get_object (preserves the
+	// rolling-deploy compat added with the full-object Get). Every other
+	// routable-Get family reads the full object and leaves this false.
+	StatusFallbackOK: true,
 }
 
 // The network families (NAD, Vpc, Subnet) are onboarded for the kubeovn CRD
@@ -223,6 +240,8 @@ var (
 	derivedGVKTable   map[schema.GroupVersionResource]gvk
 	derivedRouteSet   map[schema.GroupVersionResource]map[Verb]bool
 	derivedUnionRoute map[Verb]bool
+
+	derivedStatusFallback map[schema.GroupVersionResource]bool
 )
 
 func buildDerived() {
@@ -230,8 +249,12 @@ func buildDerived() {
 		derivedGVKTable = make(map[schema.GroupVersionResource]gvk, len(AgentCapabilities))
 		derivedRouteSet = make(map[schema.GroupVersionResource]map[Verb]bool, len(AgentCapabilities))
 		derivedUnionRoute = make(map[Verb]bool)
+		derivedStatusFallback = make(map[schema.GroupVersionResource]bool, len(AgentCapabilities))
 		for _, c := range AgentCapabilities {
 			derivedGVKTable[c.GVR] = gvk{APIVersion: c.APIVersion, Kind: c.Kind}
+			if c.StatusFallbackOK {
+				derivedStatusFallback[c.GVR] = true
+			}
 			if len(c.RouteVerbs) > 0 {
 				set := make(map[Verb]bool, len(c.RouteVerbs))
 				for _, v := range c.RouteVerbs {
@@ -284,6 +307,16 @@ func RoutableVerbs(gvr schema.GroupVersionResource) (map[Verb]bool, bool) {
 		out[v] = true
 	}
 	return out, true
+}
+
+// StatusFallbackOK reports whether AgentBacked.Get may degrade a routed read of
+// this GVR to a status-only get_status when an older agent lacks get_object. True
+// only for families whose Get consumers read status alone (VMs); false (the
+// default) for full-object consumers, which then get a clear error on an old
+// agent instead of a silently-partial object. See AgentCapability.StatusFallbackOK.
+func StatusFallbackOK(gvr schema.GroupVersionResource) bool {
+	buildDerived()
+	return derivedStatusFallback[gvr]
 }
 
 // IsReadVerb classifies a seam Verb as a read for the reads/writes toggle split.
