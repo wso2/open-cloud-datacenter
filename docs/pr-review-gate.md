@@ -86,6 +86,8 @@ repo/branch and commit them there:
 - `scripts/pr-scan.sh`
 - `scripts/install-scan-tools.sh`
 - `.githooks/pre-push`
+- `.gitleaks.toml` (allowlists the gate's own `OCD_SKIP_PRESCAN` escape-hatch string
+  so gitleaks doesn't flag it in help text/scripts/docs)
 - the `scan`, `scan-tools`, and `hooks` targets from the `Makefile` (plus their
   `.PHONY` and `help` entries)
 
