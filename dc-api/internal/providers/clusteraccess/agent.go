@@ -150,7 +150,8 @@ func (a *AgentBacked) Get(ctx context.Context, gvr schema.GroupVersionResource, 
 		// which translateErr maps to ErrOpNotRoutable. In that one case fall back to
 		// the status-only read so a rolling deploy never errors. Any other error
 		// (agent unavailable, RBAC, timeout) propagates.
-		if errors.Is(a.translateErr(err), agentgw.ErrOpNotRoutable) {
+		terr := a.translateErr(err)
+		if errors.Is(terr, agentgw.ErrOpNotRoutable) {
 			a.log.Info().
 				Str("seam", "agent").
 				Str("region", a.region).Str("zone", a.zone).
@@ -159,7 +160,7 @@ func (a *AgentBacked) Get(ctx context.Context, gvr schema.GroupVersionResource, 
 				Msg("agent does not support get_object; falling back to status-only get_status")
 			return a.getStatusFallback(ctx, gvr, ref, ns, name)
 		}
-		return nil, a.translateErr(err)
+		return nil, terr
 	}
 
 	// One INFO log per routed read, at the moment the agent path is chosen — the
