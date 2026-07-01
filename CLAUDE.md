@@ -14,7 +14,7 @@ plane), with tenant RKE2 clusters running as VMs inside Harvester. It is a **sou
 catalog, not a deployable environment**: no root module, no backend, no
 `terraform.tfvars`, no live state here.
 
-```
+```text
             open-cloud-datacenter @ terraform   (THIS branch — reusable modules)
             ┌──────────────────────────────────────────────────────────┐
             │  modules/{platform,tenancy,operators,cloud,addons}         │
@@ -62,7 +62,7 @@ SemVer (the `0.x` line means "pre-stable — surface may change"). See `README.m
 Five purpose-driven families — grouped by *when you need a module*, not who built
 it. You can stop at any layer and still have a useful system.
 
-```
+```text
 modules/
 ├── platform/                  Foundation — run once
 │   ├── rancher/               Bootstrap RKE2 + Rancher VM(s) on Harvester via cloud-init; LB + IP pool; storage class/network

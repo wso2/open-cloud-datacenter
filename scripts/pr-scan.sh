@@ -76,7 +76,7 @@ fi
 # ---- GitHub Actions ----
 if match '\.github/workflows/.*\.ya?ml$'; then
   if have actionlint; then sec "actionlint"; actionlint 2>&1 | head -40; else gap "actionlint" "brew install actionlint"; fi
-  have zizmor && { sec "zizmor (Actions security)"; zizmor .github/workflows 2>&1 | tail -30; }
+  if have zizmor; then sec "zizmor (Actions security)"; zizmor .github/workflows 2>&1 | tail -30; else gap "zizmor" "brew install zizmor"; fi
 fi
 
 # ---- shell / yaml / markdown ----

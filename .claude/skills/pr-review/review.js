@@ -10,9 +10,10 @@ export const meta = {
 // args.base = review base (PR base branch / merge-base). args.repo = repo path (default: repo root).
 const base = (args && args.base) || 'origin/terraform'
 const repo = (args && args.repo) || '.'
-// Working tree vs base (committed + staged + unstaged) — the gate runs before commit,
-// so uncommitted changes must be in scope.
-const diffRef = `git -C ${repo} diff ${base}`
+// Working tree vs merge-base (committed + staged + unstaged) — the gate runs before
+// commit, so uncommitted changes must be in scope; the merge-base (matching Layer 1 /
+// scan.sh) excludes upstream-only changes when the branch is behind base.
+const diffRef = `git -C ${repo} diff $(git -C ${repo} merge-base HEAD ${base})`
 
 const SEV = ['critical', 'major', 'minor', 'trivial', 'info']
 const FINDINGS = {

@@ -26,7 +26,7 @@ It auto-selects tools by changed file type (`.tf` → terraform fmt + tflint + c
 
 ### Layer 2 — LLM multi-lens adversarial review (the judgment half)
 The scanners can't reason about intent, design, or cross-module contracts. For that, run the engine via the Workflow tool:
-```
+```text
 Workflow({ scriptPath: ".claude/skills/pr-review/review.js",
            args: { base: "<base, e.g. origin/terraform>", repo: "." } })
 ```
