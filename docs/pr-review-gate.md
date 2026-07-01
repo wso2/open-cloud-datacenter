@@ -77,6 +77,8 @@ into the target repo and commit them there:
 - `scripts/pr-scan.sh`
 - `scripts/install-scan-tools.sh`
 - `.githooks/pre-push`
+- `.gitleaks.toml` (allowlists the `OCD_SKIP_PRESCAN` escape-hatch env var; without
+  it, gitleaks false-flags the `OCD_SKIP_PRESCAN=1 git push` help text as a secret)
 - the `scan`, `scan-tools`, and `hooks` targets from the `Makefile` (plus their
   `.PHONY` and `help` entries)
 

@@ -77,7 +77,10 @@ if command -v gitleaks >/dev/null 2>&1; then
   fi
   # Manual run / empty stdin / no non-delete refs: fall back to merge-base(HEAD)..HEAD.
   [ "$scanned_any" -eq 0 ] && scan_range "$(detect_mb HEAD)..HEAD"
+  # Reached only if scan_range never hit a leak (it exits 1 on a finding).
+  echo "[pre-push] scan complete, no secrets — push proceeding."
+else
+  echo "[pre-push] gitleaks not installed — secret scan SKIPPED (install: brew install gitleaks)"
 fi
 
-echo "[pre-push] scan complete, no secrets — push proceeding."
 exit 0
