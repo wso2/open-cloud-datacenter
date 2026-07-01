@@ -141,17 +141,67 @@ var (
 		RouteVerbs: []Verb{VerbGet, VerbCreate, VerbDelete},
 		AgentVerbs: []Verb{VerbGet, VerbList, VerbWatch, VerbCreate, VerbApply, VerbDelete},
 	}
+	// serviceAccountCapability onboards the ServiceAccount create that
+	// EnsureCloudProviderSA routes through the harvester seam (the cloud-provider
+	// SA bootstrap slice, F32). The GVR matches harvester.serviceAccountsGVR
+	// exactly (core group, v1, serviceaccounts).
+	serviceAccountCapability = AgentCapability{
+		GVR:        schema.GroupVersionResource{Group: "", Version: "v1", Resource: "serviceaccounts"},
+		APIVersion: "v1",
+		Kind:       "ServiceAccount",
+		Namespaced: true,
+		// dc-api routes only the create — the SA bootstrap creates the SA idempotently
+		// and never reads/lists/deletes it through the seam.
+		RouteVerbs: []Verb{VerbCreate},
+		// SA grant: create + patch, because the AgentBacked create is a server-side
+		// apply (VerbApply→patch). Mirrors the write grant on the other families
+		// (create for the direct-POST semantics, patch for the agent's SSA create).
+		AgentVerbs: []Verb{VerbCreate, VerbApply},
+	}
+	// roleBindingCapability onboards the RoleBinding create that
+	// EnsureCloudProviderSA routes through the harvester seam. The RoleBinding binds
+	// the SA to the harvesterhci.io:cloudprovider ClusterRole. The GVR matches
+	// harvester.roleBindingsGVR exactly (rbac.authorization.k8s.io, v1, rolebindings).
+	roleBindingCapability = AgentCapability{
+		GVR:        schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"},
+		APIVersion: "rbac.authorization.k8s.io/v1",
+		Kind:       "RoleBinding",
+		Namespaced: true,
+		// dc-api routes only the create — the bootstrap creates the RoleBinding
+		// idempotently and never reads/lists/deletes it through the seam.
+		RouteVerbs: []Verb{VerbCreate},
+		// SA grant: create + patch (SSA is the agent's create mechanism).
+		AgentVerbs: []Verb{VerbCreate, VerbApply},
+	}
+	// secretCapability onboards the token Secret ops that EnsureCloudProviderSA
+	// routes through the harvester seam: Create (the kubernetes.io/service-account-
+	// token Secret) and Get (the token-population poll reads .data.token off the
+	// Secret). The GVR matches harvester.secretsGVR exactly (core group, v1, secrets).
+	secretCapability = AgentCapability{
+		GVR:        schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"},
+		APIVersion: "v1",
+		Kind:       "Secret",
+		Namespaced: true,
+		// dc-api routes Get (read the populated SA token) and Create (the token
+		// Secret). No list/delete through the seam.
+		RouteVerbs: []Verb{VerbGet, VerbCreate},
+		// SA grant: get to read the populated token, create + patch for the token
+		// Secret (create for the direct POST, patch because the agent create is SSA).
+		AgentVerbs: []Verb{VerbGet, VerbCreate, VerbApply},
+	}
 )
 
 // AgentCapabilities is THE registry: one declaration per resource family.
 //
 // Onboarded (RouteVerbs + AgentVerbs set): vmCapability, the three network
 // families nadCapability/vpcCapability/subnetCapability (the kubeovn CRD CRUD
-// slice), and vmImageCapability (read/list path + image create). vmiCapability stays a GVK-only
-// pre-seeded entry that keeps the wire mapper a superset without granting any
-// routing or RBAC. New families are added here (one struct each) in later
-// phases — never by editing the mapper, the allow-set switch, or the RBAC YAML
-// by hand.
+// slice), vmImageCapability (read/list path + image create), and the three
+// cloud-provider SA bootstrap families serviceAccountCapability/
+// roleBindingCapability/secretCapability (F32 — EnsureCloudProviderSA routed
+// through the harvester seam). vmiCapability stays a GVK-only pre-seeded entry
+// that keeps the wire mapper a superset without granting any routing or RBAC.
+// New families are added here (one struct each) in later phases — never by
+// editing the mapper, the allow-set switch, or the RBAC YAML by hand.
 var AgentCapabilities = []AgentCapability{
 	vmCapability,
 	vmiCapability,
@@ -159,6 +209,9 @@ var AgentCapabilities = []AgentCapability{
 	nadCapability,
 	vpcCapability,
 	subnetCapability,
+	serviceAccountCapability,
+	roleBindingCapability,
+	secretCapability,
 }
 
 // Registry returns the declared capabilities.
@@ -193,10 +246,12 @@ func buildDerived() {
 
 // UnionRouteVerbs returns the union of RouteVerbs across all capabilities — the
 // set of seam Verbs that MAY route to the agent for ANY family. With the VM,
-// network, and image families onboarded this equals
+// network, image, and cloud-provider-SA families onboarded this equals
 // {VerbGet, VerbList, VerbCreate, VerbDelete} (List added when ListVMs/Images/
 // Networks were routed through the agent; the image family also routes VerbCreate
 // for CreateImage, but VM/NAD already contribute it so the union is unchanged).
+// The SA/RoleBinding/Secret families (F32) route only Get/Create, both already
+// in the union, so the union is unchanged by them too.
 // agentDecision consults this for
 // membership, then gates reads vs writes by the per-family env toggles
 // (VerbList falls on the read side — see IsReadVerb).

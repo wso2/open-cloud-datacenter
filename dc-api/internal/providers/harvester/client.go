@@ -100,43 +100,45 @@ type Client struct {
 	// unless WithRoutedAccessor injects a routed accessor. The VM-object ops route
 	// through it: GetVM's primary VirtualMachine read (read slice), CreateVM's
 	// create + DeleteVM's delete (write slice 1), the collection reads
-	// ListVMs/ListImages/ListNetworks (list slice — M-D), and the image slice —
-	// CreateImage's create and resolveImage's create-time storageClass lookup. The
-	// cloud-provider SA bootstrap and the VMI read inside GetVM still call
-	// c.dynamic directly. The seam never leaks an agent concept past the
-	// ComputeProvider interface.
+	// ListVMs/ListImages/ListNetworks (list slice — M-D), the image slice —
+	// CreateImage's create and resolveImage's create-time storageClass lookup — and
+	// the cloud-provider SA bootstrap (EnsureCloudProviderSA — the SA/RoleBinding/
+	// Secret creates + the token-population Secret Get, F32). Only the VMI read
+	// inside GetVM still calls c.dynamic directly. The seam never leaks an agent
+	// concept past the ComputeProvider interface.
 	access clusteraccess.Accessor
 
 	// remoteRegion/remoteZone are non-empty ONLY for a credential-free REMOTE
 	// client built by NewRemoteClient (multi-zone routing). For such a client
 	// c.dynamic is nil: the seam ops (CreateVM/GetVM/DeleteVM via c.access, the
-	// list reads via c.access.List, and the image slice — CreateImage's create and
-	// resolveImage's lookup — via c.access) route to that zone's agent. The two
-	// remaining direct paths behave differently on a remote client:
+	// list reads via c.access.List, the image slice — CreateImage's create and
+	// resolveImage's lookup — via c.access, and the cloud-provider SA bootstrap
+	// EnsureCloudProviderSA — the three creates + the token-population Get via
+	// c.access) route to that zone's agent. The two remaining direct paths behave
+	// differently on a remote client:
 	//   - GetVM's VMI IP enrichment read DEGRADES GRACEFULLY: it is SKIPPED (the
 	//     `c.dynamic == nil` guard returns the agent-supplied VM status WITHOUT IP
 	//     enrichment — no error), so a remote VM's status is still reported.
-	//   - the genuinely local-only ops — the cloud-provider SA bootstrap and the
-	//     full VM create orchestration — have no direct path and return a
-	//     clear local-only error (localOnlyErr) naming the zone instead of panicking
-	//     on a nil dynamic client.
+	//   - the one genuinely local-only op — the full VM create orchestration — has
+	//     no direct path and returns a clear local-only error (localOnlyErr) naming
+	//     the zone instead of panicking on a nil dynamic client.
 	// Empty for the LOCAL client → today's behaviour.
 	remoteRegion, remoteZone string
 }
 
-// localOnlyErr is returned by a REMOTE client's direct-only methods: VM create
-// (the full create orchestration is not yet routed — see CreateVM's note) and the
-// cloud-provider SA bootstrap. These touch c.dynamic, which a remote client does
-// not have. Failing here — BEFORE a PENDING row or a provisioner call — is the
-// documented local-only constraint for the remote-zone build. NOTE: image
-// resolution/import (resolveImage, CreateImage) and the collection reads are NO
-// LONGER local-only — they route through the cluster-access seam (c.access), so a
-// remote client serves them via the agent. resolveImage's storageClass lookup
-// routes too; only the full VM create orchestration and the SA bootstrap remain
-// behind this explicit error.
+// localOnlyErr is returned by a REMOTE client's one remaining direct-only method:
+// the full VM create orchestration (CreateVM — manifest build, MAC pinning, DNS
+// injection — is not yet routed for a remote zone; see CreateVM's note). It
+// touches c.dynamic, which a remote client does not have. Failing here — BEFORE a
+// PENDING row or a provisioner call — is the documented local-only constraint for
+// the remote-zone build. NOTE: image resolution/import (resolveImage,
+// CreateImage), the collection reads, AND the cloud-provider SA bootstrap
+// (EnsureCloudProviderSA) are NO LONGER local-only — they route through the
+// cluster-access seam (c.access), so a remote client serves them via the agent.
+// Only the full VM create orchestration remains behind this explicit error.
 func (c *Client) localOnlyErr(op string) error {
 	return fmt.Errorf(
-		"%s is not supported for remote zone %s/%s yet: dc-api holds no direct Harvester credentials there (the full VM create orchestration and the cloud-provider SA bootstrap are local-only for now)",
+		"%s is not supported for remote zone %s/%s yet: dc-api holds no direct Harvester credentials there (the full VM create orchestration is local-only for now)",
 		op, c.remoteRegion, c.remoteZone)
 }
 
@@ -494,14 +496,22 @@ func (c *Client) HarvesterCACert() []byte { return c.restConfig.CAData }
 // the Secret's .data.token field). Polls up to 30 s for the token controller
 // to populate the Secret after creation.
 func (c *Client) EnsureCloudProviderSA(ctx context.Context, tenantNamespace string) ([]byte, error) {
-	if c.dynamic == nil {
-		return nil, c.localOnlyErr("cloud-provider ServiceAccount bootstrap")
-	}
 	saName := "harvester-cloud-provider-" + tenantNamespace
 
 	commonLabels := map[string]interface{}{
 		"dc-api/managed": "true",
 	}
+
+	// The three creates and the token-population Get all go through the
+	// cluster-access seam (c.access), so a REMOTE (agent-only) client serves them
+	// via the agent. With the toggle OFF (default / local client) each is the exact
+	// dynamic-client call this method ran before — byte-identical POST/GET. With the
+	// toggle ON and a live agent for the zone, the creates route to the agent's
+	// server-side apply and the Get to the agent's full-object read. SSA is
+	// idempotent (apply-on-existing is a no-op update, not an already-exists error),
+	// so the routed create won't hit IsAlreadyExists; the guard is kept for the
+	// local POST path, where re-running the bootstrap must treat an existing object
+	// as success.
 
 	// ── Step 1: ServiceAccount ────────────────────────────────────────────────
 	saObj := &unstructured.Unstructured{
@@ -515,7 +525,7 @@ func (c *Client) EnsureCloudProviderSA(ctx context.Context, tenantNamespace stri
 			},
 		},
 	}
-	_, err := c.dynamic.Resource(serviceAccountsGVR).Namespace(tenantNamespace).Create(ctx, saObj, metav1.CreateOptions{})
+	_, err := c.access.Create(ctx, serviceAccountsGVR, tenantNamespace, saObj, metav1.CreateOptions{})
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
 		return nil, fmt.Errorf("create cloud-provider ServiceAccount in %s: %w", tenantNamespace, err)
 	}
@@ -544,7 +554,7 @@ func (c *Client) EnsureCloudProviderSA(ctx context.Context, tenantNamespace stri
 			},
 		},
 	}
-	_, err = c.dynamic.Resource(roleBindingsGVR).Namespace(tenantNamespace).Create(ctx, rbObj, metav1.CreateOptions{})
+	_, err = c.access.Create(ctx, roleBindingsGVR, tenantNamespace, rbObj, metav1.CreateOptions{})
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
 		return nil, fmt.Errorf("create cloud-provider RoleBinding in %s: %w", tenantNamespace, err)
 	}
@@ -566,7 +576,7 @@ func (c *Client) EnsureCloudProviderSA(ctx context.Context, tenantNamespace stri
 			"type": "kubernetes.io/service-account-token",
 		},
 	}
-	_, err = c.dynamic.Resource(secretsGVR).Namespace(tenantNamespace).Create(ctx, secretObj, metav1.CreateOptions{})
+	_, err = c.access.Create(ctx, secretsGVR, tenantNamespace, secretObj, metav1.CreateOptions{})
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
 		return nil, fmt.Errorf("create cloud-provider token Secret in %s: %w", tenantNamespace, err)
 	}
@@ -574,10 +584,12 @@ func (c *Client) EnsureCloudProviderSA(ctx context.Context, tenantNamespace stri
 	// ── Step 4: poll for token population ────────────────────────────────────
 	// The Kubernetes token controller populates .data.token asynchronously
 	// after seeing the kubernetes.io/service-account-token Secret.
-	// Poll up to 30 s in 2 s intervals.
+	// Poll up to 30 s in 2 s intervals. The read routes through the seam
+	// (c.access.Get) — the agent's full-object Get returns the Secret with its
+	// populated .data.token.
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		secret, err := c.dynamic.Resource(secretsGVR).Namespace(tenantNamespace).Get(ctx, secretName, metav1.GetOptions{})
+		secret, err := c.access.Get(ctx, secretsGVR, tenantNamespace, secretName, metav1.GetOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("get cloud-provider token Secret %s: %w", secretName, err)
 		}
