@@ -116,8 +116,8 @@ type Client struct {
 	//   - GetVM's VMI IP enrichment read DEGRADES GRACEFULLY: it is SKIPPED (the
 	//     `c.dynamic == nil` guard returns the agent-supplied VM status WITHOUT IP
 	//     enrichment — no error), so a remote VM's status is still reported.
-	//   - the genuinely local-only ops — the cloud-provider SA bootstrap and VM
-	//     create's local storageClass resolution — have no direct path and return a
+	//   - the genuinely local-only ops — the cloud-provider SA bootstrap and the
+	//     full VM create orchestration — have no direct path and return a
 	//     clear local-only error (localOnlyErr) naming the zone instead of panicking
 	//     on a nil dynamic client.
 	// Empty for the LOCAL client → today's behaviour.
@@ -125,17 +125,18 @@ type Client struct {
 }
 
 // localOnlyErr is returned by a REMOTE client's direct-only methods: VM create
-// (which resolves the image storageClass — see CreateVM's note) and the
+// (the full create orchestration is not yet routed — see CreateVM's note) and the
 // cloud-provider SA bootstrap. These touch c.dynamic, which a remote client does
 // not have. Failing here — BEFORE a PENDING row or a provisioner call — is the
 // documented local-only constraint for the remote-zone build. NOTE: image
 // resolution/import (resolveImage, CreateImage) and the collection reads are NO
 // LONGER local-only — they route through the cluster-access seam (c.access), so a
-// remote client serves them via the agent; only VM create's storageClass lookup
-// and the SA bootstrap remain behind this explicit error.
+// remote client serves them via the agent. resolveImage's storageClass lookup
+// routes too; only the full VM create orchestration and the SA bootstrap remain
+// behind this explicit error.
 func (c *Client) localOnlyErr(op string) error {
 	return fmt.Errorf(
-		"%s is not supported for remote zone %s/%s yet: dc-api holds no direct Harvester credentials there (VM create's storageClass resolution and the cloud-provider SA bootstrap are local-only for now)",
+		"%s is not supported for remote zone %s/%s yet: dc-api holds no direct Harvester credentials there (the full VM create orchestration and the cloud-provider SA bootstrap are local-only for now)",
 		op, c.remoteRegion, c.remoteZone)
 }
 
