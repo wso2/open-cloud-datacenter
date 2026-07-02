@@ -53,7 +53,10 @@ failure mode.
    supported customization that adheres to their public "Guidelines, Limitations,
    and Support Scope for Installing Custom Applications and Controllers on
    Harvester" (KB published 2026-06-18, support.scc.suse.com). Our usage falls
-   within the Standard Extension Model with documented deviations (cluster-scoped
-   CRDs and kube-system placement) that are upstream KubeOVN and Kubernetes
-   design, not our choices. See `docs/suse-support-scope.md` for the compliance
-   matrix and forward risks (native VPC GA may require a driver swap).
+   within the Standard Extension Model with two by-design deviations that are
+   upstream KubeOVN and Kubernetes design, not our choices — cluster-scoped
+   `kubeovn.io` custom resources, and KubeOVN's own placement of `vpc-nat-gw`
+   workloads in `kube-system` — plus one gap that is ours to close, tracked as
+   a remediation: moving the per-VPC CoreDNS Deployment out of `kube-system`.
+   See `docs/suse-support-scope.md` for the compliance matrix and forward risks
+   (native VPC GA may require a driver swap).
