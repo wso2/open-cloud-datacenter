@@ -53,6 +53,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { notifySessionExpiredOn401 } from '../api/client';
 import { useApi } from '../api/useApi';
 import { useConfirmDialog } from '../components/useConfirmDialog';
 import { EmptyState, ErrorState, LoadingState } from '../components/list/PageStates';
@@ -307,6 +308,9 @@ function RolePill({
  *  session regardless. Tenant/project keep using the typed client below. */
 async function scopedJson(path: string, init?: RequestInit): Promise<unknown> {
   const res = await fetch(path, { credentials: 'include', ...init });
+  // Raw fetch bypasses the typed client's middleware — apply the same
+  // session-expiry check so a 401 here also flips the app to signed-out.
+  notifySessionExpiredOn401(path, res.status);
   if (res.status === 204) return null;
   const text = await res.text();
   if (!res.ok) {
