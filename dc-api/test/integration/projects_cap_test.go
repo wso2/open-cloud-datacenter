@@ -159,8 +159,10 @@ func TestProjectCap_PatchBelowInUseRejected(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	// Tenant cap: 80 cpu. p1 at 40 cpu. Insert a fake ACTIVE VM consuming 20
-	// cpu. Patch p1 to cpu_cores=10 → below in-use (10 < 20) → 400
+	// Tenant cap: 80 cpu. p1 at 40 cpu. Insert a fake ACTIVE xlarge VM
+	// (16 cpu / 32 GB per models.Sizes) and a fake ACTIVE cluster with two
+	// node pools (system small×1 = 2 cpu, worker medium×2 = 8 cpu) → 26 cpu
+	// in use. Patch p1 to cpu_cores=10 → below in-use (10 < 26) → 400
 	// quota_below_usage.
 	tenantID, client := capTestTenant(t, randomName("inuse"), 80, 256, 2000)
 
@@ -179,41 +181,65 @@ func TestProjectCap_PatchBelowInUseRejected(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, uuid.Nil, projectUUID)
 
-	// Insert a fake VIRTUAL_MACHINE row with cpu=20 and memory_gb=32.
-	// sumProjectResourceUsageTx reads metadata->>'cpu' and metadata->>'memory_gb'.
-	vmID := uuid.New()
-	metadata := []byte(`{"cpu": 20, "memory_gb": 32}`)
-	_, err = env.DB.Pool().Exec(ctx,
-		`INSERT INTO resources
-			(id, tenant_id, tenant_uuid, project_id, project_uuid, owner_id, name, type, status, provider_type, metadata)
-		 VALUES ($1, $2, $3, 'p1', $4, 'test', 'fake-vm-cap', 'VIRTUAL_MACHINE', 'ACTIVE', 'harvester', $5)`,
-		vmID, tenantID, tenantUUID, projectUUID, metadata,
-	)
-	require.NoError(t, err, "insert fake VM resource for in-use check")
+	// Create a fake ACTIVE xlarge VM (16 cpu / 32 GB per models.Sizes) through
+	// the production repository path. Repository.Create is what persists
+	// resources.size — which the usage sum resolves through models.Sizes — so
+	// going through it (instead of a raw INSERT) makes this test fail if the
+	// create path ever stops writing the column the guard depends on.
+	vm, err := env.DB.Create(ctx, &models.Resource{
+		TenantID: tenantID, TenantUUID: tenantUUID,
+		ProjectID: "p1", ProjectUUID: projectUUID,
+		OwnerID: "test", Name: "fake-vm-cap",
+		Type: models.ResourceTypeVM, Size: "xlarge",
+		Status: models.StatusActive, ProviderType: "harvester",
+	})
+	require.NoError(t, err, "create fake VM resource for in-use check")
 
-	// PATCH p1 to cpu_cores=10 → below the 20 cpu in use → quota_below_usage.
+	// Create a fake CLUSTER the same way; its usage is derived from
+	// cluster_node_pools (size × count, all roles), not from the resource row.
+	cluster, err := env.DB.Create(ctx, &models.Resource{
+		TenantID: tenantID, TenantUUID: tenantUUID,
+		ProjectID: "p1", ProjectUUID: projectUUID,
+		OwnerID: "test", Name: "fake-cluster-cap",
+		Type:   models.ResourceTypeCluster,
+		Status: models.StatusActive, ProviderType: "rancher",
+	})
+	require.NoError(t, err, "create fake cluster resource for in-use check")
+	require.NoError(t, env.DB.CreateNodePool(ctx, &models.NodePool{
+		ClusterID: cluster.ID, Name: "system", Role: models.NodePoolRoleSystem,
+		Size: "small", Count: 1, Status: models.NodePoolStatusReady,
+	}), "insert fake system pool")
+	require.NoError(t, env.DB.CreateNodePool(ctx, &models.NodePool{
+		ClusterID: cluster.ID, Name: "workers", Role: models.NodePoolRoleWorker,
+		Size: "medium", Count: 2, Status: models.NodePoolStatusReady,
+	}), "insert fake worker pool")
+
+	// PATCH p1 to cpu_cores=10 → below the 26 cpu in use → quota_below_usage.
 	newCPU := 10
 	_, body, patchStatus, err := client.PatchProject(ctx, "p1", PatchProjectRequest{
 		CPUCores: &newCPU,
 	})
 	require.NoError(t, err)
 	require.Equal(t, http.StatusBadRequest, patchStatus,
-		"PATCH to 10 cpu must fail with 400 (20 cpu in use): %s", body)
+		"PATCH to 10 cpu must fail with 400 (26 cpu in use): %s", body)
 
 	// Parse the error body to check the error code and in_use field.
 	var errBody struct {
-		Error  string          `json:"error"`
-		InUse  models.TenantCap `json:"in_use"`
+		Error string           `json:"error"`
+		InUse models.TenantCap `json:"in_use"`
 	}
 	require.NoError(t, json.Unmarshal(body, &errBody), "parse error body: %s", body)
 	require.Equal(t, "quota_below_usage", errBody.Error,
 		"error body must say quota_below_usage: %s", body)
-	require.Equal(t, 20, errBody.InUse.CPUCores,
-		"in_use.cpu_cores must be 20 (the fake VM's allocation): %s", body)
+	require.Equal(t, 26, errBody.InUse.CPUCores,
+		"in_use.cpu_cores must be 26 (xlarge VM 16 + small×1 pool 2 + medium×2 pool 8): %s", body)
+	require.Equal(t, 52, errBody.InUse.MemoryGB,
+		"in_use.memory_gb must be 52 (xlarge VM 32 + small×1 pool 4 + medium×2 pool 16): %s", body)
 
 	t.Cleanup(func() {
 		ctx := context.Background()
-		_, _ = env.DB.Pool().Exec(ctx, `DELETE FROM resources WHERE id = $1`, vmID)
+		// Node pools cascade with the cluster row (ON DELETE CASCADE).
+		_, _ = env.DB.Pool().Exec(ctx, `DELETE FROM resources WHERE id IN ($1, $2)`, vm.ID, cluster.ID)
 		_, _ = env.DB.Pool().Exec(ctx, `DELETE FROM projects WHERE tenant_id = $1`, tenantID)
 		_, _ = env.DB.Pool().Exec(ctx, `DELETE FROM role_assignments WHERE scope_id = $1 AND scope_type = 'tenant'`, tenantID)
 		_, _ = env.DB.Pool().Exec(ctx, `DELETE FROM tenants WHERE id = $1`, tenantID)
@@ -308,4 +334,3 @@ func TestProjectCap_GetTenantCapUsage(t *testing.T) {
 		_, _ = env.DB.Pool().Exec(ctx, `DELETE FROM tenants WHERE id = $1`, tenantID)
 	})
 }
-

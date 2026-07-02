@@ -5,7 +5,7 @@ package integration
 // nop_env_test.go — cluster-free ("nop") mode for the integration suite.
 //
 // The pure-authz tests (RBAC role matrix, members, service accounts, tenants,
-// option-D, phase-6a) assert only on HTTP status codes — the authorization
+// phase-6a slug recycle) assert only on HTTP status codes — the authorization
 // decision happens in the handler before any provider call — so they don't need
 // a real Harvester/KubeOVN cluster at all. Opt in with DCAPI_TEST_NOP=1 and the
 // shared env + sub-envs are built with all-nop backends and no kubeconfig, so
