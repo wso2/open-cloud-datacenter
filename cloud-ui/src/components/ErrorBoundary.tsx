@@ -1,7 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { Button, Text, Title2, makeStyles, tokens } from '@fluentui/react-components';
 import { ErrorCircle48Regular } from '@fluentui/react-icons';
-import { useRouteError } from 'react-router-dom';
+import { isRouteErrorResponse, useRouteError } from 'react-router-dom';
 
 /**
  * Render-error fallbacks, in two layers:
@@ -98,9 +98,15 @@ function toError(raw: unknown): Error {
 /**
  * Route-level error element: react-router catches the render error and
  * exposes it via useRouteError; we render the same themed fallback.
+ * Thrown Responses (loader/action shortcuts) stringify uselessly, so
+ * surface their status line instead.
  */
 export function RouteErrorFallback() {
-  return <ErrorFallback error={toError(useRouteError())} />;
+  const raw = useRouteError();
+  const error = isRouteErrorResponse(raw)
+    ? new Error(`${raw.status} ${raw.statusText}`.trim())
+    : toError(raw);
+  return <ErrorFallback error={error} />;
 }
 
 interface ErrorBoundaryProps {
