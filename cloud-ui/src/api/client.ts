@@ -35,19 +35,27 @@ export function registerSessionExpiredHandler(handler: SessionExpiredHandler | n
   sessionExpiryNotified = false;
 }
 
+/**
+ * Shared 401 check for anything that talks to the API outside the typed
+ * client (e.g. the dynamic resource-scope calls in MembersPage). Same
+ * rules as the middleware: session-scoped /v1/* paths only, /v1/auth/*
+ * excluded, fires the registered handler once.
+ */
+export function notifySessionExpiredOn401(pathname: string, status: number) {
+  if (status !== 401) return;
+  // Only session-scoped API calls count. /v1/auth/* is excluded: the
+  // /v1/auth/me probe legitimately 401s for signed-out visitors, and
+  // login/logout/callback must never re-enter the handler (loop risk).
+  if (!pathname.startsWith('/v1/') || pathname.startsWith('/v1/auth/')) return;
+
+  if (sessionExpiryNotified) return;
+  sessionExpiryNotified = true;
+  sessionExpiredHandler?.();
+}
+
 const sessionExpiryMiddleware: Middleware = {
   async onResponse({ request, response }) {
-    if (response.status !== 401) return;
-
-    // Only session-scoped API calls count. /v1/auth/* is excluded: the
-    // /v1/auth/me probe legitimately 401s for signed-out visitors, and
-    // login/logout/callback must never re-enter the handler (loop risk).
-    const { pathname } = new URL(request.url);
-    if (!pathname.startsWith('/v1/') || pathname.startsWith('/v1/auth/')) return;
-
-    if (sessionExpiryNotified) return;
-    sessionExpiryNotified = true;
-    sessionExpiredHandler?.();
+    notifySessionExpiredOn401(new URL(request.url).pathname, response.status);
   },
 };
 

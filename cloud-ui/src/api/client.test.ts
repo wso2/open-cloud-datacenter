@@ -72,3 +72,50 @@ describe('session-expiry middleware', () => {
     expect(onExpired).not.toHaveBeenCalled();
   });
 });
+
+describe('notifySessionExpiredOn401 (raw-fetch callers)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('fires once for repeated 401s on session-scoped paths', async () => {
+    // MembersPage's scopedJson bypasses the typed client, so it calls this
+    // helper directly with the relative request path.
+    const { notifySessionExpiredOn401, registerSessionExpiredHandler } = await freshClientModule();
+    const onExpired = vi.fn();
+    registerSessionExpiredHandler(onExpired);
+
+    notifySessionExpiredOn401('/v1/tenants/t/projects/p/virtual-machines/vm/role-assignments', 401);
+    notifySessionExpiredOn401('/v1/tenants/t/projects/p/virtual-machines/vm/role-assignments', 401);
+
+    expect(onExpired).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores non-401 statuses, /v1/auth/* and non-API paths', async () => {
+    const { notifySessionExpiredOn401, registerSessionExpiredHandler } = await freshClientModule();
+    const onExpired = vi.fn();
+    registerSessionExpiredHandler(onExpired);
+
+    notifySessionExpiredOn401('/v1/tenants', 403);
+    notifySessionExpiredOn401('/v1/auth/me', 401);
+    notifySessionExpiredOn401('/healthz', 401);
+
+    expect(onExpired).not.toHaveBeenCalled();
+  });
+
+  it('shares the once-latch with the typed-client middleware', async () => {
+    // A 401 seen by the middleware and one seen by a raw fetch are the same
+    // session expiry — the auth layer must still hear about it exactly once.
+    const { makeApiClient, notifySessionExpiredOn401, registerSessionExpiredHandler } =
+      await freshClientModule();
+    const onExpired = vi.fn();
+    registerSessionExpiredHandler(onExpired);
+    stub401Fetch();
+
+    await makeApiClient().GET('/v1/tenants');
+    notifySessionExpiredOn401('/v1/tenants/t/role-assignments', 401);
+
+    expect(onExpired).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+});
