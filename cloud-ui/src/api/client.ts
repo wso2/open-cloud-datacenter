@@ -11,6 +11,47 @@ const baseUrl =
   (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? DEFAULT_BASE_URL;
 
 /**
+ * Session-expiry notification between the API client and the auth layer.
+ *
+ * client.ts must stay React-free, so instead of touching AuthContext the
+ * auth provider registers a callback here on mount. When any /v1/* call
+ * (except /v1/auth/*) comes back 401 mid-session, the handler fires and
+ * AuthProvider flips to signed-out — RequireAuth then redirects to /login.
+ *
+ * The latch is module-level (shared by every client instance) and fires
+ * once: when a session expires, every in-flight query 401s at the same
+ * time and the handler must not run N times. It never re-arms itself —
+ * re-login is a full-page navigation through /v1/auth/login, which resets
+ * module state anyway. Registering a handler resets the latch (tests, or
+ * a remounted AuthProvider).
+ */
+type SessionExpiredHandler = () => void;
+
+let sessionExpiredHandler: SessionExpiredHandler | null = null;
+let sessionExpiryNotified = false;
+
+export function registerSessionExpiredHandler(handler: SessionExpiredHandler | null) {
+  sessionExpiredHandler = handler;
+  sessionExpiryNotified = false;
+}
+
+const sessionExpiryMiddleware: Middleware = {
+  async onResponse({ request, response }) {
+    if (response.status !== 401) return;
+
+    // Only session-scoped API calls count. /v1/auth/* is excluded: the
+    // /v1/auth/me probe legitimately 401s for signed-out visitors, and
+    // login/logout/callback must never re-enter the handler (loop risk).
+    const { pathname } = new URL(request.url);
+    if (!pathname.startsWith('/v1/') || pathname.startsWith('/v1/auth/')) return;
+
+    if (sessionExpiryNotified) return;
+    sessionExpiryNotified = true;
+    sessionExpiredHandler?.();
+  },
+};
+
+/**
  * Typed DC-API client.
  *
  * Authentication uses the dc-api BFF cookie flow: every request carries
@@ -32,6 +73,7 @@ export function makeApiClient() {
     },
   };
   client.use(credentialsMiddleware);
+  client.use(sessionExpiryMiddleware);
 
   return client;
 }
