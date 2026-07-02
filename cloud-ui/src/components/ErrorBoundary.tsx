@@ -1,15 +1,23 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { Button, Text, Title2, makeStyles, tokens } from '@fluentui/react-components';
 import { ErrorCircle48Regular } from '@fluentui/react-icons';
+import { useRouteError } from 'react-router-dom';
 
 /**
- * Last-resort catch for render errors. Without it a single throwing
- * component white-screens the whole console. Mounted once in ThemedApp,
- * inside FluentProvider so the fallback picks up the active theme.
+ * Render-error fallbacks, in two layers:
  *
- * Error boundaries must be class components (React exposes
- * getDerivedStateFromError only on classes), so the class stays minimal
- * and delegates all presentation to a themed function component.
+ *  - RouteErrorFallback is the one that actually fires for page crashes.
+ *    Data routers (createBrowserRouter) install their own error boundary
+ *    at every route level and NEVER let render errors propagate out of
+ *    RouterProvider — without an errorElement of our own, users get
+ *    react-router's unthemed "Unexpected Application Error!" screen. The
+ *    router mounts this on a pathless root route so every route inherits it.
+ *
+ *  - ErrorBoundary is the last resort OUTSIDE the router (provider
+ *    construction, theming) where react-router can't help. Error boundaries
+ *    must be class components (React exposes getDerivedStateFromError only
+ *    on classes), so the class stays minimal and delegates all presentation
+ *    to the same themed function component.
  */
 
 const useStyles = makeStyles({
@@ -80,6 +88,16 @@ function ErrorFallback({ error }: { error: Error }) {
       </div>
     </div>
   );
+}
+
+/**
+ * Route-level error element: react-router catches the render error and
+ * exposes it via useRouteError; we render the same themed fallback.
+ */
+export function RouteErrorFallback() {
+  const raw = useRouteError();
+  const error = raw instanceof Error ? raw : new Error(String(raw));
+  return <ErrorFallback error={error} />;
 }
 
 interface ErrorBoundaryProps {

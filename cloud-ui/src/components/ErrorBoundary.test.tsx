@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { FluentProvider } from '@fluentui/react-components';
-import { ErrorBoundary } from './ErrorBoundary';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
+import { ErrorBoundary, RouteErrorFallback } from './ErrorBoundary';
 import { wso2LightTheme } from '../theme/themes';
 
 /** Renders fine until told to throw — the classic boundary probe. */
@@ -44,5 +45,51 @@ describe('ErrorBoundary', () => {
     expect(screen.getByText('Something went wrong')).toBeInTheDocument();
     expect(screen.getByText('kaboom from render')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+  });
+});
+
+describe('RouteErrorFallback', () => {
+  let consoleError: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleError.mockRestore();
+  });
+
+  it('shows the themed fallback when a route render throws', () => {
+    // Mirrors buildRouter: a pathless root route carrying the errorElement,
+    // so route crashes hit our fallback instead of react-router's default
+    // "Unexpected Application Error!" screen.
+    const router = createMemoryRouter([
+      {
+        errorElement: <RouteErrorFallback />,
+        children: [{ path: '/', element: <Boom /> }],
+      },
+    ]);
+    renderWithTheme(<RouterProvider router={router} />);
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+    expect(screen.getByText('kaboom from render')).toBeInTheDocument();
+  });
+
+  it('wraps non-Error route errors so the message still renders', async () => {
+    const router = createMemoryRouter([
+      {
+        errorElement: <RouteErrorFallback />,
+        children: [
+          {
+            path: '/',
+            loader: () => {
+              throw 'plain string failure';
+            },
+            element: <div>never reached</div>,
+          },
+        ],
+      },
+    ]);
+    renderWithTheme(<RouterProvider router={router} />);
+    expect(await screen.findByText('plain string failure')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toBeInTheDocument();
   });
 });

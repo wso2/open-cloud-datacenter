@@ -1,4 +1,5 @@
 import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-dom';
+import { RouteErrorFallback } from './components/ErrorBoundary';
 import RequireAuth from './auth/RequireAuth';
 import RequireTenants from './auth/RequireTenants';
 import RequireProject from './auth/RequireProject';
@@ -108,5 +109,9 @@ export function buildRouter({ isDark, onToggleDark }: BuildRouterArgs) {
     { path: '*', element: <Navigate to="/login" replace /> },
   ];
 
-  return createBrowserRouter(routes);
+  // Wrap everything in a pathless root route whose only job is the
+  // errorElement: data routers swallow render errors at the nearest route
+  // boundary and would otherwise show react-router's unthemed default error
+  // screen — this makes every route inherit the themed fallback instead.
+  return createBrowserRouter([{ errorElement: <RouteErrorFallback />, children: routes }]);
 }
