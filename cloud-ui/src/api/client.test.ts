@@ -14,11 +14,12 @@ async function freshClientModule() {
 }
 
 function stub401Fetch() {
-  const fetchMock = vi.fn(async () =>
-    new Response(JSON.stringify({ error: 'unauthenticated' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    })
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ error: 'unauthenticated' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      })
   );
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
@@ -76,6 +77,7 @@ describe('session-expiry middleware', () => {
 describe('notifySessionExpiredOn401 (raw-fetch callers)', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it('fires once for repeated 401s on session-scoped paths', async () => {
@@ -116,6 +118,33 @@ describe('notifySessionExpiredOn401 (raw-fetch callers)', () => {
     notifySessionExpiredOn401('/v1/tenants/t/role-assignments', 401);
 
     expect(onExpired).toHaveBeenCalledTimes(1);
-    vi.unstubAllGlobals();
+  });
+
+  it('re-arms the once-latch on re-registration', async () => {
+    // AuthProvider re-registers on remount; the latch must reset so the
+    // next session expiry notifies the fresh handler.
+    const { notifySessionExpiredOn401, registerSessionExpiredHandler } = await freshClientModule();
+    const first = vi.fn();
+    registerSessionExpiredHandler(first);
+    notifySessionExpiredOn401('/v1/tenants', 401);
+
+    const second = vi.fn();
+    registerSessionExpiredHandler(second);
+    notifySessionExpiredOn401('/v1/tenants', 401);
+
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it('is a no-op after the handler is detached with null', async () => {
+    // AuthProvider's unmount cleanup passes null — a late 401 must neither
+    // throw nor reach the stale handler.
+    const { notifySessionExpiredOn401, registerSessionExpiredHandler } = await freshClientModule();
+    const onExpired = vi.fn();
+    registerSessionExpiredHandler(onExpired);
+    registerSessionExpiredHandler(null);
+
+    expect(() => notifySessionExpiredOn401('/v1/tenants', 401)).not.toThrow();
+    expect(onExpired).not.toHaveBeenCalled();
   });
 });

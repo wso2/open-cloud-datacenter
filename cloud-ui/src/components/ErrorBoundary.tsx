@@ -13,11 +13,11 @@ import { useRouteError } from 'react-router-dom';
  *    react-router's unthemed "Unexpected Application Error!" screen. The
  *    router mounts this on a pathless root route so every route inherits it.
  *
- *  - ErrorBoundary is the last resort OUTSIDE the router (provider
- *    construction, theming) where react-router can't help. Error boundaries
- *    must be class components (React exposes getDerivedStateFromError only
- *    on classes), so the class stays minimal and delegates all presentation
- *    to the same themed function component.
+ *  - ErrorBoundary is the last resort for render errors react-router can't
+ *    see: the provider chain it wraps in ThemedApp (Auth/Api/ConfirmDialog).
+ *    Error boundaries must be class components (React exposes
+ *    getDerivedStateFromError only on classes), so the class stays minimal
+ *    and delegates all presentation to the same themed function component.
  */
 
 const useStyles = makeStyles({
@@ -75,8 +75,8 @@ function ErrorFallback({ error }: { error: Error }) {
         <ErrorCircle48Regular className={styles.icon} />
         <Title2>Something went wrong</Title2>
         <Text>
-          The console hit an unexpected error. Reload to continue — if it keeps happening, share
-          the details below with the platform team.
+          The console hit an unexpected error. Reload to continue — if it keeps happening, share the
+          details below with the platform team.
         </Text>
         <details className={styles.details}>
           <summary className={styles.summary}>Error details</summary>
@@ -90,14 +90,17 @@ function ErrorFallback({ error }: { error: Error }) {
   );
 }
 
+/** Anything can be thrown; normalize so the fallback always has a message. */
+function toError(raw: unknown): Error {
+  return raw instanceof Error ? raw : new Error(String(raw));
+}
+
 /**
  * Route-level error element: react-router catches the render error and
  * exposes it via useRouteError; we render the same themed fallback.
  */
 export function RouteErrorFallback() {
-  const raw = useRouteError();
-  const error = raw instanceof Error ? raw : new Error(String(raw));
-  return <ErrorFallback error={error} />;
+  return <ErrorFallback error={toError(useRouteError())} />;
 }
 
 interface ErrorBoundaryProps {
@@ -112,8 +115,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   state: ErrorBoundaryState = { error: null };
 
   static getDerivedStateFromError(error: unknown): ErrorBoundaryState {
-    // Anything can be thrown; normalize so the fallback always has a message.
-    return { error: error instanceof Error ? error : new Error(String(error)) };
+    return { error: toError(error) };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
