@@ -4,6 +4,7 @@ import { RouterProvider } from 'react-router-dom';
 import { ApiProvider } from './api/ApiContext';
 import { AuthProvider } from './auth/AuthContext';
 import { ConfirmDialogProvider } from './components/ConfirmDialog';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { buildRouter } from './router';
 import { wso2DarkTheme, wso2LightTheme } from './theme/themes';
 
@@ -14,13 +15,17 @@ export default function ThemedApp() {
 
   return (
     <FluentProvider theme={theme}>
-      <AuthProvider>
-        <ApiProvider>
-          <ConfirmDialogProvider>
-            <RouterProvider router={router} />
-          </ConfirmDialogProvider>
-        </ApiProvider>
-      </AuthProvider>
+      {/* Inside FluentProvider so the crash fallback is themed; around the
+          provider chain + RouterProvider so any render error is caught. */}
+      <ErrorBoundary>
+        <AuthProvider>
+          <ApiProvider>
+            <ConfirmDialogProvider>
+              <RouterProvider router={router} />
+            </ConfirmDialogProvider>
+          </ApiProvider>
+        </AuthProvider>
+      </ErrorBoundary>
     </FluentProvider>
   );
 }
