@@ -223,8 +223,8 @@ func (r *Repository) UpdateProjectQuota(ctx context.Context, projectUUID uuid.UU
 	}
 	if newQuota.CPUCores < inUse.CPUCores || newQuota.MemoryGB < inUse.MemoryGB || newQuota.StorageGB < inUse.StorageGB {
 		usage := &models.TenantCapUsage{
-			Cap:       newQuota,    // requested
-			Allocated: inUse,       // actually in use
+			Cap:       newQuota,           // requested
+			Allocated: inUse,              // actually in use
 			Available: models.TenantCap{}, // not meaningful for this error
 		}
 		return nil, usage, ErrProjectQuotaBelowUsage
@@ -281,9 +281,28 @@ func (r *Repository) UpdateProjectQuota(ctx context.Context, projectUUID uuid.UU
 // and sums spec usage for rows in PENDING or ACTIVE state. DELETING is
 // excluded (in-flight teardown); FAILED is excluded (never consumed).
 //
-// Current scope: VMs (cpu+memory from spec_json), clusters (cpu+memory ×
-// machine_pool_size), bastions (fixed small footprint). Storage is summed
-// from any volumes table once that lands; for now it's 0.
+// Usage is derived from what is actually persisted: the size label on each
+// row, resolved through the in-memory models.Sizes catalog (passed into the
+// query as parallel arrays and unnested into a size_specs CTE).
+//   - VM: resources.size → catalog cpu/memory.
+//   - Cluster: sum over its cluster_node_pools rows (np.size × np.count),
+//     across ALL pool roles (system + worker). Pool rows aren't filtered by
+//     their own status — the parent resource's status governs.
+//   - Bastion: fixed allocation (2 CPU, 4 GB) — small, but counted.
+//
+// LEFT JOIN semantics: a row with an unknown/NULL size label contributes 0
+// rather than dropping the whole sum. Storage is summed from any volumes
+// table once that lands; for now it's 0.
+//
+// Known scope gaps (each only ever under-counts or over-counts toward
+// safety — the guard never permits an over-allocation because of them):
+//   - Databases (databases table) and key vaults (key_vaults table) are not
+//     yet counted; their instance classes have no cpu/memory catalog to
+//     resolve against. TODO: add a class → cpu/memory catalog and fold them
+//     into this sum.
+//   - A pool row whose own status is failed still counts (over-count, so a
+//     shrink may be rejected conservatively); pool rows can't distinguish
+//     "never provisioned" from "running but a later update failed".
 //
 // TODO(M2.5 polish): wire actual storage sum once the volumes table exists.
 // TODO(observability): cache result with short TTL to avoid 4 SUMs per
@@ -291,34 +310,54 @@ func (r *Repository) UpdateProjectQuota(ctx context.Context, projectUUID uuid.UU
 func sumProjectResourceUsageTx(ctx context.Context, tx pgx.Tx, projectUUID uuid.UUID) (models.TenantCap, error) {
 	var u models.TenantCap
 
-	// Resources table holds VMs, clusters, bastions. Spec is JSONB.
-	// VM: spec_json->>'cpu'  (int), 'memory_gb' (int).
-	// Cluster: spec_json->>'cpu_per_node' × spec_json->>'node_count'.
-	// Bastion: fixed allocation (2 CPU, 4 GB) — small, but counted.
-	const q = `
-		SELECT
-			COALESCE(SUM(
-				CASE type
-					WHEN 'VIRTUAL_MACHINE' THEN COALESCE((metadata->>'cpu')::INTEGER, 0)
-					WHEN 'CLUSTER'         THEN COALESCE((metadata->>'cpu_per_node')::INTEGER, 0) * COALESCE(machine_pool_size, 0)
-					WHEN 'BASTION'         THEN 2
-					ELSE 0
-				END
-			), 0)::INTEGER AS cpu_used,
-			COALESCE(SUM(
-				CASE type
-					WHEN 'VIRTUAL_MACHINE' THEN COALESCE((metadata->>'memory_gb')::INTEGER, 0)
-					WHEN 'CLUSTER'         THEN COALESCE((metadata->>'memory_per_node_gb')::INTEGER, 0) * COALESCE(machine_pool_size, 0)
-					WHEN 'BASTION'         THEN 4
-					ELSE 0
-				END
-			), 0)::INTEGER AS mem_used,
-			0::INTEGER AS storage_used   -- TODO: sum from volumes when that table exists
-		FROM   resources
-		WHERE  project_uuid = $1
-		  AND  status IN ('PENDING', 'ACTIVE')`
+	// Flatten the size catalog into parallel arrays for unnest. Map iteration
+	// order doesn't matter — the CTE is joined by label, never by position.
+	sizeNames := make([]string, 0, len(models.Sizes))
+	sizeCPUs := make([]int32, 0, len(models.Sizes))
+	sizeMems := make([]int32, 0, len(models.Sizes))
+	for name, spec := range models.Sizes {
+		sizeNames = append(sizeNames, name)
+		sizeCPUs = append(sizeCPUs, int32(spec.CPU))
+		sizeMems = append(sizeMems, int32(spec.MemoryGB))
+	}
 
-	if err := tx.QueryRow(ctx, q, projectUUID).Scan(&u.CPUCores, &u.MemoryGB, &u.StorageGB); err != nil {
+	const q = `
+		WITH size_specs AS (
+			SELECT * FROM unnest($2::text[], $3::int[], $4::int[]) AS s(size, cpu, memory_gb)
+		),
+		vm AS (
+			SELECT COALESCE(SUM(s.cpu), 0)       AS cpu,
+			       COALESCE(SUM(s.memory_gb), 0) AS mem
+			FROM   resources r
+			LEFT JOIN size_specs s ON s.size = r.size
+			WHERE  r.project_uuid = $1
+			  AND  r.status IN ('PENDING', 'ACTIVE')
+			  AND  r.type = 'VIRTUAL_MACHINE'
+		),
+		clus AS (
+			SELECT COALESCE(SUM(s.cpu * np.count), 0)       AS cpu,
+			       COALESCE(SUM(s.memory_gb * np.count), 0) AS mem
+			FROM   resources r
+			JOIN   cluster_node_pools np ON np.cluster_id = r.id
+			LEFT JOIN size_specs s ON s.size = np.size
+			WHERE  r.project_uuid = $1
+			  AND  r.status IN ('PENDING', 'ACTIVE')
+			  AND  r.type = 'CLUSTER'
+		),
+		bast AS (
+			SELECT COUNT(*) * 2 AS cpu,
+			       COUNT(*) * 4 AS mem
+			FROM   resources r
+			WHERE  r.project_uuid = $1
+			  AND  r.status IN ('PENDING', 'ACTIVE')
+			  AND  r.type = 'BASTION'
+		)
+		SELECT (vm.cpu + clus.cpu + bast.cpu)::INTEGER AS cpu_used,
+		       (vm.mem + clus.mem + bast.mem)::INTEGER AS mem_used,
+		       0::INTEGER AS storage_used   -- TODO: sum from volumes when that table exists
+		FROM   vm, clus, bast`
+
+	if err := tx.QueryRow(ctx, q, projectUUID, sizeNames, sizeCPUs, sizeMems).Scan(&u.CPUCores, &u.MemoryGB, &u.StorageGB); err != nil {
 		return u, fmt.Errorf("db sum project resource usage: %w", err)
 	}
 	return u, nil
