@@ -355,9 +355,15 @@ func (c *Client) GetCluster(ctx context.Context, backendUID string) (*models.Res
 
 	cs, err := c.provisioner.GetClusterStatus(ctx, backendUID)
 	if err != nil {
-		// IsSteveNotFound → propagate as "not found" so the reconciler can clean up.
+		// IsSteveNotFound → propagate as a typed not-found sentinel so the
+		// reconciler can clean up structurally (NotFound()) instead of
+		// substring-matching. Msg keeps the pre-existing error text.
 		if IsSteveNotFound(err) {
-			return nil, fmt.Errorf("cluster %q not found in Rancher", backendUID)
+			return nil, &common.NotFoundError{
+				Kind: "cluster",
+				Name: backendUID,
+				Msg:  fmt.Sprintf("cluster %q not found in Rancher", backendUID),
+			}
 		}
 		return nil, err
 	}

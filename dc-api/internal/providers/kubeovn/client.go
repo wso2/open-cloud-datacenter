@@ -256,6 +256,13 @@ func NewRemoteClient(access clusteraccess.Accessor, region, zone string) *Client
 	}
 }
 
+// k8sRequestTimeout bounds every request made through this client's
+// rest.Config so a hung KubeOVN/cluster API server can't block goroutines
+// forever. Mirrors the Rancher client's 30s http.Client timeout. Safe here:
+// this client does no Watch/exec/portforward streaming (readiness waits are
+// polling loops of individual bounded requests).
+const k8sRequestTimeout = 30 * time.Second
+
 // New creates a KubeOVN Client.
 //
 //   - kubeconfig: base64-encoded kubeconfig string (same as DCAPI_HARVESTER_KUBECONFIG).
@@ -274,6 +281,10 @@ func New(kubeconfig, namespace string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse kubeovn kubeconfig: %w", err)
 	}
+	// Covers every consumer of this rest.Config / dynamic client: the KubeOVN
+	// driver itself, the KVI OpenBao proxy (RESTConfig()), and the dbaas +
+	// private-endpoint provisioners (Dynamic()).
+	restConfig.Timeout = k8sRequestTimeout
 
 	dynClient, err := dynamic.NewForConfig(restConfig)
 	if err != nil {
@@ -292,7 +303,9 @@ func New(kubeconfig, namespace string) (*Client, error) {
 
 	// Probe for VpcDns CRD availability (best-effort; if the probe call itself
 	// fails for non-404 reasons, we conservatively fall back to ConfigMap mode).
-	ctx := context.Background()
+	// Bounded: a hung API server at startup must not block boot indefinitely.
+	ctx, cancel := context.WithTimeout(context.Background(), k8sRequestTimeout)
+	defer cancel()
 	_, probeErr := dynClient.Resource(vpcDnsGVR).List(ctx, metav1.ListOptions{Limit: 1})
 	if probeErr == nil {
 		c.vpcDnsAvailable = true

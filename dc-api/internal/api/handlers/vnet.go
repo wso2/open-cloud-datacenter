@@ -25,6 +25,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/wso2/dc-api/internal/api/middleware"
+	"github.com/wso2/dc-api/internal/async"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
@@ -47,13 +48,16 @@ type VNetHandler struct {
 	// in the local zone (see isLocalZone). nil = disabled (tests).
 	nat providers.VPCNATProvisioner // nil = SNAT disabled (e.g. in tests)
 	dns providers.VPCDNSProvisioner // nil = F20 DNS disabled (e.g. in tests)
-	log zerolog.Logger
+	// tasks tracks the async provisioning goroutines so shutdown can drain
+	// them (bounded). May be nil (tests) — async.Group is nil-receiver-safe.
+	tasks *async.Group
+	log   zerolog.Logger
 }
 
 // NewVNetHandler creates a VNetHandler with injected dependencies.
 // nat and dns may be nil — when nil, the respective provisioning is skipped.
-func NewVNetHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, nat providers.VPCNATProvisioner, dns providers.VPCDNSProvisioner, log zerolog.Logger) *VNetHandler {
-	return &VNetHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, nat: nat, dns: dns, log: log}
+func NewVNetHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, nat providers.VPCNATProvisioner, dns providers.VPCDNSProvisioner, tasks *async.Group, log zerolog.Logger) *VNetHandler {
+	return &VNetHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, nat: nat, dns: dns, tasks: tasks, log: log}
 }
 
 // network resolves the NetworkProvider for a VNet's (region, zone). Empty
@@ -277,11 +281,13 @@ func (h *VNetHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 
-	go h.asyncProvisionVNet(network, vnet.ID, tenantID, projectID, userID, models.VNetSpec{
-		Name:         req.Name,
-		AddressSpace: req.AddressSpace,
-		Region:       req.Region,
-		Description:  req.Description,
+	h.tasks.Go(func() {
+		h.asyncProvisionVNet(network, vnet.ID, tenantID, projectID, userID, models.VNetSpec{
+			Name:         req.Name,
+			AddressSpace: req.AddressSpace,
+			Region:       req.Region,
+			Description:  req.Description,
+		})
 	})
 
 	w.Header().Set("Content-Type", "application/json")
@@ -439,7 +445,7 @@ func (h *VNetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
+	h.tasks.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
@@ -474,7 +480,7 @@ func (h *VNetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = h.repo.DeleteVNet(ctx, id)
-	}()
+	})
 
 	w.WriteHeader(http.StatusAccepted)
 }

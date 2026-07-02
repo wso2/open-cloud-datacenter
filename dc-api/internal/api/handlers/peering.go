@@ -27,6 +27,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/wso2/dc-api/internal/api/middleware"
+	"github.com/wso2/dc-api/internal/async"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/placement"
@@ -44,12 +45,15 @@ type PeeringHandler struct {
 	resolve       providers.Resolver
 	defaultRegion string
 	defaultZone   string
-	log           zerolog.Logger
+	// tasks tracks the async provisioning goroutines so shutdown can drain
+	// them (bounded). May be nil (tests) — async.Group is nil-receiver-safe.
+	tasks *async.Group
+	log   zerolog.Logger
 }
 
 // NewPeeringHandler creates a PeeringHandler with injected dependencies.
-func NewPeeringHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, log zerolog.Logger) *PeeringHandler {
-	return &PeeringHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, log: log}
+func NewPeeringHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, tasks *async.Group, log zerolog.Logger) *PeeringHandler {
+	return &PeeringHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, tasks: tasks, log: log}
 }
 
 // network resolves the NetworkProvider for (region, zone). Empty values resolve
@@ -274,7 +278,9 @@ func (h *PeeringHandler) Create(w http.ResponseWriter, r *http.Request) {
 		PeerAddressSpace:      peerVNet.AddressSpace,
 		TransitCIDR:           transitCIDR,
 	}
-	go h.asyncProvisionPeering(network, peering.ID, tenantID, userID, vnet.BackendUID, peerVNet.BackendUID, spec)
+	h.tasks.Go(func() {
+		h.asyncProvisionPeering(network, peering.ID, tenantID, userID, vnet.BackendUID, peerVNet.BackendUID, spec)
+	})
 
 	resp := peeringToResponse(peering)
 	w.Header().Set("Content-Type", "application/json")
@@ -436,7 +442,7 @@ func (h *PeeringHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
+	h.tasks.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		if peering.BackendUID == "" {
@@ -459,7 +465,7 @@ func (h *PeeringHandler) Delete(w http.ResponseWriter, r *http.Request) {
 				Msg("release transit CIDR (non-fatal — CASCADE will clean up)")
 		}
 		_ = h.repo.DeletePeering(ctx, peeringID)
-	}()
+	})
 
 	w.WriteHeader(http.StatusAccepted)
 }

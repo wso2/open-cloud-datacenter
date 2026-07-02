@@ -39,6 +39,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/wso2/dc-api/internal/api/middleware"
+	"github.com/wso2/dc-api/internal/async"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/placement"
@@ -67,7 +68,10 @@ type VMHandler struct {
 	// are bridges claimed by KubeOVN's ProviderNetwork or otherwise reserved
 	// for cluster infrastructure. Built from DCAPI_INFRA_RESERVED_NADS.
 	reservedNADs map[string]bool
-	log          zerolog.Logger
+	// tasks tracks the async provisioning goroutines so shutdown can drain
+	// them (bounded). May be nil (tests) — async.Group is nil-receiver-safe.
+	tasks *async.Group
+	log   zerolog.Logger
 }
 
 // NewVMHandler creates a VMHandler with injected dependencies.
@@ -79,6 +83,7 @@ func NewVMHandler(
 	defaultRegion, defaultZone string,
 	dnsSearchDomain string,
 	reservedNADs map[string]bool,
+	tasks *async.Group,
 	log zerolog.Logger,
 ) *VMHandler {
 	return &VMHandler{
@@ -88,6 +93,7 @@ func NewVMHandler(
 		defaultZone:     defaultZone,
 		dnsSearchDomain: dnsSearchDomain,
 		reservedNADs:    reservedNADs,
+		tasks:           tasks,
 		log:             log,
 	}
 }
@@ -436,7 +442,7 @@ func (h *VMHandler) Create(w http.ResponseWriter, r *http.Request) {
 		DNSServerIP:      dnsSrvIP,
 		DNSSearchDomain:  h.dnsSearchDomain,
 	}
-	go h.asyncProvision(compute, resource.ID, tenantID, projectID, userID, spec)
+	h.tasks.Go(func() { h.asyncProvision(compute, resource.ID, tenantID, projectID, userID, spec) })
 
 	// ── Step 6: return 202 Accepted ───────────────────────────────────────────
 	// Credentials are returned ONCE here — never stored server-side.
@@ -558,7 +564,7 @@ func (h *VMHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	// Async: call Harvester delete. The reconciler detects the 404 from Harvester
 	// and removes the DB row — consistent with how cluster deletion works.
-	go func() {
+	h.tasks.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
@@ -575,7 +581,7 @@ func (h *VMHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 		// Leave the row as DELETING. The reconciler polls it every 60s and removes
 		// the row once Harvester returns 404 (VM fully gone).
-	}()
+	})
 
 	w.WriteHeader(http.StatusAccepted)
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/wso2/dc-api/internal/api/middleware"
+	"github.com/wso2/dc-api/internal/async"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
@@ -37,12 +38,15 @@ type PrivateDnsZoneHandler struct {
 	resolve       providers.Resolver
 	defaultRegion string
 	defaultZone   string
-	log           zerolog.Logger
+	// tasks tracks the async provisioning goroutines so shutdown can drain
+	// them (bounded). May be nil (tests) — async.Group is nil-receiver-safe.
+	tasks *async.Group
+	log   zerolog.Logger
 }
 
 // NewPrivateDnsZoneHandler creates a PrivateDnsZoneHandler with injected dependencies.
-func NewPrivateDnsZoneHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, log zerolog.Logger) *PrivateDnsZoneHandler {
-	return &PrivateDnsZoneHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, log: log}
+func NewPrivateDnsZoneHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, tasks *async.Group, log zerolog.Logger) *PrivateDnsZoneHandler {
+	return &PrivateDnsZoneHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, tasks: tasks, log: log}
 }
 
 // network resolves the NetworkProvider for the parent VNet's (region, zone).
@@ -253,9 +257,11 @@ func (h *PrivateDnsZoneHandler) CreateZone(w http.ResponseWriter, r *http.Reques
 	}
 
 
-	go h.asyncProvisionZone(network, zone.ID, tenantID, userID, vnet.BackendUID, models.DnsZoneSpec{
-		ZoneName:    req.Name,
-		Description: req.Description,
+	h.tasks.Go(func() {
+		h.asyncProvisionZone(network, zone.ID, tenantID, userID, vnet.BackendUID, models.DnsZoneSpec{
+			ZoneName:    req.Name,
+			Description: req.Description,
+		})
 	})
 
 	w.Header().Set("Content-Type", "application/json")
@@ -373,7 +379,7 @@ func (h *PrivateDnsZoneHandler) DeleteZone(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	go func() {
+	h.tasks.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		if zone.BackendUID == "" {
@@ -386,7 +392,7 @@ func (h *PrivateDnsZoneHandler) DeleteZone(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		_ = h.repo.DeleteDNSZone(ctx, zoneID)
-	}()
+	})
 
 	w.WriteHeader(http.StatusAccepted)
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/wso2/dc-api/internal/api/middleware"
+	"github.com/wso2/dc-api/internal/async"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/placement"
@@ -49,12 +50,15 @@ type ClusterHandler struct {
 	resolve       providers.Resolver
 	defaultRegion string
 	defaultZone   string
-	log           zerolog.Logger
+	// tasks tracks the async provisioning goroutines so shutdown can drain
+	// them (bounded). May be nil (tests) — async.Group is nil-receiver-safe.
+	tasks *async.Group
+	log   zerolog.Logger
 }
 
 // NewClusterHandler creates a ClusterHandler with injected dependencies.
-func NewClusterHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, log zerolog.Logger) *ClusterHandler {
-	return &ClusterHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, log: log}
+func NewClusterHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, tasks *async.Group, log zerolog.Logger) *ClusterHandler {
+	return &ClusterHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, tasks: tasks, log: log}
 }
 
 // cluster resolves the ClusterProvider for a cluster's (region, zone). Empty
@@ -546,7 +550,7 @@ func (h *ClusterHandler) Create(w http.ResponseWriter, r *http.Request) {
 		},
 		WorkerPools: workerPools,
 	}
-	go h.asyncProvision(cluster, resource.ID, tenantID, projectID, userID, spec)
+	h.tasks.Go(func() { h.asyncProvision(cluster, resource.ID, tenantID, projectID, userID, spec) })
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
@@ -708,14 +712,14 @@ func (h *ClusterHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	_ = h.repo.UpdateStatus(r.Context(), id, models.StatusDeleting, "deletion requested", "")
 
-	go func() {
+	h.tasks.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 		if err := cluster.DeleteCluster(ctx, resource.BackendUID); err != nil {
 			h.log.Error().Err(err).Str("cluster", resource.Name).Msg("delete cluster failed")
 			_ = h.repo.UpdateStatus(ctx, id, models.StatusFailed, "deletion failed: "+err.Error(), "")
 		}
-	}()
+	})
 
 	w.WriteHeader(http.StatusAccepted)
 }
@@ -852,7 +856,9 @@ func (h *ClusterHandler) AddNodePool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go h.asyncAddPool(cluster, clusterID, clusterName, pool, mgmtNAD, tenantSubnetNAD, vmNamespace, req.ImageName)
+	h.tasks.Go(func() {
+		h.asyncAddPool(cluster, clusterID, clusterName, pool, mgmtNAD, tenantSubnetNAD, vmNamespace, req.ImageName)
+	})
 
 	writeJSON(w, http.StatusAccepted, poolToResponse(pool))
 }
@@ -1006,7 +1012,9 @@ func (h *ClusterHandler) ScaleOrUpdateNodePool(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadGateway, "cannot reach the cluster's zone: "+err.Error())
 		return
 	}
-	go h.asyncPatchPool(cluster, clusterName, pool, req.Count > 0, newCount, req.Taints != nil || req.Labels != nil, newTaints, newLabels)
+	h.tasks.Go(func() {
+		h.asyncPatchPool(cluster, clusterName, pool, req.Count > 0, newCount, req.Taints != nil || req.Labels != nil, newTaints, newLabels)
+	})
 
 	writeJSON(w, http.StatusAccepted, poolToResponse(pool))
 }
@@ -1071,7 +1079,7 @@ func (h *ClusterHandler) RemoveNodePool(w http.ResponseWriter, r *http.Request) 
 		h.log.Error().Err(err).Str("pool", poolName).Msg("mark pool deleting")
 	}
 
-	go h.asyncRemovePool(cluster, clusterID, clusterName, pool)
+	h.tasks.Go(func() { h.asyncRemovePool(cluster, clusterID, clusterName, pool) })
 
 	w.WriteHeader(http.StatusAccepted)
 }

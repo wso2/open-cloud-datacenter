@@ -65,6 +65,12 @@ type config struct {
 	LogLevel   string `envconfig:"LOG_LEVEL"   default:"info"`
 }
 
+// k8sRequestTimeout bounds every request made through the webhook's
+// rest.Config (both the in-cluster and kubeconfig paths) so a hung API server
+// can't block the NAD-lookup goroutines forever. Mirrors dc-api's provider
+// clients (30s, same as the Rancher http.Client timeout).
+const k8sRequestTimeout = 30 * time.Second
+
 func main() {
 	// ── Config ────────────────────────────────────────────────────────────────
 	var cfg config
@@ -103,6 +109,9 @@ func main() {
 			log.Fatal().Err(err).Msg("webhook: parse kubeconfig failed")
 		}
 	}
+	// Applies to BOTH paths (in-cluster and kubeconfig) — set before the
+	// dynamic client is built from this config.
+	restCfg.Timeout = k8sRequestTimeout
 
 	dynClient, err := dynamic.NewForConfig(restCfg)
 	if err != nil {

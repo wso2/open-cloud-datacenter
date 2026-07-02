@@ -160,6 +160,12 @@ func NewRemoteClient(access clusteraccess.Accessor, region, zone string) *Client
 	}
 }
 
+// k8sRequestTimeout bounds every request made through this client's
+// rest.Config so a hung Harvester API server can't block goroutines forever.
+// Mirrors the Rancher client's 30s http.Client timeout. Safe here: this
+// client does no Watch/exec/portforward streaming.
+const k8sRequestTimeout = 30 * time.Second
+
 // NewClient creates a Harvester client from a base64-encoded kubeconfig string.
 // The kubeconfig is stored in DCAPI_HARVESTER_KUBECONFIG.
 // It tries base64 decoding first; falls back to treating the input as a raw kubeconfig.
@@ -174,6 +180,7 @@ func NewClient(kubeconfigB64 string, namespace string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse harvester kubeconfig: %w", err)
 	}
+	restConfig.Timeout = k8sRequestTimeout
 
 	dynClient, err := dynamic.NewForConfig(restConfig)
 	if err != nil {
@@ -315,7 +322,14 @@ func (c *Client) GetVM(ctx context.Context, backendUID string) (*models.Resource
 	obj, err := c.access.Get(ctx, harvesterVMResource, ns, name, metav1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
-			return nil, fmt.Errorf("VM %s not found in Harvester", backendUID)
+			// Typed sentinel: the reconciler detects deletion structurally via
+			// NotFound() instead of substring-matching the message. Msg keeps
+			// the pre-existing error text so log lines don't change.
+			return nil, &common.NotFoundError{
+				Kind: "VM",
+				Name: backendUID,
+				Msg:  fmt.Sprintf("VM %s not found in Harvester", backendUID),
+			}
 		}
 		return nil, fmt.Errorf("harvester get VM %s: %w", backendUID, err)
 	}
