@@ -15,8 +15,10 @@ export default function ThemedApp() {
 
   return (
     <FluentProvider theme={theme}>
-      {/* Inside FluentProvider so the crash fallback is themed; around the
-          provider chain + RouterProvider so any render error is caught. */}
+      {/* Inside FluentProvider so the crash fallback is themed. Route render
+          errors are caught by the router's own errorElement (RouteErrorFallback,
+          see router.tsx) — this outer boundary is the last resort for errors
+          OUTSIDE the router (provider construction/render). */}
       <ErrorBoundary>
         <AuthProvider>
           <ApiProvider>
