@@ -46,6 +46,20 @@ describe('ErrorBoundary', () => {
     expect(screen.getByText('kaboom from render')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
   });
+
+  it('normalizes a non-Error throw so the fallback still renders', () => {
+    function BoomLiteral(): never {
+      // Deliberately throwing a non-Error to exercise the normalization path.
+      throw 'raw string kaboom';
+    }
+    renderWithTheme(
+      <ErrorBoundary>
+        <BoomLiteral />
+      </ErrorBoundary>
+    );
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText('raw string kaboom')).toBeInTheDocument();
+  });
 });
 
 describe('RouteErrorFallback', () => {
