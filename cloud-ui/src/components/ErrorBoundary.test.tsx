@@ -106,4 +106,26 @@ describe('RouteErrorFallback', () => {
     expect(await screen.findByText('plain string failure')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toBeInTheDocument();
   });
+
+  it('renders the status line for thrown Response route errors', async () => {
+    // Loaders/actions may throw a Response; String() on it is useless
+    // ("[object Response]"), so the fallback shows the status line.
+    const router = createMemoryRouter([
+      {
+        errorElement: <RouteErrorFallback />,
+        children: [
+          {
+            path: '/',
+            loader: () => {
+              throw new Response(null, { status: 403, statusText: 'Forbidden' });
+            },
+            element: <div>never reached</div>,
+          },
+        ],
+      },
+    ]);
+    renderWithTheme(<RouterProvider router={router} />);
+    expect(await screen.findByText('403 Forbidden')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+  });
 });
