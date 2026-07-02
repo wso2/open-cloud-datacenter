@@ -672,6 +672,103 @@ func (r *Repository) UpdateStatus(ctx context.Context, id uuid.UUID, status mode
 	return nil
 }
 
+// FailOrphanedUnprovisioned recovers every PENDING/DELETING resource that has
+// NO backend_uid and hasn't been touched for olderThan. These rows are
+// stranded by a crash/redeploy that interrupted an async operation before the
+// backend confirmed anything: ListPending filters on backend_uid IS NOT NULL,
+// so the reconciler would never see them again and their unique name would
+// stay blocked forever.
+//
+//   - PENDING rows become FAILED — a tombstone Create() replaces, so the name
+//     is reusable and the interruption is visible instead of silent.
+//   - DELETING rows are deleted outright: nothing was ever created on the
+//     backend, so removing the row completes the user's delete.
+//
+// olderThan must STRICTLY exceed the handlers' largest async-provision
+// context ceiling — 15 minutes for cluster creates, 10 minutes for everything
+// else — so an in-flight create is never reaped. The reconciler passes 20
+// minutes. Returns the number of rows reaped.
+//
+// Each reaped row produces a real audit event (STATUS_CHANGE or DELETE), same
+// as any other lifecycle transition.
+func (r *Repository) FailOrphanedUnprovisioned(ctx context.Context, olderThan time.Duration) (int, error) {
+	const pendingMsg = "provisioning was interrupted before the backend resource was created; retry the create"
+
+	// Collect first, audit after — recordAudit issues its own Exec and must
+	// not interleave with an open result set on the same conn.
+	var reaped []auditInsert
+
+	// Stranded creates: PENDING → FAILED (a tombstone Create() replaces).
+	const failQ = `
+		UPDATE resources
+		SET    status  = 'FAILED',
+		       message = $1
+		WHERE  backend_uid IS NULL
+		AND    status = 'PENDING'
+		AND    updated_at < now() - make_interval(secs => $2)
+		RETURNING id, name, type::text, tenant_uuid, project_uuid`
+	rows, err := r.pool.Query(ctx, failQ, pendingMsg, olderThan.Seconds())
+	if err != nil {
+		return 0, fmt.Errorf("db fail orphaned pending resources: %w", err)
+	}
+	for rows.Next() {
+		var id uuid.UUID
+		var name, kind string
+		var tuid, puid *uuid.UUID
+		if err := rows.Scan(&id, &name, &kind, &tuid, &puid); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("db scan orphaned pending resource: %w", err)
+		}
+		reaped = append(reaped, auditInsert{
+			ID: id, Name: name, Kind: kind, TenantUUID: tuid, ProjectUUID: puid,
+			Action: audit.ActionStatusChange,
+			From:   models.StatusPending, To: models.StatusFailed, Message: pendingMsg,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("db fail orphaned pending resources: %w", err)
+	}
+	rows.Close()
+
+	// Stranded deletes: the user asked for deletion and no backend resource
+	// was ever created, so removing the row COMPLETES the delete — flipping it
+	// to FAILED would resurrect a resource the user already discarded.
+	const deleteQ = `
+		DELETE FROM resources
+		WHERE  backend_uid IS NULL
+		AND    status = 'DELETING'
+		AND    updated_at < now() - make_interval(secs => $1)
+		RETURNING id, name, type::text, tenant_uuid, project_uuid`
+	rows, err = r.pool.Query(ctx, deleteQ, olderThan.Seconds())
+	if err != nil {
+		return len(reaped), fmt.Errorf("db delete orphaned deleting resources: %w", err)
+	}
+	for rows.Next() {
+		var id uuid.UUID
+		var name, kind string
+		var tuid, puid *uuid.UUID
+		if err := rows.Scan(&id, &name, &kind, &tuid, &puid); err != nil {
+			rows.Close()
+			return len(reaped), fmt.Errorf("db scan orphaned deleting resource: %w", err)
+		}
+		reaped = append(reaped, auditInsert{
+			ID: id, Name: name, Kind: kind, TenantUUID: tuid, ProjectUUID: puid,
+			Action: audit.ActionDelete,
+			From:   models.StatusDeleting, To: models.StatusDeleted,
+			Message: "deletion requested but no backend resource was ever created; row removed",
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return len(reaped), fmt.Errorf("db delete orphaned deleting resources: %w", err)
+	}
+	rows.Close()
+
+	for _, in := range reaped {
+		r.recordAudit(ctx, r.pool, in)
+	}
+	return len(reaped), nil
+}
+
 // GetQuota retrieves the quota for a tenant.
 // If no quota row exists, returns the __default__ quota.
 // The quotas table still uses tenant_id as primary key because __default__ is

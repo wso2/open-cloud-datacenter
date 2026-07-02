@@ -20,11 +20,24 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/audit"
+	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
 )
+
+// reconcileTimeout bounds one resource's reconcile so a hung backend can't
+// stall every other PENDING/DELETING resource in the sequential reconcileAll
+// loop; matches the per-request client timeout on the provider rest.Configs.
+const reconcileTimeout = 30 * time.Second
+
+// orphanTimeout is how long a PENDING/DELETING row may sit with no
+// backend_uid before the orphan sweep recovers it (PENDING → FAILED,
+// DELETING → row removed). Must STRICTLY exceed the largest async-provision
+// context ceiling in the handlers — 15 minutes for cluster creates, 10 for
+// everything else — so an in-flight create is never reaped while its
+// goroutine is still working. 20 minutes gives clusters a 5-minute margin.
+const orphanTimeout = 20 * time.Minute
 
 // Reconciler polls PENDING and DELETING resources and syncs their status
 // from the provider back into PostgreSQL.
@@ -97,6 +110,18 @@ func (r *Reconciler) Run(ctx context.Context) {
 
 // reconcileAll fetches all PENDING/DELETING resources and reconciles each one.
 func (r *Reconciler) reconcileAll(ctx context.Context) {
+	// Crash recovery: rows stranded before backend creation (backend_uid IS
+	// NULL) are invisible to ListPending below and would stay PENDING/DELETING
+	// forever (blocking their unique name). Sweep them first — stranded
+	// creates become FAILED, stranded deletes are completed by removing the
+	// row. A sweep failure is logged and skipped — it must never abort the tick.
+	if reaped, err := r.repo.FailOrphanedUnprovisioned(ctx, orphanTimeout); err != nil {
+		r.log.Error().Err(err).Msg("orphan sweep failed — continuing with the reconcile tick")
+	} else if reaped > 0 {
+		r.log.Warn().Int("count", reaped).
+			Msg("orphan sweep: recovered resources stranded before backend creation (interrupted provisioning)")
+	}
+
 	resources, err := r.repo.ListPending(ctx)
 	if err != nil {
 		r.log.Error().Err(err).Msg("failed to list pending resources")
@@ -116,6 +141,11 @@ func (r *Reconciler) reconcileAll(ctx context.Context) {
 
 // reconcileOne reconciles a single resource against its provider.
 func (r *Reconciler) reconcileOne(ctx context.Context, res *models.Resource) {
+	// Bound this resource's reconcile so a hung backend can't stall every
+	// other PENDING/DELETING resource; matches the per-request client timeout.
+	ctx, cancel := context.WithTimeout(ctx, reconcileTimeout)
+	defer cancel()
+
 	log := r.log.With().
 		Str("id", res.ID.String()).
 		Str("name", res.Name).
@@ -275,14 +305,14 @@ func isNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
-	// Check wrapped errors for a not-found sentinel if providers define one.
-	// For now we use string matching — a sentinel error type would be cleaner
-	// but adds provider API surface area.
+	// Preferred path: the typed sentinel (providers.NotFoundError implements
+	// NotFound() bool; Harvester GetVM and Rancher GetCluster return it).
 	var nf interface{ NotFound() bool }
 	if errors.As(err, &nf) {
 		return nf.NotFound()
 	}
-	// Fallback: string match (both drivers use "not found" in their messages).
+	// Fallback: string match, for provider paths (and agent-routed errors)
+	// that don't return the typed sentinel yet.
 	return containsNotFound(err.Error())
 }
 

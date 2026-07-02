@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/wso2/dc-api/internal/api/middleware"
+	"github.com/wso2/dc-api/internal/async"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
@@ -38,13 +39,16 @@ type SubnetHandler struct {
 	// is in the local zone. nil = disabled (tests).
 	nat providers.VPCNATProvisioner // nil = F15 disabled (no SNAT provisioning)
 	dns providers.VPCDNSProvisioner // nil = F20 disabled (no per-VPC DNS)
-	log zerolog.Logger
+	// tasks tracks the async provisioning goroutines so shutdown can drain
+	// them (bounded). May be nil (tests) — async.Group is nil-receiver-safe.
+	tasks *async.Group
+	log   zerolog.Logger
 }
 
 // NewSubnetHandler creates a SubnetHandler with injected dependencies.
 // nat and dns may be nil — when nil, the respective provisioning steps are skipped.
-func NewSubnetHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, nat providers.VPCNATProvisioner, dns providers.VPCDNSProvisioner, log zerolog.Logger) *SubnetHandler {
-	return &SubnetHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, nat: nat, dns: dns, log: log}
+func NewSubnetHandler(repo *db.Repository, resolve providers.Resolver, defaultRegion, defaultZone string, nat providers.VPCNATProvisioner, dns providers.VPCDNSProvisioner, tasks *async.Group, log zerolog.Logger) *SubnetHandler {
+	return &SubnetHandler{repo: repo, resolve: resolve, defaultRegion: defaultRegion, defaultZone: defaultZone, nat: nat, dns: dns, tasks: tasks, log: log}
 }
 
 // network resolves the NetworkProvider for a subnet's parent VNet (region, zone).
@@ -274,11 +278,13 @@ func (h *SubnetHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Async: call KubeOVN CreateSubnet. The NAT/DNS provisioning inside the
 	// goroutine is local-only; tell it whether the parent VNet is in the local
 	// zone so a remote-zone subnet skips the local NAT/DNS plumbing.
-	go h.asyncProvisionSubnet(network, h.isLocalZone(vnet.Region, vnet.Zone), subnet.ID, vnet.ID, tenantID, projectID, userID, vnet.BackendUID, models.SubnetSpec{
-		Name:        req.Name,
-		CIDR:        req.CIDR,
-		Gateway:     gw,
-		Description: req.Description,
+	h.tasks.Go(func() {
+		h.asyncProvisionSubnet(network, h.isLocalZone(vnet.Region, vnet.Zone), subnet.ID, vnet.ID, tenantID, projectID, userID, vnet.BackendUID, models.SubnetSpec{
+			Name:        req.Name,
+			CIDR:        req.CIDR,
+			Gateway:     gw,
+			Description: req.Description,
+		})
 	})
 
 	w.Header().Set("Content-Type", "application/json")
@@ -441,7 +447,7 @@ func (h *SubnetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
+	h.tasks.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		if subnet.BackendUID == "" {
@@ -510,7 +516,7 @@ func (h *SubnetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = h.repo.DeleteSubnet(ctx, subnetID)
-	}()
+	})
 
 	w.WriteHeader(http.StatusAccepted)
 }

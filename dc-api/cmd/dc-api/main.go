@@ -26,6 +26,7 @@ import (
 	"github.com/wso2/dc-api/internal/api/auth"
 	"github.com/wso2/dc-api/internal/api/handlers"
 	"github.com/wso2/dc-api/internal/api/middleware"
+	"github.com/wso2/dc-api/internal/async"
 	"github.com/wso2/dc-api/internal/config"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/directory"
@@ -39,6 +40,14 @@ import (
 	"github.com/wso2/dc-api/internal/providers/rancher"
 	"github.com/wso2/dc-api/internal/reconciler"
 )
+
+// provisionDrainTimeout bounds the post-Shutdown wait for the handlers'
+// fire-and-forget provisioning goroutines (async.Group). Long enough for the
+// typical backend submit to finish; deliberately shorter than a Kubernetes
+// terminationGracePeriod escalation would tolerate. Tasks still running when
+// it expires are abandoned and later reaped as FAILED by the reconciler's
+// orphan sweep.
+const provisionDrainTimeout = 60 * time.Second
 
 func main() {
 	// ── Configuration ─────────────────────────────────────────────────────────
@@ -451,6 +460,12 @@ func main() {
 		log.Info().Msg("IdP directory disabled (DCAPI_IDP_* unset) — invite by user_sub only")
 	}
 
+	// ── Async provisioning task group ────────────────────────────────────────
+	// Tracks the fire-and-forget provisioning goroutines the handlers launch
+	// (VM/cluster/network creates + deletes) so shutdown can drain them below
+	// instead of killing a provision mid-flight on a rolling deploy.
+	tasks := &async.Group{}
+
 	// ── Router ────────────────────────────────────────────────────────────────
 	// All wiring happens in NewRouter. main.go does not know about individual routes.
 	router := api.NewRouter(api.RouterDeps{
@@ -492,6 +507,7 @@ func main() {
 		LocalZone:        cfg.LocalZone,
 		AgentRouteReads:  cfg.AgentRouteReads,
 		AgentRouteWrites: cfg.AgentRouteWrites,
+		Tasks:            tasks,
 		Log:              log.Logger,
 	})
 
@@ -524,6 +540,18 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("graceful shutdown timed out")
+	}
+
+	// Drain the detached provisioning goroutines (bounded). Without this, a
+	// rolling deploy kills provisions mid-flight, stranding PENDING rows with
+	// no backend_uid — the exact orphans the reconciler sweep exists to reap.
+	log.Info().Dur("timeout", provisionDrainTimeout).Msg("waiting for in-flight provisioning tasks to finish")
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), provisionDrainTimeout)
+	defer drainCancel()
+	if tasks.Wait(drainCtx) {
+		log.Info().Msg("in-flight provisioning tasks drained")
+	} else {
+		log.Warn().Msg("drain timed out — abandoning in-flight provisioning tasks; interrupted creates will be reaped as FAILED by the reconciler's orphan sweep")
 	}
 	log.Info().Msg("DC-API stopped cleanly")
 }

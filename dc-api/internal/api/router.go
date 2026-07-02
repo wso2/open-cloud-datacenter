@@ -25,6 +25,7 @@ import (
 	"github.com/wso2/dc-api/internal/api/auth"
 	"github.com/wso2/dc-api/internal/api/handlers"
 	"github.com/wso2/dc-api/internal/api/middleware"
+	"github.com/wso2/dc-api/internal/async"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/directory"
 	"github.com/wso2/dc-api/internal/models"
@@ -128,7 +129,13 @@ type RouterDeps struct {
 	LocalZone        string
 	AgentRouteReads  bool
 	AgentRouteWrites bool
-	Log              zerolog.Logger
+	// Tasks tracks the fire-and-forget provisioning goroutines the handlers
+	// launch (async VM/cluster/network provisioning + deletes) so main.go can
+	// drain them, bounded, on shutdown instead of killing provisions
+	// mid-flight. Optional: nil (tests, contract harness) falls back to plain
+	// detached goroutines inside async.Group's nil-receiver path.
+	Tasks *async.Group
+	Log   zerolog.Logger
 }
 
 // NewRouter creates and returns the fully configured Chi router.
@@ -248,9 +255,9 @@ func NewRouter(deps RouterDeps) http.Handler {
 		// Instantiate handlers with their dependencies.
 		// Dependency Injection: we pass repo and provider INTO the handler.
 		// The handler does not create these — it receives them.
-		vmHandler := handlers.NewVMHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.DNSSearchDomain, deps.InfraReservedNADs, deps.Log)
-		bastionHandler := handlers.NewBastionHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.BastionImage, deps.BastionMgmtNAD, deps.DNSSearchDomain, deps.Log)
-		clusterHandler := handlers.NewClusterHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.Log)
+		vmHandler := handlers.NewVMHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.DNSSearchDomain, deps.InfraReservedNADs, deps.Tasks, deps.Log)
+		bastionHandler := handlers.NewBastionHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.BastionImage, deps.BastionMgmtNAD, deps.DNSSearchDomain, deps.Tasks, deps.Log)
+		clusterHandler := handlers.NewClusterHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.Tasks, deps.Log)
 
 		// M1.5 member management handler. The directory provider (possibly nil)
 		// powers invite-by-email resolution.
@@ -272,12 +279,12 @@ func NewRouter(deps RouterDeps) http.Handler {
 		serviceAccountHandler := handlers.NewServiceAccountHandler(deps.Repo, deps.Log)
 
 		// M2 network handlers — all share the same NetworkProvider.
-		vnetHandler := handlers.NewVNetHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.NATProvisioner, deps.DNSProvisioner, deps.Log)
-		subnetHandler := handlers.NewSubnetHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.NATProvisioner, deps.DNSProvisioner, deps.Log)
+		vnetHandler := handlers.NewVNetHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.NATProvisioner, deps.DNSProvisioner, deps.Tasks, deps.Log)
+		subnetHandler := handlers.NewSubnetHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.NATProvisioner, deps.DNSProvisioner, deps.Tasks, deps.Log)
 		rtHandler := handlers.NewRouteTableHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.Log)
 		nsgHandler := handlers.NewNSGHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.Log)
-		peeringHandler := handlers.NewPeeringHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.Log)
-		dnsHandler := handlers.NewPrivateDnsZoneHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.Log)
+		peeringHandler := handlers.NewPeeringHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.Tasks, deps.Log)
+		dnsHandler := handlers.NewPrivateDnsZoneHandler(deps.Repo, resolve, deps.LocalRegion, deps.LocalZone, deps.Tasks, deps.Log)
 
 		// Tenant list — used by cloud-ui's tenant switcher. Lives at the
 		// /v1/ level (not under /v1/tenants/{tenant_id}) because it's how
@@ -352,7 +359,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 		// tenant_uuid and enforces that the caller has at least Viewer access.
 		tenantCtx := middleware.NewTenantContext(deps.Repo)
 		projectCtx := middleware.NewProjectContext(deps.Repo)
-		projectHandler := handlers.NewProjectHandler(deps.Repo, deps.NSProvisioner, deps.Log)
+		projectHandler := handlers.NewProjectHandler(deps.Repo, deps.NSProvisioner, deps.Tasks, deps.Log)
 
 		r.Route("/tenants/{tenant_id}", func(r chi.Router) {
 			r.Use(tenantCtx.Validate)

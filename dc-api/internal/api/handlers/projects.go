@@ -31,6 +31,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/wso2/dc-api/internal/api/middleware"
+	"github.com/wso2/dc-api/internal/async"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/providers"
@@ -41,14 +42,17 @@ import (
 type ProjectHandler struct {
 	repo      *db.Repository
 	nsProvisioner providers.ProjectNamespaceProvisioner // may be nil in tests
+	// tasks tracks the async namespace-provisioning goroutines so shutdown can
+	// drain them (bounded). May be nil (tests) — async.Group is nil-receiver-safe.
+	tasks *async.Group
 	log       zerolog.Logger
 }
 
 // NewProjectHandler creates a ProjectHandler with injected dependencies.
 // nsProvisioner may be nil — when nil, K8s namespace creation is skipped
 // (acceptable in tests or when running without a Kubernetes backend).
-func NewProjectHandler(repo *db.Repository, nsProvisioner providers.ProjectNamespaceProvisioner, log zerolog.Logger) *ProjectHandler {
-	return &ProjectHandler{repo: repo, nsProvisioner: nsProvisioner, log: log}
+func NewProjectHandler(repo *db.Repository, nsProvisioner providers.ProjectNamespaceProvisioner, tasks *async.Group, log zerolog.Logger) *ProjectHandler {
+	return &ProjectHandler{repo: repo, nsProvisioner: nsProvisioner, tasks: tasks, log: log}
 }
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
@@ -226,7 +230,7 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// The project is committed regardless — the namespace can be re-created
 	// on first VNet/VM create via the provider's ensureNamespace call.
 	if h.nsProvisioner != nil {
-		go func() {
+		h.tasks.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			if nsErr := h.nsProvisioner.EnsureProjectNamespace(ctx, tenantID, req.ID, p.ProjectUUID, p.CPUCores, p.MemoryGB, p.StorageGB, q.MaxVolumes); nsErr != nil {
@@ -234,7 +238,7 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 					Str("tenant", tenantID).Str("project", req.ID).
 					Msg("project namespace provisioning failed (best-effort; will retry on first resource create)")
 			}
-		}()
+		})
 	}
 
 	writeJSON(w, http.StatusCreated, projectToResponse(p, q))
@@ -489,7 +493,7 @@ func (h *ProjectHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	// Best-effort: log on failure but commit the DB change. Operators can
 	// re-run via PATCH or kubectl directly. (TODO: surface a follow-up.)
 	if h.nsProvisioner != nil {
-		go func() {
+		h.tasks.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 			currentQuota, _ := h.repo.GetProjectQuota(ctx, p.ProjectUUID)
@@ -501,7 +505,7 @@ func (h *ProjectHandler) Patch(w http.ResponseWriter, r *http.Request) {
 				h.log.Warn().Err(rqErr).Str("project", projectID).
 					Msg("ResourceQuota update after PATCH failed; DB row updated but namespace quota lags")
 			}
-		}()
+		})
 	}
 
 	q, _ := h.repo.GetProjectQuota(r.Context(), p.ProjectUUID)

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/wso2/dc-api/internal/api/middleware"
+	"github.com/wso2/dc-api/internal/async"
 	"github.com/wso2/dc-api/internal/db"
 	"github.com/wso2/dc-api/internal/models"
 	"github.com/wso2/dc-api/internal/placement"
@@ -43,7 +44,10 @@ type BastionHandler struct {
 	bastionImage    string // DCAPI_BASTION_IMAGE
 	bastionMgmtNAD  string // DCAPI_BASTION_MGMT_NAD
 	dnsSearchDomain string // DCAPI_VPC_DNS_SEARCH_DOMAIN — same as VMHandler
-	log             zerolog.Logger
+	// tasks tracks the async provisioning goroutines so shutdown can drain
+	// them (bounded). May be nil (tests) — async.Group is nil-receiver-safe.
+	tasks *async.Group
+	log   zerolog.Logger
 }
 
 // NewBastionHandler creates a BastionHandler with injected dependencies.
@@ -52,6 +56,7 @@ func NewBastionHandler(
 	resolve providers.Resolver,
 	defaultRegion, defaultZone string,
 	bastionImage, bastionMgmtNAD, dnsSearchDomain string,
+	tasks *async.Group,
 	log zerolog.Logger,
 ) *BastionHandler {
 	return &BastionHandler{
@@ -62,6 +67,7 @@ func NewBastionHandler(
 		bastionImage:    bastionImage,
 		bastionMgmtNAD:  bastionMgmtNAD,
 		dnsSearchDomain: dnsSearchDomain,
+		tasks:           tasks,
 		log:             log,
 	}
 }
@@ -318,7 +324,7 @@ func (h *BastionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		DNSSearchDomain:  h.dnsSearchDomain,
 		MgmtNAD:          h.bastionMgmtNAD,
 	}
-	go h.asyncProvision(compute, resource.ID, tenantID, projectID, userID, spec, req.Description)
+	h.tasks.Go(func() { h.asyncProvision(compute, resource.ID, tenantID, projectID, userID, spec, req.Description) })
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
@@ -423,7 +429,7 @@ func (h *BastionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
+	h.tasks.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		if resource.BackendUID == "" {
@@ -434,7 +440,7 @@ func (h *BastionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			h.log.Error().Err(err).Str("backend_uid", resource.BackendUID).Msg("harvester delete bastion VM failed")
 			_ = h.repo.UpdateStatus(ctx, id, models.StatusFailed, "deletion failed: "+err.Error(), "")
 		}
-	}()
+	})
 
 	w.WriteHeader(http.StatusAccepted)
 }
