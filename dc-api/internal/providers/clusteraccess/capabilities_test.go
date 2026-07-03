@@ -221,10 +221,102 @@ func TestRoutableVerbs_CloudProviderSAFamilies(t *testing.T) {
 	}
 }
 
+// TestRoutableVerbs_NATFamilies pins the routable sets for the five kubeovn
+// families the F15 NAT slice onboards: ProviderNetwork and Vlan route exactly
+// {Create} (the idempotent external-network bootstrap creates); VpcNatGateway,
+// IptablesEIP, and IptablesSnatRule route exactly {Get, Create, Delete} (the
+// per-VPC NAT lifecycle: presence/readiness reads, creates, teardown deletes).
+// No NAT family routes Apply/Update/List/Watch — no NAT op applies a spec field
+// or lists these CRDs, and RouteVerbs never widen ahead of the routed verb. All
+// keep StatusFallbackOK=false (only the VM family sets it): the EIP readiness/
+// assigned-IP reads DO consume status, but the documented rule stands and an
+// old agent yields a clear error instead of a silent partial.
+func TestRoutableVerbs_NATFamilies(t *testing.T) {
+	bootstrapOnly := []schema.GroupVersionResource{
+		{Group: "kubeovn.io", Version: "v1", Resource: "provider-networks"},
+		{Group: "kubeovn.io", Version: "v1", Resource: "vlans"},
+	}
+	for _, gvr := range bootstrapOnly {
+		verbs, ok := RoutableVerbs(gvr)
+		if !ok {
+			t.Errorf("%s must be an onboarded routable family", gvr.Resource)
+			continue
+		}
+		if !verbs[VerbCreate] {
+			t.Errorf("%s must route VerbCreate, got %v", gvr.Resource, verbs)
+		}
+		if len(verbs) != 1 {
+			t.Errorf("%s routable set = %v, want exactly {Create}", gvr.Resource, verbs)
+		}
+		if StatusFallbackOK(gvr) {
+			t.Errorf("%s must keep StatusFallbackOK=false", gvr.Resource)
+		}
+	}
+
+	lifecycle := []schema.GroupVersionResource{
+		{Group: "kubeovn.io", Version: "v1", Resource: "vpc-nat-gateways"},
+		{Group: "kubeovn.io", Version: "v1", Resource: "iptables-eips"},
+		{Group: "kubeovn.io", Version: "v1", Resource: "iptables-snat-rules"},
+	}
+	for _, gvr := range lifecycle {
+		verbs, ok := RoutableVerbs(gvr)
+		if !ok {
+			t.Errorf("%s must be an onboarded routable family", gvr.Resource)
+			continue
+		}
+		for _, v := range []Verb{VerbGet, VerbCreate, VerbDelete} {
+			if !verbs[v] {
+				t.Errorf("%s must route %v, got %v", gvr.Resource, v, verbs)
+			}
+		}
+		for _, v := range []Verb{VerbList, VerbApply, VerbUpdate, VerbWatch} {
+			if verbs[v] {
+				t.Errorf("%s must NOT route %v", gvr.Resource, v)
+			}
+		}
+		if len(verbs) != 3 {
+			t.Errorf("%s routable set = %v, want exactly {Get, Create, Delete}", gvr.Resource, verbs)
+		}
+		if StatusFallbackOK(gvr) {
+			t.Errorf("%s must keep StatusFallbackOK=false", gvr.Resource)
+		}
+	}
+}
+
+// TestRoutableVerbs_PodsReadOnly pins the pod family (F15 NAT slice) to exactly
+// {Get, List} — the gateway-pod status poll and the pods-gone label-selector
+// poll. NO write verb may ever be routable for pods: dc-api never mutates a pod
+// through the seam, and this pin is the regression guard against a future slice
+// accidentally widening a core-group workload family into the write path.
+func TestRoutableVerbs_PodsReadOnly(t *testing.T) {
+	podGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+	verbs, ok := RoutableVerbs(podGVR)
+	if !ok {
+		t.Fatal("pods must be an onboarded routable family")
+	}
+	for _, v := range []Verb{VerbGet, VerbList} {
+		if !verbs[v] {
+			t.Errorf("pods must route %v, got %v", v, verbs)
+		}
+	}
+	for _, v := range []Verb{VerbCreate, VerbApply, VerbUpdate, VerbDelete, VerbWatch} {
+		if verbs[v] {
+			t.Errorf("pods must NOT route %v — the family is READ-ONLY", v)
+		}
+	}
+	if len(verbs) != 2 {
+		t.Errorf("pods routable set = %v, want exactly {Get, List}", verbs)
+	}
+	if StatusFallbackOK(podGVR) {
+		t.Error("pods must keep StatusFallbackOK=false (only the VM family sets it)")
+	}
+}
+
 // TestDefaultGVKMapperResolvesKnownGVRs pins the derived GVK table to the
-// onboarded entries (and same APIVersion/Kind). The six original entries plus the
+// onboarded entries (and same APIVersion/Kind). The six original entries, the
 // three cloud-provider-SA bootstrap families (serviceaccounts, rolebindings,
-// secrets — F32).
+// secrets — F32), and the six NAT-slice families (provider-networks, vlans,
+// vpc-nat-gateways, iptables-eips, iptables-snat-rules, pods — F15).
 func TestDefaultGVKMapperResolvesKnownGVRs(t *testing.T) {
 	m := DefaultGVKMapper()
 	cases := []struct {
@@ -241,6 +333,12 @@ func TestDefaultGVKMapperResolvesKnownGVRs(t *testing.T) {
 		{schema.GroupVersionResource{Group: "", Version: "v1", Resource: "serviceaccounts"}, "v1", "ServiceAccount"},
 		{schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"}, "rbac.authorization.k8s.io/v1", "RoleBinding"},
 		{schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}, "v1", "Secret"},
+		{schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "provider-networks"}, "kubeovn.io/v1", "ProviderNetwork"},
+		{schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "vlans"}, "kubeovn.io/v1", "Vlan"},
+		{schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "vpc-nat-gateways"}, "kubeovn.io/v1", "VpcNatGateway"},
+		{schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "iptables-eips"}, "kubeovn.io/v1", "IptablesEIP"},
+		{schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "iptables-snat-rules"}, "kubeovn.io/v1", "IptablesSnatRule"},
+		{schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}, "v1", "Pod"},
 	}
 	for _, c := range cases {
 		av, k, ok := m.GVK(c.gvr)

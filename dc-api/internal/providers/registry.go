@@ -313,8 +313,9 @@ func (r *Registry) buildLocalSet(cfg *config.Config) (*ProviderSet, error) {
 //     yields a clear "no agent connected for zone" error, never a silent hit on
 //     the LOCAL cluster. The harvester client routes the VM-object CRUD lifecycle
 //     through it; the kubeovn client routes the onboarded CRD lifecycle (VPC/
-//     Subnet/NAD create/get/delete) through it, while the VPC network plumbing
-//     (NAT/DNS/ACL/route/peering) stays local-only behind a clear error.
+//     Subnet/NAD create/get/delete), the ACL/route/peering spec writes, and the
+//     F15 NAT lifecycle through it, while the per-VPC DNS plumbing stays
+//     local-only behind a clear error.
 //   - Cluster is the SAME global Rancher client every zone shares.
 //
 // buildRemoteSet performs NO network I/O (no kubeconfig to dial), so it is safe
