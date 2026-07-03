@@ -16,13 +16,15 @@ import (
 	"github.com/wso2/dc-api/internal/providers/common"
 )
 
-// This file proves the GAP this slice closes: a REMOTE kubeovn client
-// (NewRemoteClient, c.dynamic == nil) routes the ONBOARDED CRD lifecycle
+// This file proves the GAP the CRD-lifecycle slice closed: a REMOTE kubeovn
+// client (NewRemoteClient, c.dynamic == nil) routes the ONBOARDED CRD lifecycle
 // (Vpc/Subnet/NAD create/get/delete) through its agent-only Accessor instead of
-// returning a local-only error — while the VPC network PLUMBING (NAT/DNS/ACL/
-// route/peering) still returns localOnlyErr. It also proves a remote client built
-// with a NoCreds-only accessor (no agent) fails CLOSED with a clear "no agent
-// connected" error rather than nil-dereferencing c.dynamic.
+// returning a local-only error — while the REMAINING local-only plumbing (NAT,
+// per-VPC DNS) still returns localOnlyErr. The peering/route-table/NSG spec
+// writes are no longer in the local-only set — network_plumbing_seam_test.go
+// proves they route through the seam on a remote client. It also proves a
+// remote client built with a NoCreds-only accessor (no agent) fails CLOSED with
+// a clear "no agent connected" error rather than nil-dereferencing c.dynamic.
 //
 // The remote client has c.dynamic == nil by construction, so these tests are the
 // regression guard against re-introducing a `c.dynamic == nil` guard on a routed
@@ -142,7 +144,7 @@ func (a *remoteAgentAccessor) sawGet(gvr schema.GroupVersionResource) bool {
 
 func TestRemoteClient_CreateVNet_RoutesThroughAgent(t *testing.T) {
 	agent := &remoteAgentAccessor{}
-	c := NewRemoteClient(agent, "lk", "laptop")
+	c := NewRemoteClient(agent, "lk", "zone-2")
 	if c.dynamic != nil {
 		t.Fatal("remote client must have a nil dynamic client")
 	}
@@ -161,7 +163,7 @@ func TestRemoteClient_CreateVNet_RoutesThroughAgent(t *testing.T) {
 
 func TestRemoteClient_GetVNet_RoutesThroughAgent(t *testing.T) {
 	agent := &remoteAgentAccessor{}
-	c := NewRemoteClient(agent, "lk", "laptop")
+	c := NewRemoteClient(agent, "lk", "zone-2")
 
 	res, err := c.GetVNet(context.Background(), "vnet-tenant-proj-app")
 	if err != nil {
@@ -177,7 +179,7 @@ func TestRemoteClient_GetVNet_RoutesThroughAgent(t *testing.T) {
 
 func TestRemoteClient_DeleteVNet_RoutesThroughAgent(t *testing.T) {
 	agent := &remoteAgentAccessor{}
-	c := NewRemoteClient(agent, "lk", "laptop")
+	c := NewRemoteClient(agent, "lk", "zone-2")
 
 	if err := c.DeleteVNet(context.Background(), "vnet-tenant-proj-app"); err != nil {
 		t.Fatalf("DeleteVNet error: %v", err)
@@ -189,7 +191,7 @@ func TestRemoteClient_DeleteVNet_RoutesThroughAgent(t *testing.T) {
 
 func TestRemoteClient_CreateSubnet_RoutesThroughAgent(t *testing.T) {
 	agent := &remoteAgentAccessor{}
-	c := NewRemoteClient(agent, "lk", "laptop")
+	c := NewRemoteClient(agent, "lk", "zone-2")
 
 	vnetUID := vpcName("app", "tenant", "proj")
 	res, err := c.CreateSubnet(context.Background(), vnetUID, sampleSubnetSpec())
@@ -214,7 +216,7 @@ func TestRemoteClient_CreateSubnet_RoutesThroughAgent(t *testing.T) {
 
 func TestRemoteClient_DeleteSubnet_RoutesThroughAgent(t *testing.T) {
 	agent := &remoteAgentAccessor{}
-	c := NewRemoteClient(agent, "lk", "laptop")
+	c := NewRemoteClient(agent, "lk", "zone-2")
 
 	if err := c.DeleteSubnet(context.Background(), "subnet-tenant-proj-app-sub"); err != nil {
 		t.Fatalf("DeleteSubnet error: %v", err)
@@ -230,37 +232,36 @@ func TestRemoteClient_DeleteSubnet_RoutesThroughAgent(t *testing.T) {
 	}
 }
 
-// ── Remote PLUMBING methods stay local-only ──────────────────────────────────
+// ── Remaining remote PLUMBING methods stay local-only ────────────────────────
 
+// TestRemoteClient_PlumbingMethods_ReturnLocalOnlyErr pins the REMAINING
+// local-only boundary after the spec-write plumbing slice: the per-VPC DNS
+// zone/record ops (ConfigMap-backed — configmaps are not an onboarded family).
+// The peering/route-table/NSG ops that used to sit here are now agent-routable;
+// their remote-client coverage lives in network_plumbing_seam_test.go.
 func TestRemoteClient_PlumbingMethods_ReturnLocalOnlyErr(t *testing.T) {
 	agent := &remoteAgentAccessor{}
-	c := NewRemoteClient(agent, "lk", "laptop")
+	c := NewRemoteClient(agent, "lk", "zone-2")
 	ctx := context.Background()
 
-	t.Run("CreateRouteTable", func(t *testing.T) {
-		_, err := c.CreateRouteTable(ctx, "vnet-tenant-proj-app", models.RouteTableSpec{
-			Routes: []models.RouteRule{{Name: "default", DestinationCIDR: "0.0.0.0/0", NextHopType: "virtual_appliance", NextHopIP: "10.0.0.1"}},
-		})
-		assertLocalOnlyErr(t, err, "lk", "laptop")
-	})
-	t.Run("UpdateRouteTableRoutes", func(t *testing.T) {
-		err := c.UpdateRouteTableRoutes(ctx, "vnet-tenant-proj-app/rt-uuid", nil)
-		assertLocalOnlyErr(t, err, "lk", "laptop")
-	})
-	t.Run("CreatePeering", func(t *testing.T) {
-		_, err := c.CreatePeering(ctx, "vnet-a", "vnet-b", models.PeeringSpec{})
-		assertLocalOnlyErr(t, err, "lk", "laptop")
-	})
 	t.Run("CreatePrivateDnsZone", func(t *testing.T) {
 		_, err := c.CreatePrivateDnsZone(ctx, "vnet-tenant-proj-app", models.DnsZoneSpec{})
-		assertLocalOnlyErr(t, err, "lk", "laptop")
+		assertLocalOnlyErr(t, err, "lk", "zone-2")
+	})
+	t.Run("DeletePrivateDnsZone", func(t *testing.T) {
+		err := c.DeletePrivateDnsZone(ctx, "configmap-dc-tenant-proj/zone-uuid")
+		assertLocalOnlyErr(t, err, "lk", "zone-2")
 	})
 	t.Run("UpsertDnsRecord", func(t *testing.T) {
 		err := c.UpsertDnsRecord(ctx, "zone-uuid", models.DnsRecord{})
-		assertLocalOnlyErr(t, err, "lk", "laptop")
+		assertLocalOnlyErr(t, err, "lk", "zone-2")
+	})
+	t.Run("DeleteDnsRecord", func(t *testing.T) {
+		err := c.DeleteDnsRecord(ctx, "zone-uuid", "record-uuid")
+		assertLocalOnlyErr(t, err, "lk", "zone-2")
 	})
 
-	// None of the plumbing methods should have touched the agent.
+	// None of the local-only plumbing methods should have touched the agent.
 	if got := agent.createCount() + agent.deleteCount() + agent.getCount(); got != 0 {
 		t.Errorf("plumbing methods touched the agent %d times, want 0", got)
 	}
@@ -271,17 +272,17 @@ func TestRemoteClient_PlumbingMethods_ReturnLocalOnlyErr(t *testing.T) {
 func TestRemoteClient_NoAgent_FailsClosedOnCRDOp(t *testing.T) {
 	// Mirror buildRemoteSet with NO live agent: the Routed decision always declines,
 	// so the accessor falls back to NoCreds — which must error clearly, never panic.
-	noCreds := clusteraccess.NewNoCreds("lk", "laptop")
+	noCreds := clusteraccess.NewNoCreds("lk", "zone-2")
 	routed := clusteraccess.NewRouted(noCreds, func(clusteraccess.Verb, schema.GroupVersionResource) (clusteraccess.Accessor, bool) {
 		return nil, false // no agent connected
 	})
-	c := NewRemoteClient(routed, "lk", "laptop")
+	c := NewRemoteClient(routed, "lk", "zone-2")
 
 	_, err := c.CreateVNet(context.Background(), "tenant", "proj", sampleVNetSpec())
 	if err == nil {
 		t.Fatal("CreateVNet returned nil error with no agent; it must fail closed")
 	}
-	if !strings.Contains(err.Error(), "no agent connected for zone lk/laptop") {
+	if !strings.Contains(err.Error(), "no agent connected for zone lk/zone-2") {
 		t.Errorf("error = %q, want it to name the zone and the no-agent cause", err.Error())
 	}
 

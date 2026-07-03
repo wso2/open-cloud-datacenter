@@ -91,7 +91,12 @@ var vmCapability = AgentCapability{
 }
 
 // The network families (NAD, Vpc, Subnet) are onboarded for the kubeovn CRD
-// CRUD slice (RouteVerbs/AgentVerbs filled below). vmImageCapability is onboarded
+// CRUD slice (RouteVerbs/AgentVerbs filled below); Vpc and Subnet additionally
+// route VerbApply for the network-plumbing spec writes (peering/static-route/ACL
+// lists — server-side applied as minimal single-field objects). The NAD family
+// does NOT route VerbApply: no kubeovn op applies a NAD, and the rule is to
+// never widen a family's RouteVerbs ahead of the verb actually being routed.
+// vmImageCapability is onboarded
 // for the read/list path AND image create (ListImages/resolveImage/CreateImage
 // routed via the agent — RouteVerbs={Get,List,Create}, AgentVerbs={get,list,
 // create,patch}; create+patch because SSA is the agent's create mechanism).
@@ -139,23 +144,30 @@ var (
 		AgentVerbs: []Verb{VerbGet, VerbList, VerbWatch, VerbCreate, VerbApply, VerbDelete},
 	}
 	// vpcCapability onboards the Vpc (VNet) CRUD that CreateVNet/GetVNet/DeleteVNet
-	// route through the kubeovn seam.
+	// route through the kubeovn seam, plus the spec-write plumbing (VerbApply):
+	// the peering (spec.vpcPeerings) and static-route (spec.staticRoutes)
+	// read-modify-write ops server-side apply exactly one spec list each. VerbApply
+	// maps to the k8s "patch" verb the AgentVerbs grant already carried, so adding
+	// it to RouteVerbs changes routing only — the RBAC output is unchanged.
 	vpcCapability = AgentCapability{
 		GVR:        schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "vpcs"},
 		APIVersion: "kubeovn.io/v1",
 		Kind:       "Vpc",
 		Namespaced: false,
-		RouteVerbs: []Verb{VerbGet, VerbCreate, VerbDelete},
+		RouteVerbs: []Verb{VerbGet, VerbCreate, VerbApply, VerbDelete},
 		AgentVerbs: []Verb{VerbGet, VerbList, VerbWatch, VerbCreate, VerbApply, VerbDelete},
 	}
 	// subnetCapability onboards the Subnet CRUD that CreateSubnet/GetSubnet/
-	// DeleteSubnet route through the kubeovn seam.
+	// DeleteSubnet route through the kubeovn seam, plus the spec-write plumbing
+	// (VerbApply): the NSG ACL (spec.acls) read-modify-write ops server-side apply
+	// that one spec list. As with vpcCapability, VerbApply's k8s verb ("patch") was
+	// already in AgentVerbs, so the RBAC output is unchanged.
 	subnetCapability = AgentCapability{
 		GVR:        schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "subnets"},
 		APIVersion: "kubeovn.io/v1",
 		Kind:       "Subnet",
 		Namespaced: false,
-		RouteVerbs: []Verb{VerbGet, VerbCreate, VerbDelete},
+		RouteVerbs: []Verb{VerbGet, VerbCreate, VerbApply, VerbDelete},
 		AgentVerbs: []Verb{VerbGet, VerbList, VerbWatch, VerbCreate, VerbApply, VerbDelete},
 	}
 	// serviceAccountCapability onboards the ServiceAccount create that
@@ -270,11 +282,13 @@ func buildDerived() {
 // UnionRouteVerbs returns the union of RouteVerbs across all capabilities — the
 // set of seam Verbs that MAY route to the agent for ANY family. With the VM,
 // network, image, and cloud-provider-SA families onboarded this equals
-// {VerbGet, VerbList, VerbCreate, VerbDelete} (List added when ListVMs/Images/
-// Networks were routed through the agent; the image family also routes VerbCreate
-// for CreateImage, but VM/NAD already contribute it so the union is unchanged).
-// The SA/RoleBinding/Secret families (F32) route only Get/Create, both already
-// in the union, so the union is unchanged by them too.
+// {VerbGet, VerbList, VerbCreate, VerbApply, VerbDelete} (List added when
+// ListVMs/Images/Networks were routed through the agent; Apply added when the
+// kubeovn network-plumbing spec writes — peering/static-route/ACL lists — were
+// routed through the Vpc/Subnet families; the image family also routes
+// VerbCreate for CreateImage, but VM/NAD already contribute it so the union is
+// unchanged). The SA/RoleBinding/Secret families (F32) route only Get/Create,
+// both already in the union, so the union is unchanged by them too.
 // agentDecision consults this for
 // membership, then gates reads vs writes by the per-family env toggles
 // (VerbList falls on the read side — see IsReadVerb).

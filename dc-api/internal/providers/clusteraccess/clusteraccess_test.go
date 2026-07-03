@@ -546,5 +546,79 @@ func TestRouted_NilDecisionAlwaysDirect(t *testing.T) {
 	}
 }
 
+// ── AgentBacked.Apply: fieldManager forwarding + routability guard ────────────
+
+// TestAgentBackedApply_ForwardsCallerFieldManager proves Apply sends the
+// CALLER's fieldManager (and force flag) on the wire — the load-bearing
+// property for the kubeovn network-plumbing writes, whose per-spec-list
+// managers must not be collapsed to the accessor default (SSA would then prune
+// sibling lists on the same object). An empty caller manager falls back to the
+// accessor's own default, matching the dc-agent executor's empty-default.
+func TestAgentBackedApply_ForwardsCallerFieldManager(t *testing.T) {
+	vpcGVR := schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "vpcs"}
+
+	var gotFM string
+	var gotForce bool
+	sess := &fakeSession{apply: func(_ json.RawMessage, fm string, force bool) (agentgw.ApplyResult, error) {
+		gotFM, gotForce = fm, force
+		return agentgw.ApplyResult{APIVersion: "kubeovn.io/v1", Kind: "Vpc", Name: "vnet-a"}, nil
+	}}
+	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
+
+	obj := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "kubeovn.io/v1", "kind": "Vpc",
+		"metadata": map[string]interface{}{"name": "vnet-a"},
+		"spec":     map[string]interface{}{"staticRoutes": []interface{}{}},
+	}}
+
+	if _, err := a.Apply(context.Background(), vpcGVR, "", obj, "dc-api-kubeovn-staticroutes", true); err != nil {
+		t.Fatalf("Apply error: %v", err)
+	}
+	if gotFM != "dc-api-kubeovn-staticroutes" {
+		t.Errorf("wire fieldManager = %q, want the caller's %q", gotFM, "dc-api-kubeovn-staticroutes")
+	}
+	if !gotForce {
+		t.Error("wire force = false, want the caller's true")
+	}
+
+	// Empty caller manager → the accessor default.
+	if _, err := a.Apply(context.Background(), vpcGVR, "", obj, "", false); err != nil {
+		t.Fatalf("Apply (empty manager) error: %v", err)
+	}
+	if gotFM != "dc-api" {
+		t.Errorf("wire fieldManager = %q for an empty caller value, want the accessor default %q", gotFM, "dc-api")
+	}
+}
+
+// TestAgentBackedApply_NotRoutableFamilyRefused mirrors the Get/List guards: an
+// apply for a family that does not declare VerbApply (the NAD family — mapped,
+// routable for other verbs, but nothing applies a NAD) is refused with
+// ErrOpNotRoutable BEFORE any agent op is issued.
+func TestAgentBackedApply_NotRoutableFamilyRefused(t *testing.T) {
+	nadGVR := schema.GroupVersionResource{Group: "k8s.cni.cncf.io", Version: "v1", Resource: "network-attachment-definitions"}
+
+	applyCalled := false
+	sess := &fakeSession{apply: func(json.RawMessage, string, bool) (agentgw.ApplyResult, error) {
+		applyCalled = true
+		return agentgw.ApplyResult{}, nil
+	}}
+	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
+
+	obj := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+		"metadata": map[string]interface{}{"name": "n", "namespace": "ns"},
+	}}
+	_, err := a.Apply(context.Background(), nadGVR, "ns", obj, "dc-api", true)
+	if err == nil {
+		t.Fatal("Apply on a non-Apply-routable family must error")
+	}
+	if !errors.Is(err, agentgw.ErrOpNotRoutable) {
+		t.Errorf("error = %v, want ErrOpNotRoutable", err)
+	}
+	if applyCalled {
+		t.Error("agent Apply was issued despite the routability guard")
+	}
+}
+
 // Compile-time assertion that the fake satisfies the neutral Session interface.
 var _ agentgw.Session = (*fakeSession)(nil)

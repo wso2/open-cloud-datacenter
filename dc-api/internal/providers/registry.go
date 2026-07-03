@@ -418,7 +418,9 @@ func (r *Registry) For(region, zone string) (*ProviderSet, error) {
 //
 // The routed allow-set is gated per family via clusteraccess.RoutableVerbs(gvr)
 // (the capability registry's RouteVerbs for that GVR), then split reads (VerbGet)
-// by AgentRouteReads, writes (VerbCreate, VerbDelete) by AgentRouteWrites.
+// by AgentRouteReads, writes (VerbCreate, VerbApply, VerbDelete) by
+// AgentRouteWrites (VerbApply routes only for the families that declare it —
+// the Vpc/Subnet network-plumbing spec writes).
 func (r *Registry) agentDecision(region, zone string) clusteraccess.AgentDecision {
 	mapper := clusteraccess.DefaultGVKMapper()
 	fieldManager := "dc-api"
