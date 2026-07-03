@@ -11,6 +11,7 @@ import (
 	_ "github.com/lib/pq"
 	"go.uber.org/zap"
 
+	dbschema "github.com/wso2/open-cloud-datacenter/crds/registry/db"
 	"github.com/wso2/open-cloud-datacenter/crds/registry/internal/config"
 )
 
@@ -119,9 +120,53 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// expectedTables lists every table the operator depends on. verifySchema uses
+// it as a startup guard so the pod fails fast with a clear error if a table is
+// missing, instead of hitting "relation does not exist" mid-request later.
+var expectedTables = []string{
+	"registry_deployments",
+	"registry_credentials",
+	"audit_log",
+	"registry_projects",
+	"registry_project_credentials",
+}
+
+// Migrate applies every embedded migration (db/migrations/*.sql, in filename
+// order) and then verifies all expected tables exist. Each migration is
+// idempotent, so this is safe to run on every startup.
 func (s *Store) Migrate() error {
-	_, err := s.db.Exec(schemaSQL)
-	return err
+	migrations, err := dbschema.LoadMigrations()
+	if err != nil {
+		return fmt.Errorf("load migrations: %w", err)
+	}
+	for _, m := range migrations {
+		if _, err := s.db.Exec(m.SQL); err != nil {
+			return fmt.Errorf("apply migration %s: %w", m.Name, err)
+		}
+		s.logger.Info("migration applied", zap.String("file", m.Name))
+	}
+	return s.verifySchema()
+}
+
+// verifySchema confirms every table in expectedTables is present after
+// migrations have run.
+func (s *Store) verifySchema() error {
+	for _, t := range expectedTables {
+		var exists bool
+		err := s.db.QueryRow(
+			`SELECT EXISTS (
+			   SELECT 1 FROM information_schema.tables
+			   WHERE table_schema = 'public' AND table_name = $1
+			 )`, t).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("verify table %s: %w", t, err)
+		}
+		if !exists {
+			return fmt.Errorf("schema verification failed: table %q missing after migrations", t)
+		}
+	}
+	s.logger.Info("schema verified", zap.Int("tables", len(expectedTables)))
+	return nil
 }
 
 // --- Registry Deployments ---
@@ -496,104 +541,3 @@ func progressJSON(m map[string]string) []byte {
 	b, _ := json.Marshal(m)
 	return b
 }
-
-const schemaSQL = `
-CREATE TABLE IF NOT EXISTS registry_deployments (
-	tenant_id     TEXT PRIMARY KEY,
-	namespace     TEXT NOT NULL,
-	status        TEXT NOT NULL CHECK (status IN ('PENDING','DEPLOYING','READY','FAILED','DELETING','DELETED')),
-	registry_url  TEXT,
-	helm_release  TEXT,
-	plan          TEXT,
-	progress      JSONB DEFAULT '{}',
-	error_message TEXT,
-	hard_delete   BOOLEAN NOT NULL DEFAULT false,
-	created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-	updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-	ready_at      TIMESTAMPTZ,
-	worker_lock   TEXT
-);
-
--- Safe to run on existing clusters: adds hard_delete if it doesn't exist yet.
-ALTER TABLE registry_deployments ADD COLUMN IF NOT EXISTS hard_delete BOOLEAN NOT NULL DEFAULT false;
-
--- Index speeds up the worker's polling queries
-CREATE INDEX IF NOT EXISTS idx_deployments_status
-    ON registry_deployments (status)
-    WHERE status IN ('PENDING', 'DEPLOYING', 'DELETING');
-
-CREATE TABLE IF NOT EXISTS registry_credentials (
-	tenant_id          TEXT PRIMARY KEY REFERENCES registry_deployments(tenant_id) ON DELETE CASCADE,
-	robot_username     TEXT NOT NULL,
-	encrypted_token    BYTEA NOT NULL,
-	token_nonce        BYTEA NOT NULL,
-	admin_username     TEXT NOT NULL DEFAULT 'admin',
-	encrypted_admin_pw BYTEA NOT NULL,
-	admin_pw_nonce     BYTEA NOT NULL,
-	created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-	rotated_at         TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS audit_log (
-	id          BIGSERIAL PRIMARY KEY,
-	tenant_id   TEXT NOT NULL,
-	action      TEXT NOT NULL,
-	actor_id    TEXT,
-	actor_email TEXT,
-	source_ip   TEXT,
-	result      TEXT NOT NULL,
-	details     JSONB DEFAULT '{}',
-	created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_audit_log_tenant_id ON audit_log(tenant_id);
-
-CREATE TABLE IF NOT EXISTS registry_projects (
-	tenant_id           TEXT NOT NULL REFERENCES registry_deployments(tenant_id) ON DELETE CASCADE,
-	project_id          TEXT NOT NULL,
-	registry_name       TEXT NOT NULL DEFAULT '',
-	harbor_project_name TEXT NOT NULL,
-	status              TEXT NOT NULL DEFAULT 'PENDING'
-	                        CHECK (status IN ('PENDING','READY','FAILED')),
-	robot_id            BIGINT,
-	error_message       TEXT,
-	worker_lock         TEXT,
-	created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-	updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-	PRIMARY KEY (tenant_id, project_id, registry_name)
-);
-
--- Safe to run on existing clusters that were created without registry_name.
--- Adds the column and rebuilds the PK to include registry_name.
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name   = 'registry_projects'
-          AND column_name  = 'registry_name'
-    ) THEN
-        ALTER TABLE registry_projects ADD COLUMN registry_name TEXT NOT NULL DEFAULT '';
-        ALTER TABLE registry_projects DROP CONSTRAINT IF EXISTS registry_projects_pkey;
-        ALTER TABLE registry_projects ADD PRIMARY KEY (tenant_id, project_id, registry_name);
-    END IF;
-END
-$$;
-
-CREATE INDEX IF NOT EXISTS idx_registry_projects_status
-    ON registry_projects (status) WHERE status = 'PENDING';
-
-CREATE TABLE IF NOT EXISTS registry_project_credentials (
-	tenant_id          TEXT NOT NULL,
-	project_id         TEXT NOT NULL,
-	registry_name      TEXT NOT NULL DEFAULT '',
-	robot_username     TEXT NOT NULL,
-	encrypted_token    BYTEA NOT NULL,
-	token_nonce        BYTEA NOT NULL,
-	created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-	rotated_at         TIMESTAMPTZ,
-	PRIMARY KEY (tenant_id, project_id, registry_name),
-	FOREIGN KEY (tenant_id, project_id, registry_name)
-	    REFERENCES registry_projects(tenant_id, project_id, registry_name) ON DELETE CASCADE
-);
-`
