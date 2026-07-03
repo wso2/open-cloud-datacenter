@@ -30,6 +30,7 @@ package kubeovn
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -69,6 +70,11 @@ type plumbRecordingAccessor struct {
 
 	listCalls int
 	listErr   error
+
+	// getErr/applyErr, when set, make every Get/Apply fail — for asserting the
+	// driver propagates seam errors and stops (no apply after a failed read).
+	getErr   error
+	applyErr error
 }
 
 var _ clusteraccess.Accessor = (*plumbRecordingAccessor)(nil)
@@ -77,6 +83,9 @@ func (a *plumbRecordingAccessor) Get(_ context.Context, gvr schema.GroupVersionR
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.getCalls = append(a.getCalls, gvr)
+	if a.getErr != nil {
+		return nil, a.getErr
+	}
 	obj, ok := a.objects[name]
 	if !ok {
 		return nil, k8serrors.NewNotFound(gvr.GroupResource(), name)
@@ -101,6 +110,9 @@ func (a *plumbRecordingAccessor) Create(_ context.Context, _ schema.GroupVersion
 func (a *plumbRecordingAccessor) Apply(_ context.Context, gvr schema.GroupVersionResource, ns string, obj *unstructured.Unstructured, fieldManager string, force bool) (*unstructured.Unstructured, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.applyErr != nil {
+		return nil, a.applyErr
+	}
 	// Store the object as-is (no DeepCopy): the driver builds list entries from
 	// model structs whose ints are plain `int`, which the unstructured JSON
 	// deep-copier rejects — json.Marshal (what both real seams do) handles them
@@ -690,12 +702,16 @@ func TestRemoteClient_LegacyPeeringCIDRFallback_FailsClosed(t *testing.T) {
 	// Mirror buildRemoteSet: Routed whose Direct fallback is NoCreds, decision
 	// routing only the verbs the plumbing families declare (Get/Apply here; List
 	// deliberately absent — mirroring subnetCapability.RouteVerbs).
+	sawListRequest := false
 	routed := clusteraccess.NewRouted(
 		clusteraccess.NewNoCreds("lk", "zone-2"),
 		func(v clusteraccess.Verb, _ schema.GroupVersionResource) (clusteraccess.Accessor, bool) {
 			switch v {
 			case clusteraccess.VerbGet, clusteraccess.VerbApply:
 				return agent, true
+			case clusteraccess.VerbList:
+				sawListRequest = true // the legacy CIDR fallback engaged
+				return nil, false
 			default:
 				return nil, false
 			}
@@ -710,5 +726,76 @@ func TestRemoteClient_LegacyPeeringCIDRFallback_FailsClosed(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no agent connected for zone lk/zone-2") {
 		t.Errorf("error = %q, want the NoCreds fail-closed message naming the zone", err.Error())
+	}
+	// Explicit: the failure came from the CIDR-fallback List actually engaging —
+	// a refactor that silently skips the fallback must not pass this test.
+	if !sawListRequest {
+		t.Error("the legacy subnet-CIDR fallback List was never requested — the fail-closed path did not engage")
+	}
+}
+
+// ── Seam error propagation (Get/Apply failures) ──────────────────────────────
+
+// TestAppendVpcPeering_GetErrorPropagates_NoApply: a seam Get failure aborts the
+// read-modify-apply before any write — the error propagates and Apply is never
+// issued (no blind write on unknown state).
+func TestAppendVpcPeering_GetErrorPropagates_NoApply(t *testing.T) {
+	boom := fmt.Errorf("seam get exploded")
+	acc := &plumbRecordingAccessor{getErr: boom}
+	c := &Client{access: acc}
+
+	err := c.appendVpcPeering(context.Background(), "vnet-a", "vnet-b", "100.64.10.0/24")
+	if err == nil || !strings.Contains(err.Error(), "seam get exploded") {
+		t.Fatalf("appendVpcPeering must propagate the Get error, got %v", err)
+	}
+	if got := acc.applyCount(); got != 0 {
+		t.Errorf("seam Apply called %d times after a failed Get, want 0", got)
+	}
+}
+
+// TestAppendVpcPeering_ApplyErrorPropagates: a seam Apply failure propagates to
+// the caller (the handler surfaces it; nothing swallows the write error).
+func TestAppendVpcPeering_ApplyErrorPropagates(t *testing.T) {
+	boom := fmt.Errorf("seam apply exploded")
+	acc := &plumbRecordingAccessor{
+		objects: map[string]*unstructured.Unstructured{
+			"vnet-a": seededVpc("vnet-a", []interface{}{}, []interface{}{}),
+		},
+		applyErr: boom,
+	}
+	c := &Client{access: acc}
+
+	err := c.appendVpcPeering(context.Background(), "vnet-a", "vnet-b", "100.64.10.0/24")
+	if err == nil || !strings.Contains(err.Error(), "seam apply exploded") {
+		t.Fatalf("appendVpcPeering must propagate the Apply error, got %v", err)
+	}
+}
+
+// TestPatchSubnetACLs_ApplyErrorPropagates: the pure-apply subnet-ACL op (its
+// callers do the feeding Get) propagates a seam Apply failure unchanged.
+func TestPatchSubnetACLs_ApplyErrorPropagates(t *testing.T) {
+	boom := fmt.Errorf("seam apply exploded")
+	acc := &plumbRecordingAccessor{applyErr: boom}
+	c := &Client{access: acc}
+	err := c.patchSubnetACLs(context.Background(), "subnet-1", []interface{}{})
+	if err == nil || !strings.Contains(err.Error(), "seam apply exploded") {
+		t.Fatalf("patchSubnetACLs must propagate the Apply error, got %v", err)
+	}
+}
+
+// TestUpdateRouteTableRoutes_GetErrorPropagates_NoApply: the route-table op's
+// FEEDING read fails → the error propagates and the write never runs (same
+// no-blind-write property as the peering op, on the routes code path).
+func TestUpdateRouteTableRoutes_GetErrorPropagates_NoApply(t *testing.T) {
+	boom := fmt.Errorf("seam get exploded")
+	acc := &plumbRecordingAccessor{getErr: boom}
+	c := &Client{access: acc}
+
+	err := c.UpdateRouteTableRoutes(context.Background(), "vnet-a/rt-11111111-1111-1111-1111-111111111111", nil)
+	if err == nil || !strings.Contains(err.Error(), "seam get exploded") {
+		t.Fatalf("UpdateRouteTableRoutes must propagate the Get error, got %v", err)
+	}
+	if got := acc.applyCount(); got != 0 {
+		t.Errorf("seam Apply called %d times after a failed Get, want 0", got)
 	}
 }

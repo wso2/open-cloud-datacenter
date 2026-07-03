@@ -156,6 +156,11 @@ var (
 		Namespaced: false,
 		RouteVerbs: []Verb{VerbGet, VerbCreate, VerbApply, VerbDelete},
 		AgentVerbs: []Verb{VerbGet, VerbList, VerbWatch, VerbCreate, VerbApply, VerbDelete},
+		// Explicitly false (the zero value, spelled out like vmCapability's explicit
+		// true): the Vpc Get consumers are full-object read-modify-writes — the
+		// peering (spec.vpcPeerings) and static-route (spec.staticRoutes) ops read
+		// .spec to rebuild it — so the status-only degrade must never engage.
+		StatusFallbackOK: false,
 	}
 	// subnetCapability onboards the Subnet CRUD that CreateSubnet/GetSubnet/
 	// DeleteSubnet route through the kubeovn seam, plus the spec-write plumbing
@@ -169,6 +174,10 @@ var (
 		Namespaced: false,
 		RouteVerbs: []Verb{VerbGet, VerbCreate, VerbApply, VerbDelete},
 		AgentVerbs: []Verb{VerbGet, VerbList, VerbWatch, VerbCreate, VerbApply, VerbDelete},
+		// Explicitly false (mirrors vpcCapability): the Subnet Get consumers are
+		// full-object read-modify-writes — the NSG ACL (spec.acls) ops read .spec
+		// to rebuild it — so the status-only degrade must never engage.
+		StatusFallbackOK: false,
 	}
 	// serviceAccountCapability onboards the ServiceAccount create that
 	// EnsureCloudProviderSA routes through the harvester seam (the cloud-provider
@@ -321,6 +330,15 @@ func RoutableVerbs(gvr schema.GroupVersionResource) (map[Verb]bool, bool) {
 		out[v] = true
 	}
 	return out, true
+}
+
+// VerbIsRoutable reports whether a single verb is in a GVR's routable set — a
+// direct lookup with no defensive map copy, for the per-call guards on the hot
+// read/write paths (AgentBacked.Get/List/Apply). Callers that need the whole
+// set keep using RoutableVerbs.
+func VerbIsRoutable(gvr schema.GroupVersionResource, v Verb) bool {
+	buildDerived()
+	return derivedRouteSet[gvr][v]
 }
 
 // StatusFallbackOK reports whether AgentBacked.Get may degrade a routed read of

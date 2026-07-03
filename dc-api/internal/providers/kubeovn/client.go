@@ -1021,6 +1021,9 @@ func (c *Client) AssociateRouteTable(_ context.Context, _, _ string) error {
 
 // DisassociateRouteTable is a no-op for the same reason as AssociateRouteTable.
 func (c *Client) DisassociateRouteTable(_ context.Context, _, _ string) error {
+	// M2 stance (a): routes apply VPC-wide.  No backend change (and therefore no
+	// c.dynamic guard — a remote zone's disassociation is the same pure no-op).
+	// See AssociateRouteTable.
 	return nil
 }
 

@@ -134,7 +134,7 @@ func (a *AgentBacked) Get(ctx context.Context, gvr schema.GroupVersionResource, 
 	// routable family for Get — e.g. the pre-seeded virtualmachineinstances, which
 	// has no RouteVerbs. Refuse rather than issue a read the agent's SA may not be
 	// permitted to serve; the caller falls back to the direct path.
-	if verbs, ok := RoutableVerbs(gvr); !ok || !verbs[VerbGet] {
+	if !VerbIsRoutable(gvr, VerbGet) {
 		return nil, fmt.Errorf("clusteraccess: get of %s not routable: %w", gvr.String(), agentgw.ErrOpNotRoutable)
 	}
 	ref, err := a.ref(gvr, ns, name)
@@ -250,7 +250,7 @@ func (a *AgentBacked) List(ctx context.Context, gvr schema.GroupVersionResource,
 	// virtualmachineinstances, which is in the mapper as a superset but has no
 	// RouteVerbs. Refuse to route such a family to the agent rather than issuing a
 	// list the agent's SA may not be permitted (least-privilege) to serve.
-	if verbs, ok := RoutableVerbs(gvr); !ok || !verbs[VerbList] {
+	if !VerbIsRoutable(gvr, VerbList) {
 		return nil, fmt.Errorf("clusteraccess: list of %s not routable: %w", gvr.String(), agentgw.ErrOpNotRoutable)
 	}
 	apiVersion, kind, ok := a.mapper.GVK(gvr)
@@ -333,9 +333,13 @@ func (a *AgentBacked) Apply(ctx context.Context, gvr schema.GroupVersionResource
 	// for a family that does not declare VerbApply, rather than performing a write
 	// the allow-set never granted. The Routed decision already gates this per
 	// call; the guard keeps the contract uniform for any direct AgentBacked use.
-	// Create/Update do NOT pass through here (they call applyWith directly), so
-	// families that route VerbCreate without VerbApply are unaffected.
-	if verbs, ok := RoutableVerbs(gvr); !ok || !verbs[VerbApply] {
+	// Create/Update are DELIBERATELY exempt: they call applyWith directly, are
+	// gated per call by the Routed decision's verb allow-set (VerbCreate/
+	// VerbUpdate), always use the accessor's own fieldManager, and have no direct
+	// AgentBacked callers — so a family that routes VerbCreate without VerbApply
+	// (SA/RoleBinding, provider-network-style creates) still creates via SSA
+	// without needing VerbApply in its routable set.
+	if !VerbIsRoutable(gvr, VerbApply) {
 		return nil, fmt.Errorf("clusteraccess: apply of %s not routable: %w", gvr.String(), agentgw.ErrOpNotRoutable)
 	}
 	if fieldManager == "" {
