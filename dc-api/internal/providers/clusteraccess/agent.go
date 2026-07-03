@@ -313,19 +313,42 @@ func (a *AgentBacked) Update(ctx context.Context, gvr schema.GroupVersionResourc
 	return a.apply(ctx, gvr, ns, obj)
 }
 
-// Apply deliberately IGNORES the caller's fieldManager argument and uses
-// a.fieldManager instead: the agent owns the field-manager identity for every op
-// it applies (it is fixed at the agent boundary, not chosen per call site), so the
-// caller's value is intentionally not forwarded. This is by design, not a bug.
-func (a *AgentBacked) Apply(ctx context.Context, gvr schema.GroupVersionResource, ns string, obj *unstructured.Unstructured, _ string, force bool) (*unstructured.Unstructured, error) {
-	return a.applyForce(ctx, gvr, ns, obj, force)
+// Apply FORWARDS the caller's fieldManager (falling back to a.fieldManager when
+// empty), unlike Create/Update which always use the accessor's own manager.
+//
+// The distinction is load-bearing for the kubeovn network-plumbing writes, the
+// seam's only direct Apply callers: they server-side apply MINIMAL single-field
+// objects (spec.vpcPeerings / spec.staticRoutes / spec.acls) under a DEDICATED
+// field manager per spec list. SSA replaces a manager's whole applied field set
+// on every apply, so two of those writes sharing one manager on the same object
+// would prune each other's list (and, on an agent-created object, the create
+// manifest's labels/namespaces) — verified against the apiserver's own
+// managedfields engine. Collapsing every apply to a.fieldManager here would
+// silently reintroduce exactly that wipe on the agent path, so the caller's
+// manager identity must survive the wire. The dc-agent executor honours the
+// wire's field_manager and only defaults when it is empty, matching this
+// fallback.
+func (a *AgentBacked) Apply(ctx context.Context, gvr schema.GroupVersionResource, ns string, obj *unstructured.Unstructured, fieldManager string, force bool) (*unstructured.Unstructured, error) {
+	// Routability guard FIRST (mirrors Get/List): refuse to issue an agent apply
+	// for a family that does not declare VerbApply, rather than performing a write
+	// the allow-set never granted. The Routed decision already gates this per
+	// call; the guard keeps the contract uniform for any direct AgentBacked use.
+	// Create/Update do NOT pass through here (they call applyWith directly), so
+	// families that route VerbCreate without VerbApply are unaffected.
+	if verbs, ok := RoutableVerbs(gvr); !ok || !verbs[VerbApply] {
+		return nil, fmt.Errorf("clusteraccess: apply of %s not routable: %w", gvr.String(), agentgw.ErrOpNotRoutable)
+	}
+	if fieldManager == "" {
+		fieldManager = a.fieldManager
+	}
+	return a.applyWith(ctx, gvr, ns, obj, fieldManager, force)
 }
 
 func (a *AgentBacked) apply(ctx context.Context, gvr schema.GroupVersionResource, ns string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-	return a.applyForce(ctx, gvr, ns, obj, false)
+	return a.applyWith(ctx, gvr, ns, obj, a.fieldManager, false)
 }
 
-func (a *AgentBacked) applyForce(ctx context.Context, gvr schema.GroupVersionResource, ns string, obj *unstructured.Unstructured, force bool) (*unstructured.Unstructured, error) {
+func (a *AgentBacked) applyWith(ctx context.Context, gvr schema.GroupVersionResource, ns string, obj *unstructured.Unstructured, fieldManager string, force bool) (*unstructured.Unstructured, error) {
 	// Verify the GVR is mappable (loud log on a programming error) even though
 	// the manifest carries apiVersion/kind — keeps the not-routable contract
 	// uniform across verbs.
@@ -341,7 +364,7 @@ func (a *AgentBacked) applyForce(ctx context.Context, gvr schema.GroupVersionRes
 	}
 	ctx, cancel := a.bound(ctx)
 	defer cancel()
-	res, err := a.sess.Apply(ctx, manifest, a.fieldManager, force)
+	res, err := a.sess.Apply(ctx, manifest, fieldManager, force)
 	if err != nil {
 		return nil, a.translateErr(err)
 	}
