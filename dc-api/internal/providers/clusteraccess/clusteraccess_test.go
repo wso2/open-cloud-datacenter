@@ -581,12 +581,61 @@ func TestAgentBackedApply_ForwardsCallerFieldManager(t *testing.T) {
 		t.Error("wire force = false, want the caller's true")
 	}
 
-	// Empty caller manager → the accessor default.
+	// Empty caller manager → the accessor default; force=false forwards too.
 	if _, err := a.Apply(context.Background(), vpcGVR, "", obj, "", false); err != nil {
 		t.Fatalf("Apply (empty manager) error: %v", err)
 	}
 	if gotFM != "dc-api" {
 		t.Errorf("wire fieldManager = %q for an empty caller value, want the accessor default %q", gotFM, "dc-api")
+	}
+	if gotForce {
+		t.Error("wire force = true for the second call, want the caller's false")
+	}
+}
+
+// TestAgentBackedApply_SessionErrorTranslated mirrors the Get/List
+// agent-unavailable tests: a wire failure from Session.Apply must surface
+// through translateErr so callers' errors.Is(ErrAgentUnavailable) checks fire.
+func TestAgentBackedApply_SessionErrorTranslated(t *testing.T) {
+	vpcGVR := schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "vpcs"}
+	sess := &fakeSession{apply: func(json.RawMessage, string, bool) (agentgw.ApplyResult, error) {
+		return agentgw.ApplyResult{}, agentgw.ErrAgentUnavailable
+	}}
+	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
+
+	obj := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "kubeovn.io/v1", "kind": "Vpc",
+		"metadata": map[string]interface{}{"name": "vnet-a"},
+	}}
+	_, err := a.Apply(context.Background(), vpcGVR, "", obj, "dc-api-kubeovn-staticroutes", true)
+	if !errors.Is(err, agentgw.ErrAgentUnavailable) {
+		t.Errorf("error does not wrap ErrAgentUnavailable: %v", err)
+	}
+}
+
+// TestAgentBackedApply_UnmappedGVRNotRoutable mirrors the Get/List unmapped-GVR
+// tests: an apply for a GVR outside the capability registry is refused with
+// ErrOpNotRoutable before any agent op is issued (the routability guard fires
+// first — an unmapped GVR is by definition not Apply-routable).
+func TestAgentBackedApply_UnmappedGVRNotRoutable(t *testing.T) {
+	bogusGVR := schema.GroupVersionResource{Group: "example.com", Version: "v1", Resource: "widgets"}
+	applyCalled := false
+	sess := &fakeSession{apply: func(json.RawMessage, string, bool) (agentgw.ApplyResult, error) {
+		applyCalled = true
+		return agentgw.ApplyResult{}, nil
+	}}
+	a := NewAgentBacked(sess, "lk", "zone-1", "dc-api", DefaultGVKMapper(), zerolog.Nop())
+
+	obj := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "example.com/v1", "kind": "Widget",
+		"metadata": map[string]interface{}{"name": "w"},
+	}}
+	_, err := a.Apply(context.Background(), bogusGVR, "", obj, "dc-api", true)
+	if !errors.Is(err, agentgw.ErrOpNotRoutable) {
+		t.Errorf("error = %v, want ErrOpNotRoutable", err)
+	}
+	if applyCalled {
+		t.Error("agent Apply was issued for an unmapped GVR")
 	}
 }
 
