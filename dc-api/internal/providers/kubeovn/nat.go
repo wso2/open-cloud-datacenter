@@ -17,6 +17,12 @@
 //   1. External subnet name is hardcoded "ovn-vpc-external-network".
 //   2. Subnet provider must be 3-dot-segment: <name>.<ns>.ovn.
 //   3. VPC 0.0.0.0/0 route is YOUR responsibility; merge, don't overwrite.
+//
+// Every Kubernetes op in this file runs through the cluster-access seam
+// (c.access) on onboarded capability families — NAT is agent-routable, so the
+// whole lifecycle works in a remote (agent-only) zone. All created objects use
+// FIXED, deterministic metadata.name values (never generateName), which is what
+// makes the agent path's SSA create idempotent.
 package kubeovn
 
 import (
@@ -34,7 +40,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 // ── GVRs for F15 NAT resources ────────────────────────────────────────────────
@@ -173,7 +178,10 @@ func (c *Client) EnsureVpcNAT(
 			},
 		},
 	}
-	if _, err := c.dynamic.Resource(vpcNatGatewayGVR).Create(ctx, gw, metav1.CreateOptions{}); err != nil {
+	// Cluster-scoped → ns="". Seam Create: local Direct keeps the plain POST with
+	// its IsAlreadyExists tolerance; the agent path is an SSA, which is idempotent
+	// on the fixed name so a retry converges instead of erroring.
+	if _, err := c.access.Create(ctx, vpcNatGatewayGVR, "", gw, metav1.CreateOptions{}); err != nil {
 		if !k8serrors.IsAlreadyExists(err) {
 			return nil, fmt.Errorf("ensure vpc nat: create VpcNatGateway %q: %w", gwName, err)
 		}
@@ -206,7 +214,7 @@ func (c *Client) EnsureVpcNAT(
 			},
 		},
 	}
-	if _, err := c.dynamic.Resource(iptablesEIPGVR).Create(ctx, eipObj, metav1.CreateOptions{}); err != nil {
+	if _, err := c.access.Create(ctx, iptablesEIPGVR, "", eipObj, metav1.CreateOptions{}); err != nil {
 		if !k8serrors.IsAlreadyExists(err) {
 			return nil, fmt.Errorf("ensure vpc nat: create IptablesEIP %q: %w", eipName, err)
 		}
@@ -240,7 +248,7 @@ func (c *Client) EnsureVpcNAT(
 			},
 		},
 	}
-	if _, err := c.dynamic.Resource(iptablesSnatRuleGVR).Create(ctx, snat, metav1.CreateOptions{}); err != nil {
+	if _, err := c.access.Create(ctx, iptablesSnatRuleGVR, "", snat, metav1.CreateOptions{}); err != nil {
 		if !k8serrors.IsAlreadyExists(err) {
 			return nil, fmt.Errorf("ensure vpc nat: create IptablesSnatRule %q: %w", snatName, err)
 		}
@@ -284,17 +292,20 @@ func (c *Client) DeleteVpcNAT(ctx context.Context, vpcName string) error {
 	}
 
 	// ── 2. Delete IptablesSnatRule ────────────────────────────────────────────
-	if err := c.dynamic.Resource(iptablesSnatRuleGVR).Delete(ctx, snatName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+	// Cluster-scoped → ns="". Seam Deletes: the agent path already treats a
+	// missing object as a successful idempotent delete; the IsNotFound tolerance
+	// below covers the local Direct path.
+	if err := c.access.Delete(ctx, iptablesSnatRuleGVR, "", snatName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
 		return fmt.Errorf("delete vpc nat: delete IptablesSnatRule %q: %w", snatName, err)
 	}
 
 	// ── 3. Delete IptablesEIP ─────────────────────────────────────────────────
-	if err := c.dynamic.Resource(iptablesEIPGVR).Delete(ctx, eipName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+	if err := c.access.Delete(ctx, iptablesEIPGVR, "", eipName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
 		return fmt.Errorf("delete vpc nat: delete IptablesEIP %q: %w", eipName, err)
 	}
 
 	// ── 4. Delete VpcNatGateway ───────────────────────────────────────────────
-	if err := c.dynamic.Resource(vpcNatGatewayGVR).Delete(ctx, gwName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+	if err := c.access.Delete(ctx, vpcNatGatewayGVR, "", gwName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
 		return fmt.Errorf("delete vpc nat: delete VpcNatGateway %q: %w", gwName, err)
 	}
 
@@ -320,7 +331,9 @@ func (c *Client) WaitVpcNATPodsGone(ctx context.Context, vpcUID string, timeout 
 	selector := fmt.Sprintf("app=vpc-nat-gw-%s", gwName)
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		list, err := c.dynamic.Resource(podGVR).Namespace("kube-system").List(ctx, metav1.ListOptions{
+		// Pods are namespaced → pass the namespace. Seam List so the poll works in
+		// a remote (agent-only) zone; the pod family routes reads only.
+		list, err := c.access.List(ctx, podGVR, "kube-system", metav1.ListOptions{
 			LabelSelector: selector,
 		})
 		if err == nil && len(list.Items) == 0 {
@@ -340,7 +353,9 @@ func (c *Client) WaitVpcNATPodsGone(ctx context.Context, vpcUID string, timeout 
 // loop to skip VPCs that are already fully provisioned.
 func (c *Client) IsVpcNATPresent(ctx context.Context, vpcName string) (bool, error) {
 	gwName := natGWName(vpcName)
-	_, err := c.dynamic.Resource(vpcNatGatewayGVR).Get(ctx, gwName, metav1.GetOptions{})
+	// Cluster-scoped → ns="". Seam Gets: the agent path shapes a missing object
+	// as a k8s NotFound, so the IsNotFound checks fire identically on both seams.
+	_, err := c.access.Get(ctx, vpcNatGatewayGVR, "", gwName, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return false, nil
 	}
@@ -349,7 +364,7 @@ func (c *Client) IsVpcNATPresent(ctx context.Context, vpcName string) (bool, err
 	}
 
 	eipName := natEIPName(vpcName)
-	_, err = c.dynamic.Resource(iptablesEIPGVR).Get(ctx, eipName, metav1.GetOptions{})
+	_, err = c.access.Get(ctx, iptablesEIPGVR, "", eipName, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return false, nil
 	}
@@ -378,7 +393,10 @@ func (c *Client) ensureProviderNetwork(ctx context.Context, name, bridge string)
 			},
 		},
 	}
-	_, err := c.dynamic.Resource(providerNetworkGVR).Create(ctx, obj, metav1.CreateOptions{})
+	// Cluster-scoped → ns="". Seam Create: local Direct keeps the plain POST with
+	// its IsAlreadyExists tolerance; the agent path is an idempotent SSA on the
+	// fixed (bridge-derived) name.
+	_, err := c.access.Create(ctx, providerNetworkGVR, "", obj, metav1.CreateOptions{})
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
 		return fmt.Errorf("create ProviderNetwork %q: %w", name, err)
 	}
@@ -397,12 +415,17 @@ func (c *Client) ensureVlan(ctx context.Context, name, providerName string, vlan
 				},
 			},
 			"spec": map[string]interface{}{
-				"id":       vlanID,
+				// int64, not int — unstructured content must be JSON-typed
+				// (runtime.DeepCopyJSON panics on plain int; the wire bytes are
+				// identical either way).
+				"id":       int64(vlanID),
 				"provider": providerName,
 			},
 		},
 	}
-	_, err := c.dynamic.Resource(vlanGVR).Create(ctx, obj, metav1.CreateOptions{})
+	// Cluster-scoped → ns="". Seam Create (same tolerance rationale as
+	// ensureProviderNetwork); the name is fixed ("ext-vlan-<id>").
+	_, err := c.access.Create(ctx, vlanGVR, "", obj, metav1.CreateOptions{})
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
 		return fmt.Errorf("create Vlan %q: %w", name, err)
 	}
@@ -451,10 +474,12 @@ func (c *Client) ensureExternalSubnet(ctx context.Context, providerName, cidr, g
 	// Check existence by Get first — Harvester's network webhook returns a
 	// non-AlreadyExists error ("subnet is using the provider already") when the
 	// Subnet exists, which our IsAlreadyExists check below cannot catch.
-	if _, getErr := c.dynamic.Resource(subnetGVR).Get(ctx, subnetName, metav1.GetOptions{}); getErr == nil {
+	// Cluster-scoped → ns="". subnetGVR is an onboarded family, so both the Get
+	// and the Create route through the seam for a remote zone.
+	if _, getErr := c.access.Get(ctx, subnetGVR, "", subnetName, metav1.GetOptions{}); getErr == nil {
 		return nil // already exists, idempotent
 	}
-	_, err := c.dynamic.Resource(subnetGVR).Create(ctx, obj, metav1.CreateOptions{})
+	_, err := c.access.Create(ctx, subnetGVR, "", obj, metav1.CreateOptions{})
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
 		return fmt.Errorf("create external Subnet %q: %w", subnetName, err)
 	}
@@ -503,7 +528,9 @@ func (c *Client) ensureExternalNAD(ctx context.Context, provider string) error {
 			},
 		},
 	}
-	_, err := c.dynamic.Resource(nadGVR).Namespace(ns).Create(ctx, obj, metav1.CreateOptions{})
+	// NAD is namespaced → pass ns. nadGVR is an onboarded family, so this create
+	// routes through the seam for a remote zone (fixed, hardcoded name).
+	_, err := c.access.Create(ctx, nadGVR, ns, obj, metav1.CreateOptions{})
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
 		return fmt.Errorf("create external NAD %s/%s: %w", ns, nadName, err)
 	}
@@ -517,7 +544,10 @@ func (c *Client) ensureExternalNAD(ctx context.Context, provider string) error {
 // preserved). Idempotent: if a default route with the same nextHopIP already
 // exists it is not duplicated.
 func (c *Client) ensureVPCDefaultRoute(ctx context.Context, vpcName, lanIP string) error {
-	vpc, err := c.dynamic.Resource(vpcGVR).Get(ctx, vpcName, metav1.GetOptions{})
+	// Seam Get on the onboarded vpcGVR (cluster-scoped → ns="") feeding the
+	// read-modify-write; the write below (patchVPCStaticRoutes) is already an SSA
+	// through the seam, so the whole op is agent-routable.
+	vpc, err := c.access.Get(ctx, vpcGVR, "", vpcName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("get vpc %q: %w", vpcName, err)
 	}
@@ -573,7 +603,9 @@ func (c *Client) ensureVPCDefaultRoute(ctx context.Context, vpcName, lanIP strin
 // fully managed by dc-api in F15 v1, so we treat any 0.0.0.0/0 as ours.
 // Idempotent — safe to call when no such route exists.
 func (c *Client) removeVPCDefaultRoute(ctx context.Context, vpcName string) error {
-	vpc, err := c.dynamic.Resource(vpcGVR).Get(ctx, vpcName, metav1.GetOptions{})
+	// Seam Get (see ensureVPCDefaultRoute); the agent path shapes a missing VPC
+	// as a k8s NotFound so the already-gone tolerance fires on both seams.
+	vpc, err := c.access.Get(ctx, vpcGVR, "", vpcName, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return nil // VPC already gone
 	}
@@ -606,7 +638,9 @@ func (c *Client) waitForPodRunning(ctx context.Context, ns, podName string, time
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	for {
-		obj, err := c.dynamic.Resource(podGVR).Namespace(ns).Get(ctx, podName, metav1.GetOptions{})
+		// Seam Get (pods are namespaced → pass ns): the pod family routes reads
+		// only, so this status poll works in a remote (agent-only) zone.
+		obj, err := c.access.Get(ctx, podGVR, ns, podName, metav1.GetOptions{})
 		if err == nil {
 			phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
 			if phase == "Running" {
@@ -626,7 +660,8 @@ func (c *Client) waitForEIPReady(ctx context.Context, eipName string, timeout ti
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	for {
-		obj, err := c.dynamic.Resource(iptablesEIPGVR).Get(ctx, eipName, metav1.GetOptions{})
+		// Seam Get on the onboarded iptables-eips family (cluster-scoped → ns="").
+		obj, err := c.access.Get(ctx, iptablesEIPGVR, "", eipName, metav1.GetOptions{})
 		if err == nil {
 			if ready, _, _ := unstructured.NestedBool(obj.Object, "status", "ready"); ready {
 				return nil
@@ -645,7 +680,7 @@ func (c *Client) waitForEIPReady(ctx context.Context, eipName string, timeout ti
 // difference between spec and status is a KubeOVN quirk verified live on
 // v1.15.4).
 func (c *Client) readEIPAssignedIP(ctx context.Context, eipName string) (net.IP, error) {
-	obj, err := c.dynamic.Resource(iptablesEIPGVR).Get(ctx, eipName, metav1.GetOptions{})
+	obj, err := c.access.Get(ctx, iptablesEIPGVR, "", eipName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("get IptablesEIP %q: %w", eipName, err)
 	}
@@ -665,7 +700,8 @@ func (c *Client) waitForSnatReady(ctx context.Context, snatName string, timeout 
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	for {
-		obj, err := c.dynamic.Resource(iptablesSnatRuleGVR).Get(ctx, snatName, metav1.GetOptions{})
+		// Seam Get on the onboarded iptables-snat-rules family (cluster-scoped → ns="").
+		obj, err := c.access.Get(ctx, iptablesSnatRuleGVR, "", snatName, metav1.GetOptions{})
 		if err == nil {
 			if ready, _, _ := unstructured.NestedBool(obj.Object, "status", "ready"); ready {
 				return nil
@@ -839,16 +875,4 @@ func ipLessOrEqual(a, b net.IP) bool {
 // marshalPatch is a thin wrapper around json.Marshal used for patching.
 func marshalPatch(v interface{}) ([]byte, error) {
 	return json.Marshal(v)
-}
-
-// patchVPCSpec is a helper that applies a JSON MergePatch to a VPC spec field.
-// Not exported — callers use the specific helpers above.
-func (c *Client) patchVPCSpec(ctx context.Context, vpcName string, specPatch map[string]interface{}) error {
-	patch := map[string]interface{}{"spec": specPatch}
-	patchBytes, err := json.Marshal(patch)
-	if err != nil {
-		return fmt.Errorf("marshal vpc spec patch: %w", err)
-	}
-	_, err = c.dynamic.Resource(vpcGVR).Patch(ctx, vpcName, types.MergePatchType, patchBytes, metav1.PatchOptions{})
-	return err
 }

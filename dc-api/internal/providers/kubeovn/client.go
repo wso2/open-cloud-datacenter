@@ -182,12 +182,16 @@ type Client struct {
 	// pre-seam behaviour) unless WithRoutedAccessor injects a Routed accessor.
 	// Routed through it: the CRD CRUD lifecycle of the three onboarded network
 	// families — CreateVNet/GetVNet/DeleteVNet (Vpc), the Subnet+NAD
-	// create/get/delete in CreateSubnet/GetSubnet/DeleteSubnet — AND the
-	// VPC/Subnet spec-write plumbing (peering spec.vpcPeerings, route-table
+	// create/get/delete in CreateSubnet/GetSubnet/DeleteSubnet — the VPC/Subnet
+	// spec-write plumbing (peering spec.vpcPeerings, route-table
 	// spec.staticRoutes, NSG spec.acls), whose read-modify-write ops read via the
 	// seam Get and write via the seam Apply (SSA of a minimal single-field
-	// object). Still local-only on c.dynamic: the stuck-finalizer recovery, DNS
-	// zone/record ConfigMaps, NAT/per-VPC-CoreDNS plumbing, and namespace/quota
+	// object) — AND the F15 NAT lifecycle (nat.go: the external-network bootstrap
+	// plus EnsureVpcNAT/DeleteVpcNAT/IsVpcNATPresent/WaitVpcNATPodsGone on the
+	// provider-network/vlan/vpc-nat-gateway/iptables-eip/iptables-snat-rule
+	// families, with read-only pod polls). Still local-only on c.dynamic: the
+	// stuck-finalizer recovery and other best-effort local cleanups, DNS
+	// zone/record ConfigMaps, per-VPC-CoreDNS plumbing, and namespace/quota
 	// provisioning — those GVRs/verbs are not in the agent's mapper/RBAC and are
 	// deferred to a later slice. The seam never leaks an agent concept past the
 	// NetworkProvider interface.
@@ -209,44 +213,48 @@ type Client struct {
 	// remoteRegion/remoteZone are non-empty ONLY for a credential-free REMOTE
 	// client built by NewRemoteClient. For such a client c.dynamic is nil but the
 	// access seam is an agent-only Routed accessor, so the ONBOARDED CRD lifecycle
-	// (VPC/Subnet/NAD create/get/delete) AND the VPC/Subnet spec-write plumbing
-	// (peering, static routes, ACLs) DO route through the zone's agent — every
-	// such method runs its k8s I/O through c.access, never c.dynamic. Only the
-	// remaining plumbing (NAT, per-VPC DNS/CoreDNS, DNS zone/record ConfigMaps,
-	// namespace/quota provisioning) is local-only for a remote zone and returns a
-	// clear localOnlyErr instead of dereferencing the nil dynamic client; the
-	// best-effort local cleanups (stuck-finalizer recovery, the pre-delete ACL
-	// clear) are silently skipped, with the agent-side delete owning finalizer
-	// convergence. Empty for the LOCAL client → today's behaviour. This is the
-	// documented boundary of the remote-zone build: the CRD lifecycle and the
-	// spec-write plumbing reach the agent; the rest is deferred behind an explicit
-	// error rather than silently misrouting to the local cluster.
+	// (VPC/Subnet/NAD create/get/delete), the VPC/Subnet spec-write plumbing
+	// (peering, static routes, ACLs), AND the F15 NAT lifecycle (external-network
+	// bootstrap + per-VPC gateway/EIP/SNAT + pod polls) DO route through the
+	// zone's agent — every such method runs its k8s I/O through c.access, never
+	// c.dynamic. Only the remaining plumbing (per-VPC DNS/CoreDNS, DNS zone/record
+	// ConfigMaps, namespace/quota provisioning) is local-only for a remote zone
+	// and returns a clear localOnlyErr instead of dereferencing the nil dynamic
+	// client; the best-effort local cleanups (stuck-finalizer recovery, the
+	// pre-delete ACL clear) are silently skipped, with the agent-side delete
+	// owning finalizer convergence. Empty for the LOCAL client → today's
+	// behaviour. This is the documented boundary of the remote-zone build: the
+	// CRD lifecycle, the spec-write plumbing, and NAT reach the agent; the rest
+	// is deferred behind an explicit error rather than silently misrouting to the
+	// local cluster.
 	remoteRegion, remoteZone string
 }
 
 // localOnlyErr is returned by a REMOTE client's remaining local-only PLUMBING
-// methods (NAT, per-VPC DNS/CoreDNS, DNS zone/record ConfigMaps, namespace/
-// quota provisioning). dc-api holds no kubeconfig for a remote zone and those
+// methods (per-VPC DNS/CoreDNS, DNS zone/record ConfigMaps, namespace/quota
+// provisioning). dc-api holds no kubeconfig for a remote zone and those
 // operations lean on c.dynamic for GVRs that the agent's mapper/RBAC do not
-// onboard. The onboarded CRD lifecycle (VPC/Subnet/NAD create/get/delete) and
-// the VPC/Subnet spec-write plumbing (peering, static routes, ACLs) do NOT use
-// this — they route through c.access to the zone's agent.
+// onboard. The onboarded CRD lifecycle (VPC/Subnet/NAD create/get/delete), the
+// VPC/Subnet spec-write plumbing (peering, static routes, ACLs), and the F15
+// NAT lifecycle do NOT use this — they route through c.access to the zone's
+// agent.
 func (c *Client) localOnlyErr(op string) error {
 	return fmt.Errorf(
-		"%s is not supported for remote zone %s/%s yet: dc-api holds no direct KubeOVN credentials there and this plumbing (NAT/per-VPC DNS) is local-only for now (the VPC/Subnet/NAD CRD lifecycle and the peering/route/ACL spec writes do route through the zone's agent)",
+		"%s is not supported for remote zone %s/%s yet: dc-api holds no direct KubeOVN credentials there and this plumbing (per-VPC DNS) is local-only for now (the VPC/Subnet/NAD CRD lifecycle, the peering/route/ACL spec writes, and the NAT lifecycle do route through the zone's agent)",
 		op, c.remoteRegion, c.remoteZone)
 }
 
 // NewRemoteClient builds a credential-free KubeOVN client for a REMOTE zone. It
 // has NO kubeconfig and NO dynamic client; the onboarded CRD lifecycle
 // (CreateVNet/GetVNet/DeleteVNet, CreateSubnet/GetSubnet/DeleteSubnet and the
-// NAD create/get/delete inside them) AND the VPC/Subnet spec-write plumbing
-// (peering, route tables, NSG ACLs) run through the supplied agent-only
-// Accessor (a clusteraccess.Routed whose Direct fallback is a clusteraccess.
-// NoCreds, so a missing agent fails clearly rather than hitting the local
-// cluster). The remaining plumbing methods (NAT, per-VPC DNS) return
-// localOnlyErr. region/zone are carried only for clear error messages. Mirrors
-// harvester.NewRemoteClient.
+// NAD create/get/delete inside them), the VPC/Subnet spec-write plumbing
+// (peering, route tables, NSG ACLs), AND the F15 NAT lifecycle (external-
+// network bootstrap, EnsureVpcNAT/DeleteVpcNAT/IsVpcNATPresent/
+// WaitVpcNATPodsGone) run through the supplied agent-only Accessor (a
+// clusteraccess.Routed whose Direct fallback is a clusteraccess.NoCreds, so a
+// missing agent fails clearly rather than hitting the local cluster). The
+// remaining plumbing methods (per-VPC DNS) return localOnlyErr. region/zone are
+// carried only for clear error messages. Mirrors harvester.NewRemoteClient.
 func NewRemoteClient(access clusteraccess.Accessor, region, zone string) *Client {
 	return &Client{
 		// dynamic + restConfig deliberately nil — guarded on plumbing methods.

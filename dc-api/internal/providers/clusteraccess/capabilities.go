@@ -227,19 +227,127 @@ var (
 		// Secret (create for the direct POST, patch because the agent create is SSA).
 		AgentVerbs: []Verb{VerbGet, VerbCreate, VerbApply},
 	}
+	// providerNetworkCapability onboards the ProviderNetwork create that
+	// EnsureExternalNetworkBootstrap routes through the kubeovn seam (the F15 NAT
+	// slice). Cluster-scoped: binds a host bridge to the KubeOVN SDN. The GVR
+	// matches kubeovn.providerNetworkGVR exactly.
+	providerNetworkCapability = AgentCapability{
+		GVR:        schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "provider-networks"},
+		APIVersion: "kubeovn.io/v1",
+		Kind:       "ProviderNetwork",
+		Namespaced: false,
+		// dc-api routes only the idempotent bootstrap create — nothing reads,
+		// lists, or deletes a ProviderNetwork through the seam.
+		RouteVerbs: []Verb{VerbCreate},
+		// SA grant: create + patch, because the AgentBacked create is a server-side
+		// apply (VerbApply→patch). Mirrors serviceAccountCapability's write grant.
+		AgentVerbs: []Verb{VerbCreate, VerbApply},
+	}
+	// vlanCapability onboards the Vlan create that EnsureExternalNetworkBootstrap
+	// routes through the kubeovn seam (the F15 NAT slice). Cluster-scoped:
+	// references the ProviderNetwork and carries the external VLAN id.
+	vlanCapability = AgentCapability{
+		GVR:        schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "vlans"},
+		APIVersion: "kubeovn.io/v1",
+		Kind:       "Vlan",
+		Namespaced: false,
+		// dc-api routes only the idempotent bootstrap create (same shape as
+		// providerNetworkCapability).
+		RouteVerbs: []Verb{VerbCreate},
+		// SA grant: create + patch (SSA is the agent's create mechanism).
+		AgentVerbs: []Verb{VerbCreate, VerbApply},
+	}
+	// vpcNatGatewayCapability onboards the VpcNatGateway lifecycle that
+	// EnsureVpcNAT/DeleteVpcNAT/IsVpcNATPresent route through the kubeovn seam
+	// (the F15 NAT slice). Cluster-scoped in KubeOVN (the gateway CRD carries no
+	// namespace; only the StatefulSet pod it spawns lives in kube-system).
+	vpcNatGatewayCapability = AgentCapability{
+		GVR:        schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "vpc-nat-gateways"},
+		APIVersion: "kubeovn.io/v1",
+		Kind:       "VpcNatGateway",
+		Namespaced: false,
+		// dc-api routes the create (EnsureVpcNAT), the presence read
+		// (IsVpcNATPresent), and the delete (DeleteVpcNAT). No list/apply — no NAT
+		// op lists gateways or applies a spec field, and RouteVerbs never widen
+		// ahead of the verb actually being routed.
+		RouteVerbs: []Verb{VerbGet, VerbCreate, VerbDelete},
+		// SA grant: get for the presence read, create + patch for the create (the
+		// agent create is SSA), delete for the teardown.
+		AgentVerbs: []Verb{VerbGet, VerbCreate, VerbApply, VerbDelete},
+		// Explicitly false (the documented rule: only the VM family degrades to a
+		// status-only read on an old agent; every other family errors clearly).
+		StatusFallbackOK: false,
+	}
+	// iptablesEIPCapability onboards the IptablesEIP lifecycle that EnsureVpcNAT/
+	// DeleteVpcNAT/IsVpcNATPresent route through the kubeovn seam. Cluster-scoped.
+	// The seam Get here is a FULL-object consumer in spirit (waitForEIPReady and
+	// readEIPAssignedIP read .status.ready/.status.ip), but StatusFallbackOK stays
+	// false per the documented rule: only the VM family sets it.
+	iptablesEIPCapability = AgentCapability{
+		GVR:        schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "iptables-eips"},
+		APIVersion: "kubeovn.io/v1",
+		Kind:       "IptablesEIP",
+		Namespaced: false,
+		// Same routable set as vpcNatGatewayCapability: Get (presence check +
+		// readiness poll + assigned-IP read), Create, Delete.
+		RouteVerbs: []Verb{VerbGet, VerbCreate, VerbDelete},
+		AgentVerbs: []Verb{VerbGet, VerbCreate, VerbApply, VerbDelete},
+		// Explicitly false — see the capability doc comment above: a status-only
+		// degrade WOULD serve these .status readers, but only the VM family opts
+		// in; an old agent errors clearly instead.
+		StatusFallbackOK: false,
+	}
+	// iptablesSnatRuleCapability onboards the IptablesSnatRule lifecycle that
+	// EnsureVpcNAT/DeleteVpcNAT route through the kubeovn seam. Cluster-scoped.
+	iptablesSnatRuleCapability = AgentCapability{
+		GVR:        schema.GroupVersionResource{Group: "kubeovn.io", Version: "v1", Resource: "iptables-snat-rules"},
+		APIVersion: "kubeovn.io/v1",
+		Kind:       "IptablesSnatRule",
+		Namespaced: false,
+		// Same routable set as the other two NAT families: Get (readiness poll),
+		// Create, Delete.
+		RouteVerbs: []Verb{VerbGet, VerbCreate, VerbDelete},
+		AgentVerbs: []Verb{VerbGet, VerbCreate, VerbApply, VerbDelete},
+		// Explicitly false (the documented rule: only the VM family opts in).
+		StatusFallbackOK: false,
+	}
+	// podCapability onboards the READ-ONLY pod ops the NAT lifecycle needs:
+	// waitForPodRunning polls the gateway pod's status.phase (Get) and
+	// WaitVpcNATPodsGone polls the gateway StatefulSet's pods by label selector
+	// (List). Deliberately NO write verbs — dc-api never mutates a pod through the
+	// seam, and declaring only reads keeps the routable surface (and the agent's
+	// RBAC) least-privilege. Note the emitted RBAC rule (get,list) is a subset of
+	// the generator's fixed base inventory rule (nodes/pods get,list,watch), so
+	// this capability grants the agent's SA nothing it did not already have — it
+	// exists for GVK mapping and the routing allow-set.
+	podCapability = AgentCapability{
+		GVR:        schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+		APIVersion: "v1",
+		Kind:       "Pod",
+		Namespaced: true,
+		RouteVerbs: []Verb{VerbGet, VerbList},
+		AgentVerbs: []Verb{VerbGet, VerbList},
+		// Explicitly false (the documented rule: only the VM family opts in —
+		// waitForPodRunning reads .status.phase but an old agent errors clearly).
+		StatusFallbackOK: false,
+	}
 )
 
 // AgentCapabilities is THE registry: one declaration per resource family.
 //
 // Onboarded (RouteVerbs + AgentVerbs set): vmCapability, the three network
 // families nadCapability/vpcCapability/subnetCapability (the kubeovn CRD CRUD
-// slice), vmImageCapability (read/list path + image create), and the three
+// slice), vmImageCapability (read/list path + image create), the three
 // cloud-provider SA bootstrap families serviceAccountCapability/
 // roleBindingCapability/secretCapability (F32 — EnsureCloudProviderSA routed
-// through the harvester seam). vmiCapability stays a GVK-only pre-seeded entry
-// that keeps the wire mapper a superset without granting any routing or RBAC.
-// New families are added here (one struct each) in later phases — never by
-// editing the mapper, the allow-set switch, or the RBAC YAML by hand.
+// through the harvester seam), and the six NAT-slice families
+// providerNetworkCapability/vlanCapability/vpcNatGatewayCapability/
+// iptablesEIPCapability/iptablesSnatRuleCapability/podCapability (F15 — the
+// per-VPC NAT lifecycle routed through the kubeovn seam; pods read-only).
+// vmiCapability stays a GVK-only pre-seeded entry that keeps the wire mapper a
+// superset without granting any routing or RBAC. New families are added here
+// (one struct each) in later phases — never by editing the mapper, the
+// allow-set switch, or the RBAC YAML by hand.
 var AgentCapabilities = []AgentCapability{
 	vmCapability,
 	vmiCapability,
@@ -250,6 +358,12 @@ var AgentCapabilities = []AgentCapability{
 	serviceAccountCapability,
 	roleBindingCapability,
 	secretCapability,
+	providerNetworkCapability,
+	vlanCapability,
+	vpcNatGatewayCapability,
+	iptablesEIPCapability,
+	iptablesSnatRuleCapability,
+	podCapability,
 }
 
 // Registry returns the declared capabilities.
@@ -297,8 +411,9 @@ func buildDerived() {
 // routed through the Vpc/Subnet families; the image family also routes
 // VerbCreate for CreateImage, but VM/NAD already contribute it so the union is
 // unchanged). The SA/RoleBinding/Secret families (F32) route only Get/Create,
-// both already in the union, so the union is unchanged by them too.
-// agentDecision consults this for
+// both already in the union, so the union is unchanged by them too — as are the
+// six NAT-slice families (F15), whose Get/List/Create/Delete are all already
+// members. agentDecision consults this for
 // membership, then gates reads vs writes by the per-family env toggles
 // (VerbList falls on the read side — see IsReadVerb).
 //

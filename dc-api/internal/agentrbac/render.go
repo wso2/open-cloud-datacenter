@@ -91,6 +91,13 @@ func RenderAgentRBAC(caps []clusteraccess.AgentCapability) []byte {
 // rule (nodes/pods get,list,watch — serves the agent's hard-coded get_inventory
 // op) followed by one rule per capability that grants RBAC (non-empty
 // AgentVerbs), grouped by apiGroup and sorted deterministically.
+//
+// A capability rule FULLY covered by a base rule is NOT emitted: RBAC rules are
+// additive (union), so the duplicate would grant nothing — and a subset rule
+// sitting next to its superset reads like a failed attempt to narrow the grant
+// (review-flagged on the pods rule). Subsumption is computed at render time, so
+// if a base rule is ever removed (the least-privilege pass), regeneration
+// re-emits the capability rule that now carries the grant.
 func capabilityRules(caps []clusteraccess.AgentCapability) []rule {
 	// Base inventory rule is a generator constant, NOT registry-driven: the
 	// agent's get_inventory reads nodes/pods via the typed clientset.
@@ -98,8 +105,22 @@ func capabilityRules(caps []clusteraccess.AgentCapability) []rule {
 		{apiGroup: "", resources: []string{"nodes", "pods"}, verbs: []string{"get", "list", "watch"}},
 	}
 
-	// Merge capability verbs per (apiGroup, resource).
+	// Coverage granted by the base rules, per (apiGroup, resource).
 	type key struct{ group, resource string }
+	baseCover := map[key]map[string]bool{}
+	for _, r := range rules {
+		for _, res := range r.resources {
+			k := key{group: r.apiGroup, resource: res}
+			if baseCover[k] == nil {
+				baseCover[k] = map[string]bool{}
+			}
+			for _, v := range r.verbs {
+				baseCover[k][v] = true
+			}
+		}
+	}
+
+	// Merge capability verbs per (apiGroup, resource).
 	verbsByKey := map[key]map[string]bool{}
 	for _, c := range caps {
 		if len(c.AgentVerbs) == 0 {
@@ -130,6 +151,21 @@ func capabilityRules(caps []clusteraccess.AgentCapability) []rule {
 	})
 
 	for _, k := range keys {
+		// Skip a rule the base already fully grants (see the doc comment). A
+		// PARTIALLY covered rule is emitted whole — splitting verbs across rules
+		// would obscure which capability asked for what.
+		if cover, ok := baseCover[k]; ok {
+			subsumed := true
+			for v := range verbsByKey[k] {
+				if !cover[v] {
+					subsumed = false
+					break
+				}
+			}
+			if subsumed {
+				continue
+			}
+		}
 		rules = append(rules, rule{
 			apiGroup:  k.group,
 			resources: []string{k.resource},

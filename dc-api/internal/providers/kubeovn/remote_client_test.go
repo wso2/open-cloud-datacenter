@@ -19,12 +19,14 @@ import (
 // This file proves the GAP the CRD-lifecycle slice closed: a REMOTE kubeovn
 // client (NewRemoteClient, c.dynamic == nil) routes the ONBOARDED CRD lifecycle
 // (Vpc/Subnet/NAD create/get/delete) through its agent-only Accessor instead of
-// returning a local-only error — while the REMAINING local-only plumbing (NAT,
-// per-VPC DNS) still returns localOnlyErr. The peering/route-table/NSG spec
+// returning a local-only error — while the REMAINING local-only plumbing
+// (per-VPC DNS) still returns localOnlyErr. The peering/route-table/NSG spec
 // writes are no longer in the local-only set — network_plumbing_seam_test.go
-// proves they route through the seam on a remote client. It also proves a
-// remote client built with a NoCreds-only accessor (no agent) fails CLOSED with
-// a clear "no agent connected" error rather than nil-dereferencing c.dynamic.
+// proves they route through the seam on a remote client — and neither is the
+// F15 NAT lifecycle, whose remote-client coverage lives in nat_seam_test.go.
+// It also proves a remote client built with a NoCreds-only accessor (no agent)
+// fails CLOSED with a clear "no agent connected" error rather than
+// nil-dereferencing c.dynamic.
 //
 // The remote client has c.dynamic == nil by construction, so these tests are the
 // regression guard against re-introducing a `c.dynamic == nil` guard on a routed
@@ -235,10 +237,11 @@ func TestRemoteClient_DeleteSubnet_RoutesThroughAgent(t *testing.T) {
 // ── Remaining remote PLUMBING methods stay local-only ────────────────────────
 
 // TestRemoteClient_PlumbingMethods_ReturnLocalOnlyErr pins the REMAINING
-// local-only boundary after the spec-write plumbing slice: the per-VPC DNS
-// zone/record ops (ConfigMap-backed — configmaps are not an onboarded family).
-// The peering/route-table/NSG ops that used to sit here are now agent-routable;
-// their remote-client coverage lives in network_plumbing_seam_test.go.
+// local-only boundary after the spec-write plumbing and NAT slices: ONLY the
+// per-VPC DNS zone/record ops (ConfigMap-backed — configmaps are not an
+// onboarded family). The peering/route-table/NSG ops that used to sit here are
+// now agent-routable (coverage in network_plumbing_seam_test.go), as is the
+// F15 NAT lifecycle (coverage in nat_seam_test.go).
 func TestRemoteClient_PlumbingMethods_ReturnLocalOnlyErr(t *testing.T) {
 	agent := &remoteAgentAccessor{}
 	c := NewRemoteClient(agent, "lk", "zone-2")
