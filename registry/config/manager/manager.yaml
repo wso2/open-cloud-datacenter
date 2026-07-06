@@ -46,14 +46,22 @@ spec:
         # REQUIRED: the base domain used to build registry URLs
         # (https://registry.<tenant>.<BASE_DOMAIN>).
         - name: BASE_DOMAIN
-          value: "lkdc.wso2.com"
+          value: "192.168.10.6.nip.io"
+        # cert-manager ClusterIssuer for Harbor's per-tenant ingress TLS.
+        # Let's Encrypt CANNOT validate a private nip.io host, so this must be a
+        # self-signed / internal-CA issuer. VERIFY the exact name in your
+        # cluster with:  kubectl get clusterissuer
+        - name: CERT_ISSUER
+          value: "selfsigned-issuer"
+        # Harbor serves that self-signed cert, so the operator's own HTTPS calls
+        # to the Harbor API must skip verification.
+        - name: HARBOR_INSECURE_TLS
+          value: "true"
         # Optional Harbor/Helm settings (defaults shown; override as needed).
         # - name: STORAGE_CLASS
         #   value: "longhorn"
         # - name: INGRESS_CLASS
         #   value: "nginx"
-        # - name: CERT_ISSUER
-        #   value: "letsencrypt-prod"
         # - name: HARBOR_CHART_VERSION
         #   value: "1.14.0"
         # Point Helm's cache/config/data at the writable /tmp volume below,
