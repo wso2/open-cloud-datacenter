@@ -1,9 +1,9 @@
 module "my_cluster" {
-  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.4.0"
+  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.1.7"
 
   # ── Cluster identity ────────────────────────────────────────────────────────
   cluster_name       = "my-cluster"        # REPLACE: your cluster name
-  kubernetes_version = "v1.35.4+rke2r1"
+  kubernetes_version = "v1.34.9+rke2r1"
 
   # ── Rancher / Harvester connection ──────────────────────────────────────────
   create_cloud_credential         = true

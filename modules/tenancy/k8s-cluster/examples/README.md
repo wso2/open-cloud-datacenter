@@ -20,10 +20,11 @@ The sample Terraform files in this directory are a working starting point — co
    - [terraform.tfvars](#55-terraformtfvars)
    - [secret.tfvars](#56-secrettfvars--secrets)
 6. [Machine Pool Sizing Reference](#6-machine-pool-sizing-reference)
-7. [Plan and Apply](#7-plan-and-apply)
-8. [Get Your Kubeconfig](#8-get-your-kubeconfig)
-9. [Managing Your Cluster](#9-managing-your-cluster)
-10. [Troubleshooting](#10-troubleshooting)
+7. [Grant Cluster Access](#7-grant-cluster-access)
+8. [Plan and Apply](#8-plan-and-apply)
+9. [Get Your Kubeconfig](#9-get-your-kubeconfig)
+10. [Managing Your Cluster](#10-managing-your-cluster)
+11. [Troubleshooting](#11-troubleshooting)
 
 ---
 
@@ -180,11 +181,11 @@ Replace every value marked with `# REPLACE` with your own values from sections 1
 
 ```hcl
 module "my_cluster" {
-  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.4.0"
+  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.1.7"
 
   # ── Cluster identity ────────────────────────────────────────────────────────
   cluster_name       = "my-cluster"        # REPLACE: your cluster name
-  kubernetes_version = "v1.35.4+rke2r1"
+  kubernetes_version = "v1.34.9+rke2r1"
 
   # ── Rancher / Harvester connection ──────────────────────────────────────────
   create_cloud_credential         = true
@@ -234,7 +235,7 @@ module "my_cluster" {
 
 #### Kubernetes version reference
 
-Versions follow the format `v<k8s-version>+rke2r<patch>` — for example `v1.35.4+rke2r1`. Browse available releases at https://github.com/rancher/rke2/releases.
+Versions follow the format `v<k8s-version>+rke2r<patch>` — for example `v1.34.9+rke2r1`. Browse available releases at https://github.com/rancher/rke2/releases.
 
 The table below reflects the currently supported component versions. Always verify against the official support matrices before upgrading.
 
@@ -371,7 +372,51 @@ machine_pools = [
 
 ---
 
-## 7. Plan and Apply
+## 7. Grant Cluster Access
+
+The `cluster_members` input lets you grant Rancher users or groups a role on the cluster at provisioning time. This is the Terraform-managed equivalent of going to Rancher UI → your cluster → **Cluster Members** and adding members manually.
+
+### Roles
+
+| Role | Description |
+|------|-------------|
+| `cluster-member` | Read-only access to cluster resources (default) |
+| `cluster-owner` | Full administrative access to the cluster |
+
+### Identity lookup methods
+
+Each entry in `cluster_members` must set **exactly one** identifier field:
+
+| Field | Resolved as | Example |
+|-------|-------------|---------|
+| `email` | User by email address | `dev@example.com` |
+| `user_id` | Bare Rancher user ID | `u-427g5iiyyg` |
+| `user_principal_id` | Full principal ID (local or OIDC user) | `local://u-abc123` |
+| `group_principal_id` | Full principal ID for an OIDC group | `genericoidc_group://platform-team` |
+| `name` + `type = "group"` | Group by display name | — |
+
+### Example
+
+Add `cluster_members` to your `main.tf` module block:
+
+```hcl
+cluster_members = [
+  # Grant a specific user cluster-owner by email
+  { email = "lead@example.com", role = "cluster-owner" },
+
+  # Grant a team's OIDC group cluster-member access (default role, can omit role field)
+  { group_principal_id = "genericoidc_group://my-team", role = "cluster-member" },
+
+  # Grant a local Rancher user by their user principal ID
+  { user_principal_id = "local://u-427g5iiyyg", role = "cluster-member" },
+]
+```
+
+> **Tip:** Find a user's principal ID in Rancher UI → **Users & Authentication** → click the user → copy the ID shown in the URL or the user detail page. For OIDC groups, the principal ID follows the pattern `genericoidc_group://<group-name>` where the group name matches what your identity provider sends in the groups claim.
+
+---
+
+## 8. Plan and Apply
 
 ```bash
 # 1. Initialise — downloads the module and providers
@@ -394,7 +439,7 @@ Individual nodes progress through: `Waiting → Provisioning → Running`.
 
 ---
 
-## 8. Get Your Kubeconfig
+## 9. Get Your Kubeconfig
 
 Once the cluster status is `Active`:
 
@@ -411,7 +456,7 @@ kubectl get nodes
 
 ---
 
-## 9. Managing Your Cluster
+## 10. Managing Your Cluster
 
 ### Scaling a pool
 
@@ -439,7 +484,7 @@ This removes the cluster from Rancher and deletes all node VMs. **This is irreve
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 ### Cluster stuck in `Provisioning`
 
