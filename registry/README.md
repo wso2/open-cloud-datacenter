@@ -19,9 +19,10 @@ Tested on **Harvester 1.7.1** (RKE2 v1.34.3).
   so running multiple replicas yields exactly one active reconciler (hot
   standby for failover).
 - **RegistryBackend reconciler**: generates Harbor's admin + database passwords
-  into an owned Secret, installs Harbor via Helm into the tenant namespace,
-  polls the Harbor API until it is ready, applies system configuration, and
-  reports `Ready` with the registry URL.
+  into an owned Secret, ensures the tenant's `<tenantID>-management` namespace
+  exists (creating it if absent), installs Harbor via Helm into it, polls the
+  Harbor API until it is ready, applies system configuration, and reports
+  `Ready` with the registry URL.
 - **RegistryInstance reconciler**: waits for the backend to be `Ready`, creates
   a Harbor project, mints a project-scoped robot account **once**, and writes
   the robot credentials into an **owner-referenced K8s Secret**
