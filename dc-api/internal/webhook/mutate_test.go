@@ -309,6 +309,120 @@ func TestMissingMAC(t *testing.T) {
 	assert.Empty(t, patch, "missing MAC must produce empty patch — we never synthesise MACs")
 }
 
+// withStatus returns a copy of vm with the given status block attached —
+// simulating the object state KubeVirt maintains once the VM has been
+// processed (status.created/ready flip true when a VMI exists).
+func withStatus(vm map[string]interface{}, status map[string]interface{}) map[string]interface{} {
+	vm["status"] = status
+	return vm
+}
+
+// TestHandle_LiveVMI_NotMutated verifies the provisioning-time guard: a VM
+// whose VMI already exists (status.created=true) must NOT be patched, even
+// when its OVN annotations are missing. Mutating spec.template on a live VM
+// was implicated in a control-plane cluster outage post-mortem.
+func TestHandle_LiveVMI_NotMutated(t *testing.T) {
+	const (
+		nadNS   = "dc-hiran"
+		nadName = "subnet-hiran-vm-sn"
+		mac     = "02:11:22:33:44:55"
+	)
+	nadRef := nadNS + "/" + nadName
+
+	vm := withStatus(
+		buildVM(
+			[]interface{}{multusNetwork("ovn", nadRef)},
+			[]interface{}{bridgeInterface("ovn", mac)},
+			nil, // annotations missing — would normally be patched
+		),
+		map[string]interface{}{
+			"created":         true,
+			"ready":           true,
+			"printableStatus": "Running",
+		},
+	)
+	raw, err := json.Marshal(vm)
+	require.NoError(t, err)
+
+	req := &admissionv1.AdmissionRequest{UID: "live-vmi-uid", Operation: admissionv1.Update}
+	req.Object.Raw = raw
+
+	lookup := newFake(nadRef, cniTypeKubeOVN)
+	m := NewMutator(lookup, silentLogger())
+	resp := m.Handle(context.Background(), req)
+
+	assert.True(t, resp.Allowed)
+	assert.Empty(t, resp.Patch, "a VM with a live VMI must never be mutated")
+}
+
+// TestHandle_PreBootUpdate_StillMutated verifies that the guard does not
+// close the legitimate heal window: an UPDATE on a VM whose VMI has not been
+// created yet (e.g. Rancher pinning the MAC after create, before start) must
+// still be patched.
+func TestHandle_PreBootUpdate_StillMutated(t *testing.T) {
+	const (
+		nadNS   = "dc-hiran"
+		nadName = "subnet-hiran-vm-sn"
+		mac     = "02:11:22:33:44:55"
+	)
+	nadRef := nadNS + "/" + nadName
+
+	vm := withStatus(
+		buildVM(
+			[]interface{}{multusNetwork("ovn", nadRef)},
+			[]interface{}{bridgeInterface("ovn", mac)},
+			nil,
+		),
+		map[string]interface{}{
+			"created":         false,
+			"ready":           false,
+			"printableStatus": "Stopped",
+		},
+	)
+	raw, err := json.Marshal(vm)
+	require.NoError(t, err)
+
+	req := &admissionv1.AdmissionRequest{UID: "pre-boot-uid", Operation: admissionv1.Update}
+	req.Object.Raw = raw
+
+	lookup := newFake(nadRef, cniTypeKubeOVN)
+	m := NewMutator(lookup, silentLogger())
+	resp := m.Handle(context.Background(), req)
+
+	assert.True(t, resp.Allowed)
+	assert.NotEmpty(t, resp.Patch, "pre-boot UPDATE must still be patched — the heal window stays open")
+}
+
+// TestVMHasLiveVMI table-tests the status interpretation.
+func TestVMHasLiveVMI(t *testing.T) {
+	cases := []struct {
+		name   string
+		status map[string]interface{}
+		want   bool
+	}{
+		{"no status at all", nil, false},
+		{"empty status", map[string]interface{}{}, false},
+		{"created true", map[string]interface{}{"created": true}, true},
+		{"ready true", map[string]interface{}{"ready": true}, true},
+		{"printableStatus Running", map[string]interface{}{"printableStatus": "Running"}, true},
+		{"printableStatus Starting", map[string]interface{}{"printableStatus": "Starting"}, true},
+		{"printableStatus Migrating", map[string]interface{}{"printableStatus": "Migrating"}, true},
+		{"printableStatus Stopped", map[string]interface{}{"printableStatus": "Stopped", "created": false}, false},
+		{"printableStatus Provisioning", map[string]interface{}{"printableStatus": "Provisioning"}, false},
+		{"printableStatus WaitingForVolumeBinding", map[string]interface{}{"printableStatus": "WaitingForVolumeBinding"}, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			vm := buildVM(nil, nil, nil)
+			if tc.status != nil {
+				vm = withStatus(vm, tc.status)
+			}
+			assert.Equal(t, tc.want, vmHasLiveVMI(vm))
+		})
+	}
+}
+
 // TestHandle_NilRequest verifies that a nil request is handled gracefully
 // and returns an allow response without panicking.
 func TestHandle_NilRequest(t *testing.T) {

@@ -25,6 +25,24 @@ no-ops when all annotations already match.
 failurePolicy is Ignore — if the webhook is down, VMs on non-OVN NADs are
 unaffected. VMs on OVN NADs fall back to the pre-webhook failure mode.
 
+## Scope guards (post-incident hardening)
+
+The webhook is deliberately narrow, in layers:
+
+1. **Namespace scope** — the MutatingWebhookConfiguration carries a
+   `namespaceSelector` matching `dc-api/managed: "true"`, the label dc-api puts
+   on the per-project namespaces it provisions VMs and tenant clusters into.
+   Platform-infra VMs (the dcapi-controlplane RKE2 nodes in `default`,
+   harvester-system, …) are structurally never intercepted.
+2. **NAD-type filter** — the handler resolves each multus network to its NAD
+   and no-ops unless the CNI type is `kube-ovn`.
+3. **Provisioning-time only** — the handler never mutates a VM that already
+   has a live VMI (`status.created`/`status.ready`/`printableStatus`).
+   The annotations only take effect at VMI creation anyway, and mutating
+   `spec.template` on a running VM can trigger KubeVirt/CDI reconciliation of
+   the live instance. UPDATE stays registered solely for the pre-boot window
+   where Rancher pins the MAC after create but before first start.
+
 ## Running locally
 
     # Build

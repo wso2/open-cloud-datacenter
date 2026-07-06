@@ -52,6 +52,24 @@ func (m *Mutator) Handle(ctx context.Context, req *admissionv1.AdmissionRequest)
 		return allow(nil)
 	}
 
+	// Provisioning-time only: never mutate a VM that already has a live VMI.
+	// The OVN annotations live in spec.template and only take effect when the
+	// VMI is (re)created, so patching a running VM buys nothing — and a
+	// spec.template mutation on a live VM can trigger KubeVirt/CDI
+	// reconciliation of the running instance (implicated in a control-plane
+	// cluster outage post-mortem). MAC heals that arrive after first boot
+	// apply naturally on the next restart, when this webhook sees the
+	// pre-boot UPDATE again.
+	if vmHasLiveVMI(vm) {
+		m.log.Info().
+			Str("uid", string(req.UID)).
+			Str("operation", string(req.Operation)).
+			Str("namespace", req.Namespace).
+			Str("name", req.Name).
+			Msg("webhook: VM already has a live VMI — provisioning-time only, skipping")
+		return allow(nil)
+	}
+
 	patch, err := m.buildPatch(ctx, vm)
 	if err != nil {
 		m.log.Error().Err(err).Str("uid", string(req.UID)).Msg("webhook: failed to build patch — allowing unchanged")
@@ -228,6 +246,31 @@ func (m *Mutator) buildPatch(ctx context.Context, vm map[string]interface{}) ([]
 	}
 
 	return ops, nil
+}
+
+// vmHasLiveVMI reports whether the VirtualMachine already has a live VMI
+// behind it. status.created flips true as soon as KubeVirt instantiates the
+// VMI (status.ready once it is running); printableStatus is checked as a
+// belt-and-suspenders signal for in-flight lifecycle states. Pre-boot states
+// (no status, Stopped, Provisioning, WaitingForVolumeBinding, …) return
+// false so provisioning-time UPDATEs — e.g. Rancher pinning the MAC after
+// create but before start — are still mutated.
+func vmHasLiveVMI(vm map[string]interface{}) bool {
+	status, ok := getNestedMap(vm, "status")
+	if !ok {
+		return false
+	}
+	if created, _ := status["created"].(bool); created {
+		return true
+	}
+	if ready, _ := status["ready"].(bool); ready {
+		return true
+	}
+	switch s, _ := status["printableStatus"].(string); s {
+	case "Starting", "Running", "Paused", "Stopping", "Terminating", "Migrating":
+		return true
+	}
+	return false
 }
 
 // annotationOp returns the right RFC 6902 op ("add" or "replace") for a single
