@@ -4,10 +4,15 @@ metadata:
   labels:
     app.kubernetes.io/name: registry
     app.kubernetes.io/managed-by: kustomize
-  name: registryinstance-sample
+  name: ri-sample-registry
   namespace: registry-system
-  annotations:
-    registry.opencloud.wso2.com/hard-delete: "false"
 spec:
   tenantID: sample-tenant
+  projectID: sample-project
+  registryName: sample-registry
   plan: starter
+  # Retain (default) leaves the Harbor project on delete; Delete removes it.
+  reclaimPolicy: Retain
+  backendRef:
+    name: rb-sample-tenant
+    namespace: registry-system

@@ -48,6 +48,13 @@ type RegistryInstanceSpec struct {
 	// namespace: dc-tenant-<tenantID>). dc-api sets this; the controller reads it
 	// to locate the running Harbor instance across namespaces.
 	BackendRef BackendRef `json:"backendRef"`
+
+	// ReclaimPolicy controls what happens to the Harbor project (and its
+	// images) when this instance is deleted. Retain (default) leaves the
+	// project intact; Delete removes it upstream.
+	// +kubebuilder:validation:Enum=Retain;Delete
+	// +kubebuilder:default=Retain
+	ReclaimPolicy string `json:"reclaimPolicy,omitempty"`
 }
 
 type RegistryInstanceStatus struct {
@@ -55,14 +62,21 @@ type RegistryInstanceStatus struct {
 	// +kubebuilder:validation:Enum=Pending;Provisioning;Ready;Failed;Terminating
 	Phase string `json:"phase,omitempty"`
 
+	// ObservedGeneration is the .metadata.generation the controller last
+	// reconciled.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// Conditions holds standard Kubernetes status conditions.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// RegistryURL is the Harbor portal URL, populated when Phase is Ready.
 	RegistryURL string `json:"registryURL,omitempty"`
 
-	// Progress tracks sub-step status during provisioning (e.g. "namespace": "READY").
-	// Mirrors the backend's Progress until the Harbor project step takes over.
+	// CredentialsSecretName is the name (in this namespace) of the Secret
+	// holding the robot username + token for this registry. Owned by this CR.
+	CredentialsSecretName string `json:"credentialsSecretName,omitempty"`
+
+	// Progress is retained for API compatibility; no longer populated.
 	Progress map[string]string `json:"progress,omitempty"`
 
 	// Message contains error details when Phase is Failed.

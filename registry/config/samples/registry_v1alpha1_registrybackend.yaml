@@ -4,5 +4,10 @@ metadata:
   labels:
     app.kubernetes.io/name: registry
     app.kubernetes.io/managed-by: kustomize
-  name: registrybackend-sample
-spec: {}
+  name: rb-sample-tenant
+  namespace: registry-system
+spec:
+  tenantID: sample-tenant
+  plan: starter
+  # Retain (default) keeps Harbor's PVCs on delete; Delete removes them.
+  reclaimPolicy: Retain

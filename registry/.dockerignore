@@ -9,6 +9,3 @@
 # Re-include Go module files
 !go.mod
 !go.sum
-
-# Re-include embedded SQL schema/migrations (compiled in via //go:embed)
-!**/*.sql

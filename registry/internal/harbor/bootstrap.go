@@ -187,6 +187,15 @@ func (c *Client) CreateProjectRobotAccount(ctx context.Context, projectName, rob
 	return &robot, nil
 }
 
+// DeleteProject deletes a Harbor project by name. 404 (already gone) is treated
+// as success. 412 Precondition Failed means the project still has repositories;
+// Harbor refuses to delete a non-empty project, so we surface that as an error
+// (the caller leaves cleanup to an admin rather than silently orphaning data).
+func (c *Client) DeleteProject(ctx context.Context, projectName string) error {
+	return c.do(ctx, "DELETE", "/api/v2.0/projects/"+projectName, nil, nil,
+		http.StatusOK, http.StatusNoContent, http.StatusNotFound)
+}
+
 // Bootstrap runs the full first-run setup: configure → create project → create robot.
 // Returns the robot account credentials.
 func (c *Client) Bootstrap(ctx context.Context) (*RobotAccount, error) {

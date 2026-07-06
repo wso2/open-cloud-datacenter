@@ -2,235 +2,328 @@ package controller
 
 import (
 	"context"
-	"errors"
+	"fmt"
+	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	registryv1alpha1 "github.com/wso2/open-cloud-datacenter/crds/registry/api/v1alpha1"
-	"github.com/wso2/open-cloud-datacenter/crds/registry/internal/db"
+	"github.com/wso2/open-cloud-datacenter/crds/registry/internal/config"
+	"github.com/wso2/open-cloud-datacenter/crds/registry/internal/harbor"
 )
 
-const finalizerName = "registry.opencloud.wso2.com/finalizer"
+const instanceFinalizer = "registry.opencloud.wso2.com/instance-cleanup"
 
-// dbProjectStatusToPhase maps the internal DB project status (ALL CAPS) to the
-// title-case phase values the CR status.phase field uses.
-func dbProjectStatusToPhase(s string) string {
-	switch s {
-	case string(db.StatusPending):
-		return PhasePending
-	case string(db.StatusReady):
-		return PhaseReady
-	case string(db.StatusFailed):
-		return PhaseFailed
-	default:
-		return s
-	}
-}
-
-// setInstanceReadyCondition upserts the "Ready" condition on the instance status.
-// Only updates LastTransitionTime when the Status changes, matching Kubernetes conventions.
-func setInstanceReadyCondition(s *registryv1alpha1.RegistryInstanceStatus, status metav1.ConditionStatus, reason, message string) {
-	cond := metav1.Condition{
-		Type:               "Ready",
-		Status:             status,
-		LastTransitionTime: metav1.Now(),
-		Reason:             reason,
-		Message:            message,
-	}
-	for i, c := range s.Conditions {
-		if c.Type == "Ready" {
-			if c.Status == status {
-				return
-			}
-			s.Conditions[i] = cond
-			return
-		}
-	}
-	s.Conditions = append(s.Conditions, cond)
-}
-
-// RegistryInstanceReconciler reconciles RegistryInstance CRs.
-//
-// Lifecycle:
-//
-//	Phase 1 — Wait for the per-tenant RegistryBackend to reach Ready.
-//	           Mirror backend status into the Instance while waiting.
-//	Phase 2 — Ensure a registry_projects row exists so the project_worker
-//	           can create the Harbor project + robot account.
-//	           Sync project status back into CR status.
+// RegistryInstanceReconciler provisions one Harbor project + robot account per
+// registry. The robot credentials are written into an owner-referenced K8s
+// Secret; dc-api reads that Secret directly (no DB, no HTTP gateway).
 type RegistryInstanceReconciler struct {
 	client.Client
-	Store *db.Store
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
+	HelmCfg  config.HelmConfig
 }
+
+// +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registryinstances,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registryinstances/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registryinstances/finalizers,verbs=update
+// +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registrybackends,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;delete
 
 func (r *RegistryInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	var instance registryv1alpha1.RegistryInstance
-	if err := r.Get(ctx, req.NamespacedName, &instance); err != nil {
+	var cr registryv1alpha1.RegistryInstance
+	if err := r.Get(ctx, req.NamespacedName, &cr); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("get RegistryInstance: %w", err)
 	}
 
-	// ── Deletion path ──────────────────────────────────────────────────────────
-	if !instance.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&instance, finalizerName) {
-			if instance.Spec.ProjectID != "" {
-				_ = r.Store.DeleteProject(ctx, instance.Spec.TenantID, instance.Spec.ProjectID, instanceRegistryName(&instance))
-			}
-			controllerutil.RemoveFinalizer(&instance, finalizerName)
-			return ctrl.Result{}, r.Update(ctx, &instance)
-		}
-		return ctrl.Result{}, nil
+	if !cr.DeletionTimestamp.IsZero() {
+		return r.handleDelete(ctx, &cr, log)
 	}
-
-	// ── Add finalizer on first reconcile ───────────────────────────────────────
-	if !controllerutil.ContainsFinalizer(&instance, finalizerName) {
-		controllerutil.AddFinalizer(&instance, finalizerName)
-		if err := r.Update(ctx, &instance); err != nil {
-			return ctrl.Result{}, err
+	if !controllerutil.ContainsFinalizer(&cr, instanceFinalizer) {
+		controllerutil.AddFinalizer(&cr, instanceFinalizer)
+		if err := r.Update(ctx, &cr); err != nil {
+			return ctrl.Result{}, fmt.Errorf("add finalizer: %w", err)
 		}
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// ── Phase 1: wait for RegistryBackend ──────────────────────────────────────
-	// BackendRef is a required non-pointer field; both Name and Namespace are always set by dc-api.
-	backendName := instance.Spec.BackendRef.Name
-	backendNS := instance.Spec.BackendRef.Namespace
-
-	var backend registryv1alpha1.RegistryBackend
-	if err := r.Get(ctx, client.ObjectKey{Name: backendName, Namespace: backendNS}, &backend); err != nil {
-		if apierrors.IsNotFound(err) {
-			msg := "waiting for RegistryBackend " + backendNS + "/" + backendName
-			_ = r.updateStatus(ctx, req.NamespacedName, func(s *registryv1alpha1.RegistryInstanceStatus) {
-				s.Phase = PhasePending
-				s.Message = msg
-				setInstanceReadyCondition(s, metav1.ConditionFalse, "BackendNotFound", msg)
-			})
-			log.Info("RegistryBackend not found; requeuing", "backend", backendNS+"/"+backendName)
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-		}
-		return ctrl.Result{}, err
+	// 1. Resolve the Backend and wait for it to be Ready.
+	backend, res, err := r.resolveBackend(ctx, &cr)
+	if backend == nil {
+		return res, err
 	}
 
-	if backend.Status.Phase != PhaseReady {
-		_ = r.updateStatus(ctx, req.NamespacedName, func(s *registryv1alpha1.RegistryInstanceStatus) {
-			s.Phase = backend.Status.Phase
-			s.RegistryURL = backend.Status.RegistryURL
-			s.Progress = backend.Status.Progress
-			s.Message = backend.Status.Message
-			setInstanceReadyCondition(s, metav1.ConditionFalse, "BackendNotReady",
-				"RegistryBackend phase="+backend.Status.Phase)
-		})
-		log.Info("RegistryBackend not ready; requeuing", "backendPhase", backend.Status.Phase)
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	}
-
-	// ── Phase 2: ensure Harbor project row exists ──────────────────────────────
-	if instance.Spec.ProjectID == "" {
-		log.Info("RegistryInstance has no projectID — skipping Phase 2")
-		return ctrl.Result{}, nil
-	}
-
-	rName := instanceRegistryName(&instance)
-	proj, err := r.Store.GetProject(ctx, instance.Spec.TenantID, instance.Spec.ProjectID, rName)
+	// 2. Read the Backend's admin password.
+	adminPass, err := r.readSecretKey(ctx, backend.Namespace, backend.Status.AdminSecretName, "admin-password")
 	if err != nil {
-		return ctrl.Result{}, err
+		return r.transient(ctx, &cr, "read backend admin secret", err)
 	}
-	if proj == nil {
-		if err := r.Store.CreateProject(ctx, &db.RegistryProject{
-			TenantID:          instance.Spec.TenantID,
-			ProjectID:         instance.Spec.ProjectID,
-			RegistryName:      rName,
-			HarborProjectName: rName,
-		}); err != nil {
-			if proj2, _ := r.Store.GetProject(ctx, instance.Spec.TenantID, instance.Spec.ProjectID, rName); proj2 != nil {
-				proj = proj2
-			} else {
-				return ctrl.Result{}, err
-			}
-		} else {
-			log.Info("created harbor project record", "tenant", instance.Spec.TenantID, "registry", rName)
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-		}
+	registryURL := backend.Status.RegistryURL
+	cli := r.harborClient(registryURL, adminPass)
+
+	// 3. Create the Harbor project (idempotent — 409 treated as success).
+	projectName := projectNameFor(&cr)
+	if err := cli.CreateHarborProject(ctx, projectName); err != nil {
+		return r.transient(ctx, &cr, "create Harbor project", err)
 	}
 
-	// Sync project status → CR status.
-	phase := dbProjectStatusToPhase(proj.Status)
-	if err := r.updateStatus(ctx, req.NamespacedName, func(s *registryv1alpha1.RegistryInstanceStatus) {
-		s.Phase = phase
-		s.RegistryURL = backend.Status.RegistryURL
-		s.Message = proj.ErrorMessage
-		switch proj.Status {
-		case string(db.StatusReady):
-			setInstanceReadyCondition(s, metav1.ConditionTrue, "HarborProjectReady", "Harbor project and robot account are ready")
-		case string(db.StatusFailed):
-			setInstanceReadyCondition(s, metav1.ConditionFalse, "HarborProjectFailed", proj.ErrorMessage)
-		default:
-			setInstanceReadyCondition(s, metav1.ConditionFalse, "HarborProjectProvisioning", "Harbor project creation in progress")
-		}
+	// 4. Mint the robot account ONCE and persist creds in an owned Secret.
+	credName := credentialsSecretName(&cr)
+	if err := r.ensureCredentials(ctx, &cr, cli, projectName, registryURL, credName); err != nil {
+		return r.transient(ctx, &cr, "provision credentials", err)
+	}
+
+	// 5. Ready.
+	if err := r.patchStatus(ctx, req.NamespacedName, func(s *registryv1alpha1.RegistryInstanceStatus) {
+		s.Phase = phaseReady
+		s.ObservedGeneration = cr.Generation
+		s.RegistryURL = registryURL
+		s.CredentialsSecretName = credName
+		s.Message = fmt.Sprintf("Harbor project %q ready", projectName)
+		setReady(&s.Conditions, cr.Generation, metav1.ConditionTrue, reasonReady, "registry ready")
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
+	r.Recorder.Event(&cr, corev1.EventTypeNormal, reasonReady, "registry ready; credentials in Secret "+credName)
 
-	switch proj.Status {
-	case string(db.StatusReady):
+	// Steady-state: re-check for drift (project deleted out-of-band, etc.).
+	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+}
+
+// resolveBackend fetches the referenced Backend. Returns (nil, result, err)
+// with a requeue when the caller should stop this pass (backend missing / not
+// ready); returns (backend, _, nil) when it is Ready.
+func (r *RegistryInstanceReconciler) resolveBackend(ctx context.Context, cr *registryv1alpha1.RegistryInstance) (*registryv1alpha1.RegistryBackend, ctrl.Result, error) {
+	var backend registryv1alpha1.RegistryBackend
+	err := r.Get(ctx, client.ObjectKey{
+		Namespace: cr.Spec.BackendRef.Namespace,
+		Name:      cr.Spec.BackendRef.Name,
+	}, &backend)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			res, _ := r.provisioning(ctx, cr,
+				fmt.Sprintf("Backend %s/%s not found; waiting", cr.Spec.BackendRef.Namespace, cr.Spec.BackendRef.Name),
+				30*time.Second)
+			return nil, res, nil
+		}
+		res, e := r.transient(ctx, cr, "get Backend", err)
+		return nil, res, e
+	}
+	if backend.Status.Phase != phaseReady || backend.Status.AdminSecretName == "" || backend.Status.RegistryURL == "" {
+		res, _ := r.provisioning(ctx, cr,
+			fmt.Sprintf("Backend %s phase=%s; waiting for Ready", backend.Name, backend.Status.Phase),
+			15*time.Second)
+		return nil, res, nil
+	}
+	return &backend, ctrl.Result{}, nil
+}
+
+// ensureCredentials mints a project robot account only if the credentials
+// Secret does not already exist, then writes an owned Secret. Re-minting would
+// invalidate the user's stored credentials, so it is done exactly once.
+func (r *RegistryInstanceReconciler) ensureCredentials(ctx context.Context, cr *registryv1alpha1.RegistryInstance, cli *harbor.Client, projectName, registryURL, credName string) error {
+	key := client.ObjectKey{Namespace: cr.Namespace, Name: credName}
+	var existing corev1.Secret
+	if err := r.Get(ctx, key, &existing); err == nil {
+		return nil // already provisioned
+	} else if !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	robotName := "ci-" + shortSuffix(cr)
+	robot, err := cli.CreateProjectRobotAccount(ctx, projectName, robotName)
+	if err != nil {
+		return fmt.Errorf("create robot account: %w", err)
+	}
+
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      credName,
+			Namespace: cr.Namespace,
+			Labels:    propagatedLabels(cr),
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			"robot_username": []byte(robot.Name),
+			"robot_secret":   []byte(robot.Secret),
+			"registry_url":   []byte(registryURL),
+			"project":        []byte(projectName),
+			"robot_id":       []byte(fmt.Sprintf("%d", robot.ID)),
+		},
+	}
+	if err := controllerutil.SetControllerReference(cr, sec, r.Scheme); err != nil {
+		return err
+	}
+	if err := r.Create(ctx, sec); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+	return nil
+}
+
+// handleDelete runs the instance finalizer. With reclaimPolicy=Delete it also
+// removes the Harbor project upstream (best-effort). The credentials Secret is
+// GC'd via its owner reference.
+func (r *RegistryInstanceReconciler) handleDelete(ctx context.Context, cr *registryv1alpha1.RegistryInstance, log logr.Logger) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(cr, instanceFinalizer) {
 		return ctrl.Result{}, nil
-	case string(db.StatusFailed):
-		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 	}
-	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+
+	if cr.Spec.ReclaimPolicy == reclaimDelete {
+		if err := r.cleanupUpstream(ctx, cr, log); err != nil {
+			// If the Backend is simply gone, don't trap the CR forever.
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{RequeueAfter: 15 * time.Second}, err
+			}
+		}
+	}
+
+	controllerutil.RemoveFinalizer(cr, instanceFinalizer)
+	if err := r.Update(ctx, cr); err != nil {
+		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+	}
+	return ctrl.Result{}, nil
 }
 
-// instanceRegistryName returns the user-provided registry name from spec,
-// falling back to the CR name if spec.registryName is empty.
-func instanceRegistryName(instance *registryv1alpha1.RegistryInstance) string {
-	if instance.Spec.RegistryName != "" {
-		return instance.Spec.RegistryName
+func (r *RegistryInstanceReconciler) cleanupUpstream(ctx context.Context, cr *registryv1alpha1.RegistryInstance, log logr.Logger) error {
+	var backend registryv1alpha1.RegistryBackend
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: cr.Spec.BackendRef.Namespace,
+		Name:      cr.Spec.BackendRef.Name,
+	}, &backend); err != nil {
+		return err // NotFound → caller skips
 	}
-	return instance.Name
+	if backend.Status.Phase != phaseReady || backend.Status.AdminSecretName == "" {
+		return nil // nothing reachable to clean up
+	}
+	adminPass, err := r.readSecretKey(ctx, backend.Namespace, backend.Status.AdminSecretName, "admin-password")
+	if err != nil {
+		return err
+	}
+	cli := r.harborClient(backend.Status.RegistryURL, adminPass)
+	projectName := projectNameFor(cr)
+	log.Info("deleting Harbor project", "project", projectName)
+	if err := cli.DeleteProject(ctx, projectName); err != nil {
+		return fmt.Errorf("delete Harbor project: %w", err)
+	}
+	return nil
 }
 
-// updateStatus fetches the freshest CR, applies the mutator, and Status-Updates it.
-// Retries once on ResourceVersion conflict — enough because we only race against
-// other controllers (kvi-controller-manager), which the label predicate now filters out.
-func (r *RegistryInstanceReconciler) updateStatus(ctx context.Context, key client.ObjectKey, mutate func(*registryv1alpha1.RegistryInstanceStatus)) error {
+func (r *RegistryInstanceReconciler) readSecretKey(ctx context.Context, namespace, name, key string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("secret name is empty")
+	}
+	var sec corev1.Secret
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &sec); err != nil {
+		return "", err
+	}
+	v, ok := sec.Data[key]
+	if !ok {
+		return "", fmt.Errorf("key %q not found in secret %s/%s", key, namespace, name)
+	}
+	return string(v), nil
+}
+
+func (r *RegistryInstanceReconciler) harborClient(url, adminPass string) *harbor.Client {
+	if r.HelmCfg.InsecureHarborTLS {
+		return harbor.NewInsecureClient(url, adminPass)
+	}
+	return harbor.NewClient(url, adminPass)
+}
+
+// --- naming helpers ---
+
+// projectNameFor returns the Harbor project name: RegistryName if set,
+// otherwise ProjectID.
+func projectNameFor(cr *registryv1alpha1.RegistryInstance) string {
+	if cr.Spec.RegistryName != "" {
+		return cr.Spec.RegistryName
+	}
+	return cr.Spec.ProjectID
+}
+
+func credentialsSecretName(cr *registryv1alpha1.RegistryInstance) string {
+	return "registry-credentials-" + cr.Name
+}
+
+func shortSuffix(cr *registryv1alpha1.RegistryInstance) string {
+	s := cr.Name
+	if len(s) > 12 {
+		s = s[:12]
+	}
+	return strings.ToLower(s)
+}
+
+// propagatedLabels copies dc-api.wso2.com/* labels from the CR onto the
+// credentials Secret (platform contract).
+func propagatedLabels(cr *registryv1alpha1.RegistryInstance) map[string]string {
+	out := map[string]string{}
+	for k, v := range cr.Labels {
+		if strings.HasPrefix(k, "dc-api.wso2.com/") {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// --- status helpers ---
+
+func (r *RegistryInstanceReconciler) patchStatus(ctx context.Context, key client.ObjectKey, mutate func(*registryv1alpha1.RegistryInstanceStatus)) error {
 	for attempt := 0; attempt < 2; attempt++ {
 		var fresh registryv1alpha1.RegistryInstance
 		if err := r.Get(ctx, key, &fresh); err != nil {
 			return err
 		}
 		mutate(&fresh.Status)
-		err := r.Status().Update(ctx, &fresh)
-		if err == nil {
-			return nil
-		}
-		if !apierrors.IsConflict(err) {
+		if err := r.Status().Update(ctx, &fresh); err != nil {
+			if apierrors.IsConflict(err) {
+				continue
+			}
 			return err
 		}
+		return nil
 	}
-	return errors.New("registryinstance status update: too many conflicts")
+	return fmt.Errorf("status update: too many conflicts")
+}
+
+func (r *RegistryInstanceReconciler) provisioning(ctx context.Context, cr *registryv1alpha1.RegistryInstance, msg string, after time.Duration) (ctrl.Result, error) {
+	err := r.patchStatus(ctx, client.ObjectKeyFromObject(cr), func(s *registryv1alpha1.RegistryInstanceStatus) {
+		s.Phase = phaseProvisioning
+		s.Message = msg
+		setReady(&s.Conditions, cr.Generation, metav1.ConditionFalse, reasonProvisioning, msg)
+	})
+	return ctrl.Result{RequeueAfter: after}, err
+}
+
+func (r *RegistryInstanceReconciler) transient(ctx context.Context, cr *registryv1alpha1.RegistryInstance, step string, cause error) (ctrl.Result, error) {
+	msg := fmt.Sprintf("%s: %v", step, cause)
+	r.Recorder.Event(cr, corev1.EventTypeWarning, reasonTransient, msg)
+	_ = r.patchStatus(ctx, client.ObjectKeyFromObject(cr), func(s *registryv1alpha1.RegistryInstanceStatus) {
+		s.Phase = phaseProvisioning
+		s.Message = msg
+		setReady(&s.Conditions, cr.Generation, metav1.ConditionFalse, reasonTransient, msg)
+	})
+	return ctrl.Result{}, cause
 }
 
 func (r *RegistryInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Only reconcile CRs stamped with our dc-api label. Prevents our controller
-	// from touching RegistryInstance CRs created by other operators in the same cluster.
-	ownedByUs := predicate.NewPredicateFuncs(func(obj client.Object) bool {
-		_, ok := obj.GetLabels()["dc-api.wso2.com/tenant"]
-		return ok
-	})
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&registryv1alpha1.RegistryInstance{}, builder.WithPredicates(ownedByUs)).
+		For(&registryv1alpha1.RegistryInstance{}).
+		Owns(&corev1.Secret{}).
 		Named("registryinstance").
 		Complete(r)
 }

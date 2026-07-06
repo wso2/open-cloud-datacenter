@@ -2,9 +2,9 @@
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: registryinstances.registry.opencloud.wso2.com
   annotations:
-    controller-gen.kubebuilder.io/version: v0.14.0
+    controller-gen.kubebuilder.io/version: v0.16.4
+  name: registryinstances.registry.opencloud.wso2.com
 spec:
   group: registry.opencloud.wso2.com
   names:
@@ -12,119 +12,193 @@ spec:
     listKind: RegistryInstanceList
     plural: registryinstances
     singular: registryinstance
-    shortNames:
-      - ri
   scope: Namespaced
   versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      subresources:
-        status: {}
-      additionalPrinterColumns:
-        - name: Tenant
-          type: string
-          jsonPath: .spec.tenantID
-        - name: Project
-          type: string
-          jsonPath: .spec.projectID
-        - name: Phase
-          type: string
-          jsonPath: .status.phase
-        - name: URL
-          type: string
-          jsonPath: .status.registryURL
-        - name: Age
-          type: date
-          jsonPath: .metadata.creationTimestamp
-      schema:
-        openAPIV3Schema:
-          type: object
-          properties:
-            apiVersion:
-              type: string
-            kind:
-              type: string
-            metadata:
-              type: object
-            spec:
-              type: object
-              required: [tenantID, projectID]
-              properties:
-                tenantID:
-                  type: string
-                  minLength: 1
-                  description: >
-                    Unique tenant identifier (e.g. "acme").
-                    Determines Harbor namespace name ({tenantID}-management) and Helm release name.
-                projectID:
-                  type: string
-                  minLength: 1
-                  description: >
-                    Datacenter project ID requesting a Harbor project inside the shared Harbor.
-                    Each project gets its own Harbor project and project-scoped robot account.
-                registryName:
-                  type: string
-                  description: >
-                    User-provided registry name (e.g. "prod-images"). Used as the
-                    Harbor project name and to derive the credentials Secret name
-                    (registry-credentials-<cr-name>). Unique within (tenantID, projectID).
-                plan:
-                  type: string
-                  enum: [starter, professional, enterprise]
-                  default: starter
-                  description: Harbor resource profile (CPU/memory/storage limits).
-                backendRef:
-                  type: object
-                  description: >
-                    Cross-namespace reference to the per-tenant RegistryBackend CR
-                    (name: rb-{tenantID}, namespace: dc-tenant-{tenantID}).
-                    dc-api sets this; the controller reads it to locate the running Harbor instance.
-                  properties:
-                    name:
-                      type: string
-                    namespace:
-                      type: string
-                  required: [name, namespace]
-            status:
-              type: object
-              properties:
-                phase:
-                  type: string
-                  enum: [Pending, Provisioning, Ready, Failed, Terminating]
-                  description: Lifecycle state — Pending, Provisioning, Ready, Failed, Terminating.
-                conditions:
-                  type: array
-                  items:
-                    type: object
-                    required: [type, status, lastTransitionTime, reason, message]
-                    properties:
-                      type:
-                        type: string
-                      status:
-                        type: string
-                        enum: ["True", "False", "Unknown"]
-                      observedGeneration:
-                        type: integer
-                        format: int64
-                      lastTransitionTime:
-                        type: string
-                        format: date-time
-                      reason:
-                        type: string
-                      message:
-                        type: string
-                registryURL:
-                  type: string
-                  description: Harbor portal URL, populated when phase is Ready.
-                progress:
-                  type: object
-                  additionalProperties:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.tenantID
+      name: Tenant
+      type: string
+    - jsonPath: .spec.projectID
+      name: Project
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.registryURL
+      name: URL
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              backendRef:
+                description: |-
+                  BackendRef references the per-tenant RegistryBackend CR (name: rb-<tenantID>,
+                  namespace: dc-tenant-<tenantID>). dc-api sets this; the controller reads it
+                  to locate the running Harbor instance across namespaces.
+                properties:
+                  name:
                     type: string
-                  description: >
-                    Sub-step status during provisioning.
-                    Keys: namespace, helm_install, bootstrap. Values: STARTING, READY.
-                    Harbor pod names (e.g. harbor-acme-core) are added as keys once Helm installs.
-                message:
+                  namespace:
+                    type: string
+                required:
+                - name
+                - namespace
+                type: object
+              plan:
+                default: starter
+                description: Plan selects the Harbor resource profile.
+                enum:
+                - starter
+                - professional
+                - enterprise
+                type: string
+              projectID:
+                description: ProjectID is the datacenter project requesting a Harbor
+                  project inside the shared Harbor.
+                type: string
+              reclaimPolicy:
+                default: Retain
+                description: |-
+                  ReclaimPolicy controls what happens to the Harbor project (and its
+                  images) when this instance is deleted. Retain (default) leaves the
+                  project intact; Delete removes it upstream.
+                enum:
+                - Retain
+                - Delete
+                type: string
+              registryName:
+                description: |-
+                  RegistryName is the user-provided registry name. Used as the Harbor project name
+                  and to derive the credentials Secret name (registry-credentials-<cr-name>).
+                  Unique within the (tenantID, projectID) pair.
+                type: string
+              tenantID:
+                description: TenantID is the unique identifier for the tenant (e.g.
+                  "acme").
+                type: string
+            required:
+            - backendRef
+            - projectID
+            - tenantID
+            type: object
+          status:
+            properties:
+              conditions:
+                description: Conditions holds standard Kubernetes status conditions.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              credentialsSecretName:
+                description: |-
+                  CredentialsSecretName is the name (in this namespace) of the Secret
+                  holding the robot username + token for this registry. Owned by this CR.
+                type: string
+              message:
+                description: Message contains error details when Phase is Failed.
+                type: string
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the .metadata.generation the controller last
+                  reconciled.
+                format: int64
+                type: integer
+              phase:
+                description: Phase is the lifecycle state of this registry instance.
+                enum:
+                - Pending
+                - Provisioning
+                - Ready
+                - Failed
+                - Terminating
+                type: string
+              progress:
+                additionalProperties:
                   type: string
-                  description: Human-readable error detail when phase is Failed.
+                description: Progress is retained for API compatibility; no longer
+                  populated.
+                type: object
+              registryURL:
+                description: RegistryURL is the Harbor portal URL, populated when
+                  Phase is Ready.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

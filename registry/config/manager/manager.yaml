@@ -37,14 +37,33 @@ spec:
       containers:
       - command:
         - /registry-provisioner
-        args:
-          - --leader-elect
-          - --health-probe-bind-address=:8081
         image: e20449/registry-provisioner:latest
         name: manager
+        env:
+        # REQUIRED: the base domain used to build registry URLs
+        # (https://registry.<tenant>.<BASE_DOMAIN>).
+        - name: BASE_DOMAIN
+          value: "lkdc.wso2.com"
+        # Optional Harbor/Helm settings (defaults shown; override as needed).
+        # - name: STORAGE_CLASS
+        #   value: "longhorn"
+        # - name: INGRESS_CLASS
+        #   value: "nginx"
+        # - name: CERT_ISSUER
+        #   value: "letsencrypt-prod"
+        # - name: HARBOR_CHART_VERSION
+        #   value: "1.14.0"
+        # Point Helm's cache/config/data at the writable /tmp volume below,
+        # since the root filesystem is read-only.
+        - name: HELM_CACHE_HOME
+          value: /tmp/helm/cache
+        - name: HELM_CONFIG_HOME
+          value: /tmp/helm/config
+        - name: HELM_DATA_HOME
+          value: /tmp/helm/data
         ports:
         - containerPort: 8080
-          name: http
+          name: metrics
           protocol: TCP
         - containerPort: 8081
           name: health
@@ -74,7 +93,13 @@ spec:
           requests:
             cpu: 10m
             memory: 64Mi
-        volumeMounts: []
-      volumes: []
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      # Writable scratch for Helm (values, pulled charts, cache) because the
+      # root filesystem is read-only.
+      - name: tmp
+        emptyDir: {}
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

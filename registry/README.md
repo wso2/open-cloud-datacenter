@@ -1,41 +1,42 @@
 # registry
 
 A Kubernetes operator that provisions managed Harbor container registries as
-tenant-isolated deployments on a Harvester HCI cluster. One `RegistryInstance`
-custom resource maps to one Harbor Helm release, a TLS-secured ingress, scoped
-robot account credentials, and optional Prometheus monitoring.
+tenant-isolated deployments on a Harvester HCI cluster. A `RegistryBackend`
+custom resource maps to one Harbor Helm release; a `RegistryInstance` maps to
+one Harbor project with scoped robot-account credentials.
 
 Tested on **Harvester 1.7.1** (RKE2 v1.34.3).
 
 ## What it does
 
-- **API**: `RegistryInstance` and `RegistryBackend` in group
-  `registry.opencloud.wso2.com/v1alpha1`, namespaced. `RegistryBackend`
-  represents the shared Helm/infra config; `RegistryInstance` represents one
-  tenant's Harbor deployment.
-- **Reconciler**: phase-based state machine (`Pending → Provisioning → Ready →
-  Failed / Terminating`); idempotent and crash-safe via a Postgres-backed
-  worker. Status surfaces the `loginServer`, `harborProject`, and robot account
-  credentials through a K8s Secret read by dc-api.
-- **Deploy worker**: a background goroutine pulls pending deployments from
-  Postgres, installs Harbor via Helm into the tenant's management namespace
-  (`<tenantID>-management`), polls until all Deployments are ready, bootstraps
-  the Harbor API (configure → create project → create robot account), then
-  writes a credentials Secret for dc-api.
-- **HTTP gateway**: a thin REST layer (`/api/v1/registries`) that dc-api calls
-  to trigger provisioning and fetch status — authenticated by forwarding the
-  caller's bearer token to the K8s API server (same authn/RBAC/audit path as
-  `kubectl`).
-- **TLS**: per-tenant Harbor TLS cert issued from an `internal-ca`
-  ClusterIssuer (cert-manager). The CA PEM travels with the robot credentials
-  so clients can trust the registry without a public CA.
-- **Tenant isolation**: each Harbor runs in its own namespace with a
-  `deny-cross-tenant` NetworkPolicy. A hard-delete annotation
-  (`registry.opencloud.wso2.com/hard-delete: "true"`) controls whether PVCs
-  are removed on CR deletion.
+- **API**: `RegistryBackend` (one shared Harbor per tenant) and
+  `RegistryInstance` (one Harbor project + robot account per registry) in group
+  `registry.opencloud.wso2.com/v1alpha1`.
+- **Pattern**: a pure controller-runtime operator. The Custom Resource is the
+  single source of truth — there is **no database, no background worker, and no
+  HTTP gateway**. Both reconcilers do all their work in the reconcile loop,
+  polling slow external steps with `RequeueAfter`. Leader election is enabled,
+  so running multiple replicas yields exactly one active reconciler (hot
+  standby for failover).
+- **RegistryBackend reconciler**: generates Harbor's admin + database passwords
+  into an owned Secret, installs Harbor via Helm into the tenant namespace,
+  polls the Harbor API until it is ready, applies system configuration, and
+  reports `Ready` with the registry URL.
+- **RegistryInstance reconciler**: waits for the backend to be `Ready`, creates
+  a Harbor project, mints a project-scoped robot account **once**, and writes
+  the robot credentials into an **owner-referenced K8s Secret**
+  (`registry-credentials-<name>`) that dc-api reads directly.
+- **Lifecycle**: phase-based (`Pending → Provisioning → Ready →
+  Failed / Terminating`) with standard status conditions, `observedGeneration`,
+  and Kubernetes Events. Finalizers guarantee cleanup; a Backend refuses
+  deletion while `RegistryInstance`s still reference it. `spec.reclaimPolicy`
+  (`Retain` | `Delete`) controls whether Harbor's PVCs / project are destroyed
+  on delete.
+- **TLS**: per-tenant Harbor TLS issued via cert-manager (ingress annotations
+  in the rendered Helm values).
 - **Access control**: scaffolded `registryinstance-admin/editor/viewer` and
-  `registrybackend-admin/editor/viewer` ClusterRoles aggregate into the
-  built-in K8s roles. Authorization is pure Kubernetes RBAC.
+  `registrybackend-admin/editor/viewer` ClusterRoles. Authorization is pure
+  Kubernetes RBAC.
 
 ## Quickstart
 

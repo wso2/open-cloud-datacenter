@@ -1,3 +1,7 @@
+// Package v1alpha1 contains API Schema definitions for the registry v1alpha1
+// API group.
+// +kubebuilder:object:generate=true
+// +groupName=registry.opencloud.wso2.com
 package v1alpha1
 
 import (

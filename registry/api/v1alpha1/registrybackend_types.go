@@ -29,6 +29,13 @@ type RegistryBackendSpec struct {
 	// +kubebuilder:validation:Enum=starter;professional;enterprise
 	// +kubebuilder:default=starter
 	Plan string `json:"plan,omitempty"`
+
+	// ReclaimPolicy controls what happens to Harbor's data (PVCs) when this
+	// Backend is deleted. Retain (default) leaves the PVCs on disk; Delete
+	// removes them. Retain is the safe default for a registry.
+	// +kubebuilder:validation:Enum=Retain;Delete
+	// +kubebuilder:default=Retain
+	ReclaimPolicy string `json:"reclaimPolicy,omitempty"`
 }
 
 type RegistryBackendStatus struct {
@@ -36,13 +43,22 @@ type RegistryBackendStatus struct {
 	// +kubebuilder:validation:Enum=Pending;Provisioning;Ready;Failed;Terminating
 	Phase string `json:"phase,omitempty"`
 
+	// ObservedGeneration is the .metadata.generation the controller last
+	// reconciled. When it equals .metadata.generation the latest spec has
+	// been processed.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// Conditions holds standard Kubernetes status conditions.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// RegistryURL is the Harbor portal URL, populated when Phase is Ready.
 	RegistryURL string `json:"registryURL,omitempty"`
 
-	// Progress tracks sub-step status during Helm deployment.
+	// AdminSecretName is the name (in this namespace) of the Secret holding
+	// Harbor's admin + database passwords. Owned by this CR.
+	AdminSecretName string `json:"adminSecretName,omitempty"`
+
+	// Progress is retained for API compatibility; no longer populated.
 	Progress map[string]string `json:"progress,omitempty"`
 
 	// Message contains error details when Phase is Failed.
