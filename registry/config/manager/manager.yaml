@@ -48,18 +48,20 @@ spec:
         - name: BASE_DOMAIN
           value: "192.168.10.6.nip.io"
         # cert-manager ClusterIssuer for Harbor's per-tenant ingress TLS.
-        # Let's Encrypt CANNOT validate a private nip.io host, so this must be a
-        # self-signed / internal-CA issuer. VERIFY the exact name in your
-        # cluster with:  kubectl get clusterissuer
+        # Let's Encrypt cannot validate a private nip.io host; the platform uses
+        # a CA-based internal issuer (one CA signs every tenant cert). Confirmed
+        # present + Ready on the cluster: `kubectl get clusterissuer`.
         - name: CERT_ISSUER
-          value: "selfsigned-issuer"
-        # Harbor serves that self-signed cert, so the operator's own HTTPS calls
-        # to the Harbor API must skip verification.
+          value: "internal-ca"
+        # Harbor serves that internal-CA cert (the operator doesn't hold the CA),
+        # so the operator's own HTTPS calls to the Harbor API skip verification.
         - name: HARBOR_INSECURE_TLS
           value: "true"
+        # Longhorn StorageClass for Harbor's PVCs (cluster default; what the
+        # existing tenant Harbors use).
+        - name: STORAGE_CLASS
+          value: "harvester-longhorn-2r"
         # Optional Harbor/Helm settings (defaults shown; override as needed).
-        # - name: STORAGE_CLASS
-        #   value: "longhorn"
         # - name: INGRESS_CLASS
         #   value: "nginx"
         # - name: HARBOR_CHART_VERSION
