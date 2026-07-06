@@ -1,4 +1,4 @@
-# Registry Provisioner — operator + HTTP gateway + Harbor deploy worker.
+# Registry operator — provisions per-tenant Harbor registries via CRDs.
 # Layout follows the KeyVault operator (crds/keyvault) conventions.
 
 IMG ?= e20449/registry-provisioner:latest
@@ -22,11 +22,12 @@ help: ## Display this help.
 
 .PHONY: manifests
 manifests: controller-gen ## Generate CRDs and RBAC into config/.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd paths="./..." output:crd:artifacts:config=config/crd/bases
+	"$(CONTROLLER_GEN)" rbac:roleName=manager-role paths="./..."
+	"$(CONTROLLER_GEN)" crd paths="./api/..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate DeepCopy methods.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
 
 .PHONY: fmt
 fmt: ## Run go fmt.
@@ -61,18 +62,26 @@ docker-push: ## Push the container image ($(IMG)).
 ##@ Deployment
 
 .PHONY: install
-install: manifests ## Install CRDs into the cluster (KUBECONFIG / --context as needed).
-	kubectl apply -f config/crd/bases
+install: ## Install the CRDs into the cluster (KUBECONFIG / --context as needed).
+	kubectl apply -k config/crd
+
+.PHONY: uninstall
+uninstall: ## Remove the CRDs from the cluster.
+	kubectl delete -k config/crd --ignore-not-found=true
 
 .PHONY: deploy
-deploy: ## Apply the Harvester-direct provisioner manifests.
-	kubectl apply -f ../k8s/harvester-direct/
+deploy: ## Deploy the operator (namespace, RBAC, CRDs, manager). Override IMG in config/default.
+	kubectl apply -k config/default
+
+.PHONY: undeploy
+undeploy: ## Remove the operator from the cluster.
+	kubectl delete -k config/default --ignore-not-found=true
 
 ##@ Tools
 
 $(LOCALBIN):
-	mkdir -p $(LOCALBIN)
+	mkdir -p "$(LOCALBIN)"
 
 .PHONY: controller-gen
 controller-gen: $(LOCALBIN) ## Install controller-gen locally if missing.
-	@test -s $(CONTROLLER_GEN) || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION)
+	@test -s "$(CONTROLLER_GEN)" || GOBIN="$(LOCALBIN)" go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION)

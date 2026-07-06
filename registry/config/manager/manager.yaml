@@ -37,7 +37,7 @@ spec:
       containers:
       - command:
         - /registry-provisioner
-        image: e20449/registry-provisioner:latest
+        image: controller:latest
         name: manager
         env:
         # REQUIRED: the base domain used to build registry URLs

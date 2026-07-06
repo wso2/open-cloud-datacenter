@@ -8,7 +8,9 @@ resources:
 - ../manager
 - metrics_service.yaml
 
-patches:
-- path: manager_metrics_patch.yaml
-  target:
-    kind: Deployment
+# Override the operator image here (or run
+# `kustomize edit set image controller=<repo>/<image>:<tag>`).
+images:
+- name: controller
+  newName: e20449/registry-provisioner
+  newTag: latest
