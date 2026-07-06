@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/wso2/dc-api/internal/providers/clusteraccess"
 )
@@ -48,5 +51,37 @@ func TestRBACByteStable(t *testing.T) {
 	b := RenderAgentRBAC(clusteraccess.AgentCapabilities)
 	if !bytes.Equal(a, b) {
 		t.Fatalf("RenderAgentRBAC is not byte-stable:\n--- run 1 ---\n%s\n--- run 2 ---\n%s", a, b)
+	}
+}
+
+// TestSubsumedCapabilityRuleNotEmitted pins the render-time subsumption rule:
+// a capability whose k8s verbs the fixed base inventory rule already fully
+// grants (pods get/list ⊂ nodes/pods get/list/watch) emits NO separate
+// ClusterRole rule — RBAC is additive, so the duplicate would grant nothing and
+// only reads as a failed narrowing. A capability with any verb OUTSIDE the base
+// coverage still emits its full rule.
+func TestSubsumedCapabilityRuleNotEmitted(t *testing.T) {
+	podsReadOnly := clusteraccess.AgentCapability{
+		GVR:        schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+		APIVersion: "v1", Kind: "Pod", Namespaced: true,
+		AgentVerbs: []clusteraccess.Verb{clusteraccess.VerbGet, clusteraccess.VerbList},
+	}
+	out := string(RenderAgentRBAC([]clusteraccess.AgentCapability{podsReadOnly}))
+	if strings.Contains(out, `resources: ["pods"]`) {
+		t.Errorf("fully-subsumed pods rule was emitted:\n%s", out)
+	}
+	if !strings.Contains(out, `resources: ["nodes", "pods"]`) {
+		t.Errorf("base inventory rule missing:\n%s", out)
+	}
+
+	// Widen one verb beyond the base rule (create) → the rule MUST be emitted.
+	podsWithCreate := podsReadOnly
+	podsWithCreate.AgentVerbs = []clusteraccess.Verb{clusteraccess.VerbGet, clusteraccess.VerbList, clusteraccess.VerbCreate}
+	out = string(RenderAgentRBAC([]clusteraccess.AgentCapability{podsWithCreate}))
+	if !strings.Contains(out, `resources: ["pods"]`) {
+		t.Errorf("partially-covered pods rule was NOT emitted:\n%s", out)
+	}
+	if !strings.Contains(out, `verbs: ["get", "list", "create"]`) {
+		t.Errorf("partially-covered pods rule lost verbs:\n%s", out)
 	}
 }
