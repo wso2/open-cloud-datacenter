@@ -38,6 +38,9 @@ spec:
       - command:
         - /registry-provisioner
         image: controller:latest
+        # Using a mutable :latest tag — always pull so a redeploy picks up a
+        # freshly pushed image instead of a cached one.
+        imagePullPolicy: Always
         name: manager
         env:
         # REQUIRED: the base domain used to build registry URLs
