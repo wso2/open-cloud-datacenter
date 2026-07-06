@@ -41,7 +41,7 @@ type RegistryBackendReconciler struct {
 //
 // The operator emits Events and reads namespaces:
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
-// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
 //
 // Harbor's chart objects are created by Helm using this pod's ServiceAccount,
 // so the ClusterRole must grant the resource types the Harbor chart manages:
@@ -84,8 +84,13 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.transient(ctx, &cr, "", "ensure admin secret", err)
 	}
 
-	// 2. Render values + install Harbor (idempotent: Install skips if the
-	// release already exists).
+	// 2. Ensure the tenant's Harbor namespace (<tenantID>-management) exists,
+	// then render values + install Harbor into it (idempotent: Install skips if
+	// the release already exists).
+	harborNS := harborNamespace(tenantID)
+	if err := r.ensureNamespace(ctx, harborNS); err != nil {
+		return r.transient(ctx, &cr, secretName, "ensure Harbor namespace", err)
+	}
 	tplan, err := helm.PlanFor(plan)
 	if err != nil {
 		return r.fail(ctx, &cr, "resolve plan", err)
@@ -103,7 +108,7 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err != nil {
 		return r.fail(ctx, &cr, "generate values", err)
 	}
-	if err := r.Helm.Install(ctx, tenantID, cr.Namespace, values); err != nil {
+	if err := r.Helm.Install(ctx, tenantID, harborNS, values); err != nil {
 		return r.transient(ctx, &cr, secretName, "helm install", err)
 	}
 
@@ -211,8 +216,8 @@ func (r *RegistryBackendReconciler) handleDelete(ctx context.Context, cr *regist
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
-	// Uninstall Harbor.
-	if err := r.Helm.Uninstall(ctx, cr.Spec.TenantID, cr.Namespace); err != nil {
+	// Uninstall Harbor from the tenant's Harbor namespace.
+	if err := r.Helm.Uninstall(ctx, cr.Spec.TenantID, harborNamespace(cr.Spec.TenantID)); err != nil {
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, fmt.Errorf("helm uninstall: %w", err)
 	}
 
@@ -236,7 +241,7 @@ func (r *RegistryBackendReconciler) handleDelete(ctx context.Context, cr *regist
 func (r *RegistryBackendReconciler) deletePVCs(ctx context.Context, cr *registryv1alpha1.RegistryBackend) error {
 	var pvcs corev1.PersistentVolumeClaimList
 	if err := r.List(ctx, &pvcs,
-		client.InNamespace(cr.Namespace),
+		client.InNamespace(harborNamespace(cr.Spec.TenantID)),
 		client.MatchingLabels{"app.kubernetes.io/instance": "harbor-" + cr.Spec.TenantID},
 	); err != nil {
 		return err
@@ -245,6 +250,27 @@ func (r *RegistryBackendReconciler) deletePVCs(ctx context.Context, cr *registry
 		if err := r.Delete(ctx, &pvcs.Items[i]); err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
+	}
+	return nil
+}
+
+// harborNamespace is the namespace a tenant's Harbor is deployed into:
+// "<tenantID>-management".
+func harborNamespace(tenantID string) string {
+	return tenantID + "-management"
+}
+
+// ensureNamespace creates the namespace if it does not already exist.
+func (r *RegistryBackendReconciler) ensureNamespace(ctx context.Context, name string) error {
+	var ns corev1.Namespace
+	if err := r.Get(ctx, client.ObjectKey{Name: name}, &ns); err == nil {
+		return nil
+	} else if !apierrors.IsNotFound(err) {
+		return err
+	}
+	ns = corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	if err := r.Create(ctx, &ns); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
 	}
 	return nil
 }
