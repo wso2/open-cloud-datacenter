@@ -1,8 +1,20 @@
 # Mutating admission webhook: injects MAC-pinning + KubeOVN annotations on
 # KubeVirt VMs. failurePolicy: Ignore is intentional — if the webhook is down,
 # non-OVN VMs must not be blocked; OVN VMs just miss the MAC pinning (same as
-# before the webhook existed). The handler filters internally by NAD type and
-# no-ops on non-OVN VMs, so no namespaceSelector is needed.
+# before the webhook existed).
+#
+# Scope is layered, defense-in-depth (post-mortem of a control-plane cluster
+# outage, where an unscoped webhook was implicated):
+#   1. namespaceSelector: only namespaces labeled dc-api/managed=true — the
+#      per-project namespaces dc-api provisions VMs and tenant clusters into.
+#      Infra VMs (the dcapi-controlplane RKE2 nodes in `default`,
+#      harvester-system, …) are structurally out of reach, regardless of any
+#      handler bug.
+#   2. The handler filters by NAD type and no-ops on non-OVN VMs.
+#   3. The handler is provisioning-time only: it never mutates a VM whose VMI
+#      is already live (see vmHasLiveVMI in dc-api/internal/webhook/mutate.go).
+#      UPDATE stays registered for the pre-boot window where Rancher pins the
+#      MAC after create.
 #
 # The caBundle is injected by cert-manager's cainjector from the serving
 # Certificate (the inject-ca-from annotation), so it is omitted here and kept in
@@ -28,6 +40,9 @@ webhooks:
         resources: ["virtualmachines"]
         operations: ["CREATE", "UPDATE"]
         scope: Namespaced
+    namespaceSelector:
+      matchLabels:
+        dc-api/managed: "true"
     failurePolicy: Ignore
     sideEffects: None
     timeoutSeconds: 5
