@@ -187,6 +187,11 @@ resource "rancher2_cluster_v2" "this" {
       rke_config[0].machine_selector_config,
       rke_config[0].upgrade_strategy[0].control_plane_drain_options,
       rke_config[0].upgrade_strategy[0].worker_drain_options,
+      # On-demand snapshots taken via the Rancher UI/API ("Snapshot Now") set
+      # etcd_snapshot_create.generation on the cluster object. It is not managed
+      # here, so without this every subsequent plan shows spurious drift trying to
+      # null it. Ignore it — scheduled snapshots stay Terraform-managed via etcd_s3.
+      rke_config[0].etcd_snapshot_create,
     ]
     precondition {
       condition     = !var.manage_rke_config || length(var.machine_pools) > 0
