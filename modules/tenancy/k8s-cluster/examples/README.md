@@ -25,6 +25,7 @@ The sample Terraform files in this directory are a working starting point — co
 9. [Get Your Kubeconfig](#9-get-your-kubeconfig)
 10. [Managing Your Cluster](#10-managing-your-cluster)
 11. [Troubleshooting](#11-troubleshooting)
+12. [Backups](#12-backups)
 
 ---
 
@@ -509,3 +510,16 @@ Re-run `terraform apply -var-file="secret.tfvars"`. If it persists, check node V
 # Refresh state without making changes
 terraform refresh -var-file="secret.tfvars"
 ```
+
+---
+
+## 12. Backups
+
+Once your cluster is `Active`, configure backups — both layers are self-service
+using your own S3 buckets and the same Terraform directory:
+
+- **etcd snapshots** protect the cluster control plane (whole-cluster restore).
+- **Velero** protects workloads and PersistentVolume data (per-namespace restore).
+
+See **[BACKUPS.md](./BACKUPS.md)** for the full guide — bucket + IAM setup,
+Terraform, verification, and restore for both.
