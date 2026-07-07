@@ -55,8 +55,14 @@ Create a bucket in your own AWS account (use your datacenter's region):
 REGION=us-east-2
 BUCKET=my-team-cluster-bkps
 
-aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
-  --create-bucket-configuration LocationConstraint="$REGION"
+# us-east-1 is S3's default region and rejects a LocationConstraint; every other
+# region requires one.
+if [ "$REGION" = "us-east-1" ]; then
+  aws s3api create-bucket --bucket "$BUCKET" --region "$REGION"
+else
+  aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
+    --create-bucket-configuration LocationConstraint="$REGION"
+fi
 aws s3api put-public-access-block --bucket "$BUCKET" \
   --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 aws s3api put-bucket-versioning --bucket "$BUCKET" --versioning-configuration Status=Enabled
@@ -207,8 +213,14 @@ Use a **separate bucket + IAM user** from etcd (least privilege):
 REGION=us-east-2
 BUCKET=my-team-velero-bkps
 
-aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
-  --create-bucket-configuration LocationConstraint="$REGION"
+# us-east-1 is S3's default region and rejects a LocationConstraint; every other
+# region requires one.
+if [ "$REGION" = "us-east-1" ]; then
+  aws s3api create-bucket --bucket "$BUCKET" --region "$REGION"
+else
+  aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
+    --create-bucket-configuration LocationConstraint="$REGION"
+fi
 aws s3api put-public-access-block --bucket "$BUCKET" \
   --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 aws s3api put-bucket-versioning --bucket "$BUCKET" --versioning-configuration Status=Enabled
