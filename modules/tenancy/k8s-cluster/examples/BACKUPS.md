@@ -66,6 +66,10 @@ fi
 aws s3api put-public-access-block --bucket "$BUCKET" \
   --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 aws s3api put-bucket-versioning --bucket "$BUCKET" --versioning-configuration Status=Enabled
+# Versioning keeps noncurrent copies of deleted/rotated backups; expire them so
+# retention/TTL actually bound total storage (tune NoncurrentDays to taste).
+aws s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" \
+  --lifecycle-configuration '{"Rules":[{"ID":"expire-noncurrent","Status":"Enabled","Filter":{},"NoncurrentVersionExpiration":{"NoncurrentDays":30}}]}'
 ```
 
 Create an IAM user and attach this least-privilege policy (note the two ARNs —
@@ -224,6 +228,10 @@ fi
 aws s3api put-public-access-block --bucket "$BUCKET" \
   --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 aws s3api put-bucket-versioning --bucket "$BUCKET" --versioning-configuration Status=Enabled
+# Versioning keeps noncurrent copies of deleted/rotated backups; expire them so
+# retention/TTL actually bound total storage (tune NoncurrentDays to taste).
+aws s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" \
+  --lifecycle-configuration '{"Rules":[{"ID":"expire-noncurrent","Status":"Enabled","Filter":{},"NoncurrentVersionExpiration":{"NoncurrentDays":30}}]}'
 ```
 
 IAM policy — note the extra multipart-upload actions Velero requires:
@@ -421,12 +429,17 @@ Frequency = your RPO; retention/TTL = how far back you can recover.
 - etcd `snapshot_retention` is a **count of snapshots**, not days.
 - Velero `ttl` is when the backup is deleted from S3; back it with an S3
   lifecycle rule for cost control.
+- With bucket versioning enabled, deleting or rotating a backup leaves a
+  **noncurrent version**, so `snapshot_retention` / `ttl` bound only *current*
+  objects. The noncurrent-version lifecycle rule from the bucket setup (§A.1 /
+  §B.1) is what caps total storage — set `NoncurrentDays` to your grace window.
 
 ## Production Hardening
 
 - Block Public Access on, default encryption (SSE-S3 or SSE-KMS) on, versioning
-  on, and a bucket policy denying non-TLS access. Consider S3 Object Lock for
-  ransomware resilience.
+  on **with a noncurrent-version expiration lifecycle rule** (so retention/TTL
+  bound total storage), and a bucket policy denying non-TLS access. Consider S3
+  Object Lock for ransomware resilience.
 - **Separate buckets and IAM users** for etcd vs Velero.
 - Never commit `secret.tfvars` — add it to `.gitignore`.
 - Rotate IAM keys periodically.
