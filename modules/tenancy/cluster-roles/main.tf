@@ -604,9 +604,63 @@ resource "rancher2_role_template" "cluster_reader" {
   }
 
   rules {
-    api_groups = ["*"]
-    resources  = ["*"]
+    api_groups = [""]
+    resources  = ["pods", "pods/log", "pods/status", "configmaps", "endpoints", "events", "namespaces", "persistentvolumeclaims", "persistentvolumeclaims/status", "replicationcontrollers", "resourcequotas", "serviceaccounts", "services"]
     verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["apps"]
+    resources  = ["controllerrevisions", "daemonsets", "deployments", "deployments/scale", "replicasets", "replicasets/scale", "statefulsets", "statefulsets/scale"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["batch"]
+    resources  = ["cronjobs", "jobs"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["autoscaling"]
+    resources  = ["horizontalpodautoscalers"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["policy"]
+    resources  = ["poddisruptionbudgets"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["networking.k8s.io"]
+    resources  = ["ingresses", "networkpolicies"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["discovery.k8s.io"]
+    resources  = ["endpointslices"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["coordination.k8s.io"]
+    resources  = ["leases"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["kubevirt.io"]
+    resources  = ["virtualmachines", "virtualmachineinstances"]
+    verbs      = ["get", "list", "watch"]
+  }
+
+  rules {
+    api_groups = ["subresources.kubevirt.io"]
+    resources  = ["virtualmachineinstances/metrics"]
+    verbs      = ["get"]
   }
 }
 
