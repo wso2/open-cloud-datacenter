@@ -18,7 +18,7 @@ locals {
 
   # Resolved namespace name for all harvester_network resources.
   # Common namespace takes precedence; falls back to the -net namespace.
-  active_net_ns_name = coalesce(local.common_namespace, local.network_namespace)
+  active_net_ns_name = local.common_namespace != null ? local.common_namespace : local.network_namespace
 
   # VyOS path: compute a deterministic /23 subnet from 10.0.0.0/8 using the VLAN
   # index. Only relevant when vyos_endpoint is set and exactly one VLAN is given.

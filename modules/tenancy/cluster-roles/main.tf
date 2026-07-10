@@ -602,6 +602,12 @@ resource "rancher2_role_template" "cluster_reader" {
     resources  = ["nodemetrics", "nodes"]
     verbs      = ["get", "list", "watch"]
   }
+
+  rules {
+    api_groups = ["*"]
+    resources  = ["*"]
+    verbs      = ["get", "list", "watch"]
+  }
 }
 
 resource "rancher2_role_template" "vm_metrics_observer" {
