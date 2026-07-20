@@ -154,7 +154,10 @@ locals {
     export RESTIC_PASSWORD="${var.restic_password}"
   ENV
 
-  # Init the repo once (idempotent), snapshot the chosen paths, then prune.
+  # Init the repo once (idempotent), snapshot the chosen paths, then prune. The
+  # `/my-vm` prefix in RESTIC_REPOSITORY makes this a per-VM repository, so
+  # `forget --prune` only ever affects this VM's own snapshots. Keep one repo
+  # (prefix) per VM; if you ever share a repo, add `--tag my-app` to forget/dump.
   restic_backup = <<-SH
     #!/usr/bin/env bash
     set -euo pipefail
@@ -177,6 +180,15 @@ locals {
 }
 ```
 
+> **Security — where these secrets live.** The `restic_env` values (AWS keys and
+> `RESTIC_PASSWORD`) are interpolated into `user_data`, which the module stores
+> verbatim in a `harvester_cloudinit_secret` (a Kubernetes Secret in your namespace)
+> and in your Terraform state. `sensitive = true` only redacts Terraform's console
+> output — it does **not** encrypt state or the Secret. Keep read access to the
+> Terraform state and the namespace's Secrets tightly limited, keep the IAM user
+> least-privileged (§1) so any leak is bounded to this one bucket, and rotate the
+> keys periodically.
+
 …then pass a cloud-init that base64-embeds those scripts and the systemd units
 **inside your existing `module` call**:
 
@@ -191,7 +203,7 @@ module "my_vm" {
 
   user_data = <<-YAML
     #cloud-config
-    password: ${var.vm_password}
+    password: ${jsonencode(var.vm_password)}
     ssh_pwauth: True
     packages: [qemu-guest-agent]
     write_files:
@@ -276,10 +288,11 @@ sudo bash -c 'source /etc/my-app/restic.env
   restic snapshots          # >=1 snapshot with your paths and tag
   restic check'             # "no errors were found"
 
-systemctl list-timers restic-backup.timer                       # future NEXT
-
-aws s3 ls s3://my-team-vm-bkps/my-vm/ --region us-east-2         # objects present
+systemctl list-timers restic-backup.timer    # future NEXT
 ```
+
+`restic snapshots` + `restic check` already confirm the data is in the bucket
+(restic talks to S3 directly), so no separate object listing is needed.
 
 Generate some new data, run `sudo bash /opt/restic-backup.sh` again, and confirm a
 **second** snapshot appears — only the changed data is uploaded (deduplication).
@@ -308,16 +321,19 @@ Use `--target /tmp/restore` to stage into a scratch directory first.
 You don't need the whole snapshot:
 
 ```bash
-source /etc/my-app/restic.env
-
 # one path out of the latest snapshot
-restic restore latest --tag my-app --include /srv/appdata/important.dat --target /tmp/r
+sudo bash -c 'source /etc/my-app/restic.env
+  restic restore latest --tag my-app --include /srv/appdata/important.dat --target /tmp/r'
 
-# stream a single file to stdout
-restic dump latest /srv/appdata/important.dat > /tmp/important.dat
+# stream a single file to stdout (the redirect runs as your user; restic runs as root)
+sudo bash -c 'source /etc/my-app/restic.env
+  restic dump latest --tag my-app /srv/appdata/important.dat' > /tmp/important.dat
 
-# browse a snapshot as a filesystem, copy what you need, then Ctrl-C to unmount
-restic mount /mnt/restic
+# optional: browse a snapshot as a filesystem — needs the FUSE package + a mountpoint
+sudo apt-get install -y fuse
+sudo mkdir -p /mnt/restic
+sudo bash -c 'source /etc/my-app/restic.env
+  restic mount /mnt/restic'        # Ctrl-C to unmount
 ```
 
 ### 5.3 In a different datacenter (cross-DC DR)
