@@ -55,3 +55,18 @@ func genPassword() (string, error) {
 	}
 	return "Aa1" + base64.RawURLEncoding.EncodeToString(b), nil
 }
+
+// genAlphaNum returns an n-character alphanumeric secret. The Harbor chart
+// requires exact lengths for its internal keys (secretKey/core.secret 16,
+// xsrfKey 32), so unlike genPassword the length is caller-controlled.
+func genAlphaNum(n int) (string, error) {
+	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	for i := range b {
+		b[i] = alphabet[int(b[i])%len(alphabet)]
+	}
+	return string(b), nil
+}

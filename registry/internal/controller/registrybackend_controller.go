@@ -3,11 +3,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
@@ -15,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	registryv1alpha1 "github.com/wso2/open-cloud-datacenter/crds/registry/api/v1alpha1"
 	"github.com/wso2/open-cloud-datacenter/crds/registry/internal/config"
@@ -78,15 +81,18 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		plan = "starter"
 	}
 
-	// 1. Ensure Harbor admin + db passwords exist in an owned Secret.
-	adminPass, dbPass, secretName, err := r.ensureAdminSecret(ctx, &cr)
+	// 1. Ensure the full pinned Harbor credential set exists in an owned Secret
+	// (admin + db passwords and the chart's internal keys — pinned so that
+	// re-rendered values are deterministic and upgrades never rotate secrets).
+	secrets, secretName, err := r.ensureAdminSecret(ctx, &cr)
 	if err != nil {
 		return r.transient(ctx, &cr, "", "ensure admin secret", err)
 	}
 
 	// 2. Ensure the tenant's Harbor namespace (<tenantID>-management) exists,
-	// then render values + install Harbor into it (idempotent: Install skips if
-	// the release already exists).
+	// then render values and converge the Helm release (install when missing,
+	// upgrade when the desired values drift from the deployed ones — e.g. a
+	// plan change; no-op otherwise).
 	harborNS := harborNamespace(tenantID)
 	if err := r.ensureNamespace(ctx, harborNS); err != nil {
 		return r.transient(ctx, &cr, secretName, "ensure Harbor namespace", err)
@@ -96,25 +102,36 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.fail(ctx, &cr, "resolve plan", err)
 	}
 	values, err := helm.GenerateValues(helm.ValuesInput{
-		TenantID:     tenantID,
-		AdminPass:    adminPass,
-		DBPass:       dbPass,
-		BaseDomain:   r.HelmCfg.BaseDomain,
-		StorageClass: r.HelmCfg.StorageClass,
-		IngressClass: r.HelmCfg.IngressClass,
-		CertIssuer:   r.HelmCfg.CertIssuer,
-		Plan:         tplan,
+		TenantID:         tenantID,
+		AdminPass:        secrets.AdminPass,
+		DBPass:           secrets.DBPass,
+		BaseDomain:       r.HelmCfg.BaseDomain,
+		StorageClass:     r.HelmCfg.StorageClass,
+		IngressClass:     r.HelmCfg.IngressClass,
+		CertIssuer:       r.HelmCfg.CertIssuer,
+		Plan:             tplan,
+		CoreSecret:       secrets.CoreSecret,
+		JobserviceSecret: secrets.JobserviceSecret,
+		RegistrySecret:   secrets.RegistrySecret,
+		XSRFKey:          secrets.XSRFKey,
+		EncryptionKey:    secrets.EncryptionKey,
 	})
 	if err != nil {
 		return r.fail(ctx, &cr, "generate values", err)
 	}
 	if err := r.Helm.Install(ctx, tenantID, harborNS, values); err != nil {
-		return r.transient(ctx, &cr, secretName, "helm install", err)
+		return r.transient(ctx, &cr, secretName, "helm install/upgrade", err)
+	}
+
+	// 2b. Grow plan-controlled PVCs to the plan's sizes (helm cannot resize
+	// existing claims; PVC expansion is a direct, grow-only patch).
+	if err := r.ensureStorageSize(ctx, &cr, harborNS, tplan); err != nil {
+		return r.transient(ctx, &cr, secretName, "ensure storage size", err)
 	}
 
 	// 3. Wait for Harbor to accept API requests (poll, don't block).
 	registryURL := fmt.Sprintf("https://registry.%s.%s", tenantID, r.HelmCfg.BaseDomain)
-	cli := r.harborClient(registryURL, adminPass)
+	cli := r.harborClient(registryURL, secrets.AdminPass)
 	if err := cli.Ping(ctx); err != nil {
 		return r.provisioning(ctx, &cr, secretName, registryURL,
 			"waiting for Harbor to accept API requests", 15*time.Second)
@@ -144,47 +161,147 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 }
 
-// ensureAdminSecret returns the Harbor admin + db passwords, creating an owned
-// Secret with fresh random values on first reconcile. On later reconciles it
-// returns the stored values so Helm re-installs are stable.
-func (r *RegistryBackendReconciler) ensureAdminSecret(ctx context.Context, cr *registryv1alpha1.RegistryBackend) (admin, db, name string, err error) {
-	name = cr.Name + "-harbor-admin"
+// harborSecrets holds every credential the Harbor chart must receive as a
+// pinned value. If any were left unset, the chart would generate fresh random
+// ones on every render — making helm upgrade rotate live credentials. Pinning
+// them keeps GenerateValues deterministic, which is what makes upgrades safe.
+type harborSecrets struct {
+	AdminPass        string
+	DBPass           string
+	CoreSecret       string
+	JobserviceSecret string
+	RegistrySecret   string
+	XSRFKey          string
+	EncryptionKey    string
+}
+
+// harborSecretGenerators maps Secret data keys to their generators. Lengths
+// follow the Harbor chart's requirements (secretKey/core.secret 16, xsrfKey 32).
+var harborSecretGenerators = map[string]func() (string, error){
+	"admin-password":    genPassword,
+	"db-password":       genPassword,
+	"core-secret":       func() (string, error) { return genAlphaNum(16) },
+	"jobservice-secret": func() (string, error) { return genAlphaNum(16) },
+	"registry-secret":   func() (string, error) { return genAlphaNum(16) },
+	"xsrf-key":          func() (string, error) { return genAlphaNum(32) },
+	"encryption-key":    func() (string, error) { return genAlphaNum(16) },
+}
+
+// ensureAdminSecret returns the full pinned Harbor credential set, creating an
+// owned Secret with fresh random values on first reconcile and returning the
+// stored values on later reconciles so Helm renders stay stable. Secrets from
+// pre-pinning deployments are migrated in place: any missing key is generated
+// and added (existing keys are never touched).
+func (r *RegistryBackendReconciler) ensureAdminSecret(ctx context.Context, cr *registryv1alpha1.RegistryBackend) (harborSecrets, string, error) {
+	name := cr.Name + "-harbor-admin"
 	key := client.ObjectKey{Namespace: cr.Namespace, Name: name}
 
 	var sec corev1.Secret
-	if err = r.Get(ctx, key, &sec); err == nil {
-		return string(sec.Data["admin-password"]), string(sec.Data["db-password"]), name, nil
-	} else if !apierrors.IsNotFound(err) {
-		return "", "", "", err
-	}
-
-	if admin, err = genPassword(); err != nil {
-		return "", "", "", err
-	}
-	if db, err = genPassword(); err != nil {
-		return "", "", "", err
-	}
-	sec = corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cr.Namespace},
-		Type:       corev1.SecretTypeOpaque,
-		Data: map[string][]byte{
-			"admin-password": []byte(admin),
-			"db-password":    []byte(db),
-		},
-	}
-	if err = controllerutil.SetControllerReference(cr, &sec, r.Scheme); err != nil {
-		return "", "", "", err
-	}
-	if err = r.Create(ctx, &sec); err != nil {
-		if apierrors.IsAlreadyExists(err) {
-			// Lost a race; re-read the winner's values.
-			if e := r.Get(ctx, key, &sec); e == nil {
-				return string(sec.Data["admin-password"]), string(sec.Data["db-password"]), name, nil
+	err := r.Get(ctx, key, &sec)
+	switch {
+	case err == nil:
+		// Migration path: fill keys added since this Secret was created.
+		added := false
+		for k, gen := range harborSecretGenerators {
+			if len(sec.Data[k]) > 0 {
+				continue
+			}
+			v, gerr := gen()
+			if gerr != nil {
+				return harborSecrets{}, "", gerr
+			}
+			if sec.Data == nil {
+				sec.Data = map[string][]byte{}
+			}
+			sec.Data[k] = []byte(v)
+			added = true
+		}
+		if added {
+			if uerr := r.Update(ctx, &sec); uerr != nil {
+				return harborSecrets{}, "", uerr
 			}
 		}
-		return "", "", "", err
+	case apierrors.IsNotFound(err):
+		sec = corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cr.Namespace},
+			Type:       corev1.SecretTypeOpaque,
+			Data:       map[string][]byte{},
+		}
+		for k, gen := range harborSecretGenerators {
+			v, gerr := gen()
+			if gerr != nil {
+				return harborSecrets{}, "", gerr
+			}
+			sec.Data[k] = []byte(v)
+		}
+		if cerr := controllerutil.SetControllerReference(cr, &sec, r.Scheme); cerr != nil {
+			return harborSecrets{}, "", cerr
+		}
+		if cerr := r.Create(ctx, &sec); cerr != nil {
+			if !apierrors.IsAlreadyExists(cerr) {
+				return harborSecrets{}, "", cerr
+			}
+			// Lost a race; re-read the winner's values.
+			if gerr := r.Get(ctx, key, &sec); gerr != nil {
+				return harborSecrets{}, "", gerr
+			}
+		}
+	default:
+		return harborSecrets{}, "", err
 	}
-	return admin, db, name, nil
+
+	return harborSecrets{
+		AdminPass:        string(sec.Data["admin-password"]),
+		DBPass:           string(sec.Data["db-password"]),
+		CoreSecret:       string(sec.Data["core-secret"]),
+		JobserviceSecret: string(sec.Data["jobservice-secret"]),
+		RegistrySecret:   string(sec.Data["registry-secret"]),
+		XSRFKey:          string(sec.Data["xsrf-key"]),
+		EncryptionKey:    string(sec.Data["encryption-key"]),
+	}, name, nil
+}
+
+// ensureStorageSize grows the plan-controlled PVCs to the plan's sizes. Helm
+// cannot do this (StatefulSet volumeClaimTemplates are immutable and PVC size
+// changes are frozen out of the upgrade diff), so the reconciler patches the
+// claims directly. Grow-only: Kubernetes forbids shrinking, and the CRD's CEL
+// rule already rejects plan downgrades at admission. Idempotent — equal or
+// larger current size is a no-op. Requires a StorageClass with
+// allowVolumeExpansion (Longhorn: yes).
+func (r *RegistryBackendReconciler) ensureStorageSize(ctx context.Context, cr *registryv1alpha1.RegistryBackend, namespace string, plan helm.TenantPlan) error {
+	var pvcs corev1.PersistentVolumeClaimList
+	if err := r.List(ctx, &pvcs, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("list PVCs: %w", err)
+	}
+	for i := range pvcs.Items {
+		pvc := &pvcs.Items[i]
+		// The namespace is dedicated to this tenant's Harbor release, so name
+		// suffixes are unambiguous: the registry image store and the database.
+		var want string
+		switch {
+		case strings.HasSuffix(pvc.Name, "-registry"):
+			want = plan.RegistryStorage
+		case strings.Contains(pvc.Name, "-database-"):
+			want = plan.DBStorage
+		default:
+			continue // jobservice/redis/trivy sizes are not plan-controlled
+		}
+		desired, err := resource.ParseQuantity(want)
+		if err != nil {
+			return fmt.Errorf("parse plan size %q: %w", want, err)
+		}
+		current := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+		if desired.Cmp(current) <= 0 {
+			continue // grow-only
+		}
+		pvc.Spec.Resources.Requests[corev1.ResourceStorage] = desired
+		if err := r.Update(ctx, pvc); err != nil {
+			return fmt.Errorf("expand PVC %s to %s: %w", pvc.Name, want, err)
+		}
+		r.Recorder.Event(cr, corev1.EventTypeNormal, "StorageExpanded",
+			fmt.Sprintf("PVC %s: %s -> %s", pvc.Name, current.String(), want))
+	}
+	return nil
 }
 
 // handleDelete runs the Backend finalizer: refuse while RegistryInstances still
@@ -344,7 +461,11 @@ func (r *RegistryBackendReconciler) fail(ctx context.Context, cr *registryv1alph
 		s.Message = msg
 		setReady(&s.Conditions, cr.Generation, metav1.ConditionFalse, reasonError, msg)
 	})
-	return ctrl.Result{}, cause
+	// TerminalError: no requeue (retrying cannot fix a spec-level error — only
+	// a user edit can, and that edit re-triggers reconcile via the watch), but
+	// unlike returning nil the failure still lands in logs and the
+	// terminal_reconcile_errors_total metric.
+	return ctrl.Result{}, reconcile.TerminalError(cause)
 }
 
 func (r *RegistryBackendReconciler) SetupWithManager(mgr ctrl.Manager) error {

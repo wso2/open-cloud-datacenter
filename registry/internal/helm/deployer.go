@@ -2,9 +2,11 @@ package helm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"time"
 
 	"go.uber.org/zap"
@@ -15,6 +17,7 @@ import (
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/getter"
 	"helm.sh/helm/v3/pkg/repo"
+	"helm.sh/helm/v3/pkg/storage/driver"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 
 	"github.com/wso2/open-cloud-datacenter/crds/registry/internal/config"
@@ -78,35 +81,111 @@ func (d *Deployer) Install(ctx context.Context, tenantID, namespace string, valu
 		return err
 	}
 
-	install := action.NewInstall(cfg)
-	install.ReleaseName = releaseName(tenantID)
-	install.Namespace = namespace
-	install.CreateNamespace = false
-	install.Wait = false
-	install.Timeout = 10 * time.Minute
-	install.Atomic = false
+	rel := releaseName(tenantID)
 
-	// Check if release already exists (retry after partial failure) — skip install entirely.
-	// Do NOT upgrade: upgrade regenerates passwords which breaks the running Harbor DB.
-	// WaitForAllReady will confirm pods are healthy before proceeding to bootstrap.
+	// Level-triggered convergence: desired state is the freshly rendered
+	// values; observed state is the deployed release's values. Missing →
+	// install. Identical → no-op (the steady-state case). Drifted → upgrade
+	// (e.g. a plan change). Upgrading is safe because every chart secret is
+	// pinned in values, so a re-render can never rotate live credentials.
 	history := action.NewHistory(cfg)
 	history.Max = 1
-	if _, err := history.Run(releaseName(tenantID)); err == nil {
-		d.logger.Info("release already exists, skipping install",
+	if _, err := history.Run(rel); err != nil {
+		if !errors.Is(err, driver.ErrReleaseNotFound) {
+			return fmt.Errorf("helm history: %w", err)
+		}
+		install := action.NewInstall(cfg)
+		install.ReleaseName = rel
+		install.Namespace = namespace
+		install.CreateNamespace = false
+		install.Wait = false
+		install.Timeout = 10 * time.Minute
+		install.Atomic = false
+
+		d.logger.Info("installing harbor on harvester",
 			zap.String("tenant", tenantID),
+			zap.String("namespace", namespace),
+			zap.String("target_cluster", "harvester"),
 		)
+		if _, err := install.RunWithContext(ctx, chart, vals); err != nil {
+			return fmt.Errorf("helm install: %w", err)
+		}
 		return nil
 	}
 
-	d.logger.Info("installing harbor on harvester",
+	// Release exists — diff desired values against deployed values.
+	deployed, err := action.NewGetValues(cfg).Run(rel)
+	if err != nil {
+		return fmt.Errorf("helm get values: %w", err)
+	}
+
+	// PVC sizes must never flow through helm upgrade: StatefulSet
+	// volumeClaimTemplates are immutable and Kubernetes cannot shrink claims.
+	// Freeze the deployed sizes into the desired values; storage growth is the
+	// reconciler's job (ensureStorageSize patches the PVCs directly).
+	freezeStorageSizes(vals, deployed)
+
+	if reflect.DeepEqual(vals, deployed) {
+		return nil // no drift — nothing to do
+	}
+
+	d.logger.Info("values drift detected, upgrading harbor release",
 		zap.String("tenant", tenantID),
 		zap.String("namespace", namespace),
-		zap.String("target_cluster", "harvester"),
 	)
-	if _, err := install.RunWithContext(ctx, chart, vals); err != nil {
-		return fmt.Errorf("helm install: %w", err)
+	up := action.NewUpgrade(cfg)
+	up.Namespace = namespace
+	up.Wait = false // the reconciler polls readiness (Ping + RequeueAfter)
+	up.Timeout = 10 * time.Minute
+	up.MaxHistory = 5
+	if _, err := up.RunWithContext(ctx, rel, chart, vals); err != nil {
+		return fmt.Errorf("helm upgrade: %w", err)
 	}
 	return nil
+}
+
+// freezeStorageSizes copies the deployed persistence sizes into the desired
+// values so the upgrade diff never proposes a PVC size change (immutable
+// through the chart). The reconciler grows PVCs directly instead.
+func freezeStorageSizes(desired, deployed map[string]interface{}) {
+	paths := [][]string{
+		{"persistence", "persistentVolumeClaim", "registry", "size"},
+		{"persistence", "persistentVolumeClaim", "jobservice", "jobLog", "size"},
+		{"persistence", "persistentVolumeClaim", "database", "size"},
+		{"persistence", "persistentVolumeClaim", "redis", "size"},
+		{"persistence", "persistentVolumeClaim", "trivy", "size"},
+	}
+	for _, p := range paths {
+		if v, ok := nestedGet(deployed, p); ok {
+			nestedSet(desired, p, v)
+		}
+	}
+}
+
+func nestedGet(m map[string]interface{}, path []string) (interface{}, bool) {
+	var cur interface{} = m
+	for _, k := range path {
+		mm, ok := cur.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		if cur, ok = mm[k]; !ok {
+			return nil, false
+		}
+	}
+	return cur, true
+}
+
+func nestedSet(m map[string]interface{}, path []string, v interface{}) {
+	cur := m
+	for _, k := range path[:len(path)-1] {
+		next, ok := cur[k].(map[string]interface{})
+		if !ok {
+			return
+		}
+		cur = next
+	}
+	cur[path[len(path)-1]] = v
 }
 
 // Uninstall removes the Harbor Helm release from the tenant's management namespace on Harvester.

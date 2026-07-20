@@ -44,6 +44,16 @@ type ValuesInput struct {
 	IngressClass string
 	CertIssuer   string
 	Plan         TenantPlan
+
+	// Pinned chart secrets. When these are NOT set in values, the Harbor chart
+	// auto-generates random ones at every render — which means a helm upgrade
+	// would rotate them and break the running installation. Pinning them makes
+	// GenerateValues deterministic, which is what makes upgrades safe.
+	CoreSecret       string // core.secret (16 chars)
+	JobserviceSecret string // jobservice.secret (16 chars)
+	RegistrySecret   string // registry.secret (16 chars)
+	XSRFKey          string // core.xsrfKey (32 chars)
+	EncryptionKey    string // secretKey — encrypts stored credentials (16 chars)
 }
 
 func PlanFor(name string) (TenantPlan, error) {
@@ -89,6 +99,9 @@ externalURL: https://registry.{{.TenantID}}.{{.BaseDomain}}
 
 harborAdminPassword: "{{.AdminPass}}"
 
+# Pinned so helm upgrade never rotates it (chart would otherwise use a default).
+secretKey: "{{.EncryptionKey}}"
+
 persistence:
   enabled: true
   resourcePolicy: keep
@@ -120,6 +133,8 @@ redis:
   type: internal
 
 core:
+  secret: "{{.CoreSecret}}"
+  xsrfKey: "{{.XSRFKey}}"
   resources:
     requests:
       cpu: {{.Plan.CoreCPUReq}}
@@ -129,6 +144,7 @@ core:
       memory: {{.Plan.CoreMemLimit}}
 
 registry:
+  secret: "{{.RegistrySecret}}"
   resources:
     requests:
       cpu: {{.Plan.RegistryCPUReq}}
@@ -138,6 +154,7 @@ registry:
       memory: 512Mi
 
 jobservice:
+  secret: "{{.JobserviceSecret}}"
   resources:
     requests:
       cpu: 100m

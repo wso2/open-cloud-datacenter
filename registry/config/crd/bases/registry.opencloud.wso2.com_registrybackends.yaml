@@ -56,12 +56,21 @@ spec:
             properties:
               plan:
                 default: starter
-                description: Plan selects the Harbor resource profile.
+                description: |-
+                  Plan selects the Harbor resource profile. Upgrades only
+                  (starter -> professional -> enterprise): a downgrade would imply
+                  shrinking PVCs, which Kubernetes cannot do. Enforced at admission by the
+                  CEL transition rule below (evaluated on UPDATE only).
                 enum:
                 - starter
                 - professional
                 - enterprise
                 type: string
+                x-kubernetes-validations:
+                - message: plan can only be upgraded (starter -> professional -> enterprise),
+                    never downgraded
+                  rule: self == oldSelf || (oldSelf == 'starter' && self != 'starter')
+                    || (oldSelf == 'professional' && self == 'enterprise')
               reclaimPolicy:
                 default: Retain
                 description: |-

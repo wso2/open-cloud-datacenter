@@ -25,9 +25,13 @@ type RegistryBackendSpec struct {
 	// The Harbor Helm release and namespace are derived from this.
 	TenantID string `json:"tenantID"`
 
-	// Plan selects the Harbor resource profile.
+	// Plan selects the Harbor resource profile. Upgrades only
+	// (starter -> professional -> enterprise): a downgrade would imply
+	// shrinking PVCs, which Kubernetes cannot do. Enforced at admission by the
+	// CEL transition rule below (evaluated on UPDATE only).
 	// +kubebuilder:validation:Enum=starter;professional;enterprise
 	// +kubebuilder:default=starter
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf || (oldSelf == 'starter' && self != 'starter') || (oldSelf == 'professional' && self == 'enterprise')",message="plan can only be upgraded (starter -> professional -> enterprise), never downgraded"
 	Plan string `json:"plan,omitempty"`
 
 	// ReclaimPolicy controls what happens to Harbor's data (PVCs) when this
