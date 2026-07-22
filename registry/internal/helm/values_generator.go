@@ -37,23 +37,32 @@ var plans = map[string]TenantPlan{
 
 type ValuesInput struct {
 	TenantID     string
-	AdminPass    string
-	DBPass       string
 	BaseDomain   string
 	StorageClass string
 	IngressClass string
 	CertIssuer   string
 	Plan         TenantPlan
 
-	// Pinned chart secrets. When these are NOT set in values, the Harbor chart
-	// auto-generates random ones at every render — which means a helm upgrade
-	// would rotate them and break the running installation. Pinning them makes
-	// GenerateValues deterministic, which is what makes upgrades safe.
-	CoreSecret       string // core.secret (16 chars)
-	JobserviceSecret string // jobservice.secret (16 chars)
-	RegistrySecret   string // registry.secret (16 chars)
-	XSRFKey          string // core.xsrfKey (32 chars)
-	EncryptionKey    string // secretKey — encrypts stored credentials (16 chars)
+	// SecretName is the operator-owned Secret (built by ensureAdminSecret) that
+	// Harbor's chart reads the admin password, core secret, xsrf key,
+	// jobservice secret, and registry secret FROM DIRECTLY via its
+	// existingSecret* fields — so those five values are never written into
+	// values.yaml and never enter the Helm release record (visible via
+	// `helm get values`/`helm get manifest`). The Secret must use the exact
+	// data keys Harbor's chart requires: HARBOR_ADMIN_PASSWORD, secret,
+	// CSRF_KEY, JOBSERVICE_SECRET, REGISTRY_HTTP_SECRET.
+	SecretName string
+
+	// DBPass and EncryptionKey have NO existingSecret equivalent anywhere in
+	// the Harbor chart (verified against goharbor/harbor-helm values.yaml —
+	// database.internal.password and the top-level secretKey are only ever
+	// settable as literal values), so unlike the five secrets above they must
+	// still be passed as raw template values. Both are pinned (not left for
+	// the chart to auto-generate) so GenerateValues stays deterministic —
+	// which is what makes upgrades safe — even though their plaintext still
+	// ends up in the rendered values.yaml.
+	DBPass        string // database.internal.password (16 chars)
+	EncryptionKey string // secretKey — encrypts stored credentials (16 chars)
 }
 
 func PlanFor(name string) (TenantPlan, error) {
@@ -97,9 +106,14 @@ expose:
 
 externalURL: https://registry.{{.TenantID}}.{{.BaseDomain}}
 
-harborAdminPassword: "{{.AdminPass}}"
+# Read directly from our owned Secret (key: HARBOR_ADMIN_PASSWORD) instead of
+# a literal value — keeps the admin password out of the Helm release record.
+existingSecretAdminPassword: "{{.SecretName}}"
+existingSecretAdminPasswordKey: HARBOR_ADMIN_PASSWORD
 
-# Pinned so helm upgrade never rotates it (chart would otherwise use a default).
+# No existingSecret option exists for secretKey in the Harbor chart, so this
+# stays a literal value. Still pinned (not left to chart auto-generation) so
+# helm upgrade never rotates it.
 secretKey: "{{.EncryptionKey}}"
 
 persistence:
@@ -127,14 +141,20 @@ persistence:
 database:
   type: internal
   internal:
+    # No existingSecret option for the internal database password in the
+    # Harbor chart, so this stays a literal value — still our own random
+    # value, not the chart's world-known "changeit" default.
     password: "{{.DBPass}}"
 
 redis:
   type: internal
 
 core:
-  secret: "{{.CoreSecret}}"
-  xsrfKey: "{{.XSRFKey}}"
+  # Read directly from our owned Secret instead of literal values — keeps
+  # core.secret and core.xsrfKey out of the Helm release record.
+  existingSecret: "{{.SecretName}}"
+  existingXsrfSecret: "{{.SecretName}}"
+  existingXsrfSecretKey: CSRF_KEY
   resources:
     requests:
       cpu: {{.Plan.CoreCPUReq}}
@@ -144,7 +164,8 @@ core:
       memory: {{.Plan.CoreMemLimit}}
 
 registry:
-  secret: "{{.RegistrySecret}}"
+  # Read directly from our owned Secret instead of a literal value.
+  existingSecret: "{{.SecretName}}"
   resources:
     requests:
       cpu: {{.Plan.RegistryCPUReq}}
@@ -154,7 +175,8 @@ registry:
       memory: 512Mi
 
 jobservice:
-  secret: "{{.JobserviceSecret}}"
+  # Read directly from our owned Secret instead of a literal value.
+  existingSecret: "{{.SecretName}}"
   resources:
     requests:
       cpu: 100m

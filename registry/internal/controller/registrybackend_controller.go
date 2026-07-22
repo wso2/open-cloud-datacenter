@@ -102,19 +102,15 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.fail(ctx, &cr, "resolve plan", err)
 	}
 	values, err := helm.GenerateValues(helm.ValuesInput{
-		TenantID:         tenantID,
-		AdminPass:        secrets.AdminPass,
-		DBPass:           secrets.DBPass,
-		BaseDomain:       r.HelmCfg.BaseDomain,
-		StorageClass:     r.HelmCfg.StorageClass,
-		IngressClass:     r.HelmCfg.IngressClass,
-		CertIssuer:       r.HelmCfg.CertIssuer,
-		Plan:             tplan,
-		CoreSecret:       secrets.CoreSecret,
-		JobserviceSecret: secrets.JobserviceSecret,
-		RegistrySecret:   secrets.RegistrySecret,
-		XSRFKey:          secrets.XSRFKey,
-		EncryptionKey:    secrets.EncryptionKey,
+		TenantID:      tenantID,
+		SecretName:    secretName, // core/jobservice/registry secrets + admin password read from here via existingSecret
+		DBPass:        secrets.DBPass,
+		EncryptionKey: secrets.EncryptionKey,
+		BaseDomain:    r.HelmCfg.BaseDomain,
+		StorageClass:  r.HelmCfg.StorageClass,
+		IngressClass:  r.HelmCfg.IngressClass,
+		CertIssuer:    r.HelmCfg.CertIssuer,
+		Plan:          tplan,
 	})
 	if err != nil {
 		return r.fail(ctx, &cr, "generate values", err)
@@ -175,23 +171,33 @@ type harborSecrets struct {
 	EncryptionKey    string
 }
 
-// harborSecretGenerators maps Secret data keys to their generators. Lengths
-// follow the Harbor chart's requirements (secretKey/core.secret 16, xsrfKey 32).
+// harborSecretGenerators maps Secret data keys to their generators. Keys for
+// admin-password, core.secret, core.xsrfKey, jobservice.secret, and
+// registry.secret use the EXACT names Harbor's chart requires when read via
+// existingSecret (HARBOR_ADMIN_PASSWORD/secret/CSRF_KEY/JOBSERVICE_SECRET/
+// REGISTRY_HTTP_SECRET — see values_generator.go's harborValuesTemplate),
+// so the same Secret this map builds is what the chart reads directly; their
+// plaintext never enters values.yaml or the Helm release record. db-password
+// and encryption-key have no existingSecret equivalent in the chart, so they
+// stay under plain names and are still passed as raw template values.
+// Lengths follow the Harbor chart's documented requirements (secretKey/
+// core.secret/jobservice.secret/registry.secret: 16 chars; xsrfKey: 32).
 var harborSecretGenerators = map[string]func() (string, error){
-	"admin-password":    genPassword,
-	"db-password":       genPassword,
-	"core-secret":       func() (string, error) { return genAlphaNum(16) },
-	"jobservice-secret": func() (string, error) { return genAlphaNum(16) },
-	"registry-secret":   func() (string, error) { return genAlphaNum(16) },
-	"xsrf-key":          func() (string, error) { return genAlphaNum(32) },
-	"encryption-key":    func() (string, error) { return genAlphaNum(16) },
+	"HARBOR_ADMIN_PASSWORD": genPassword,
+	"db-password":           genPassword,
+	"secret":                func() (string, error) { return genAlphaNum(16) }, // core.secret
+	"JOBSERVICE_SECRET":     func() (string, error) { return genAlphaNum(16) },
+	"REGISTRY_HTTP_SECRET":  func() (string, error) { return genAlphaNum(16) },
+	"CSRF_KEY":              func() (string, error) { return genAlphaNum(32) }, // core.xsrfKey
+	"encryption-key":        func() (string, error) { return genAlphaNum(16) },
 }
 
 // ensureAdminSecret returns the full pinned Harbor credential set, creating an
 // owned Secret with fresh random values on first reconcile and returning the
-// stored values on later reconciles so Helm renders stay stable. Secrets from
-// pre-pinning deployments are migrated in place: any missing key is generated
-// and added (existing keys are never touched).
+// stored values on later reconciles so Helm renders stay stable. Any key not
+// yet present (e.g. one added to harborSecretGenerators after this Secret was
+// first created) is generated and added on a later reconcile; existing keys
+// are never overwritten, so live credentials are never silently rotated.
 func (r *RegistryBackendReconciler) ensureAdminSecret(ctx context.Context, cr *registryv1alpha1.RegistryBackend) (harborSecrets, string, error) {
 	name := cr.Name + "-harbor-admin"
 	key := client.ObjectKey{Namespace: cr.Namespace, Name: name}
@@ -200,7 +206,7 @@ func (r *RegistryBackendReconciler) ensureAdminSecret(ctx context.Context, cr *r
 	err := r.Get(ctx, key, &sec)
 	switch {
 	case err == nil:
-		// Migration path: fill keys added since this Secret was created.
+		// Self-heal: generate any key not yet present.
 		added := false
 		for k, gen := range harborSecretGenerators {
 			if len(sec.Data[k]) > 0 {
@@ -251,12 +257,12 @@ func (r *RegistryBackendReconciler) ensureAdminSecret(ctx context.Context, cr *r
 	}
 
 	return harborSecrets{
-		AdminPass:        string(sec.Data["admin-password"]),
+		AdminPass:        string(sec.Data["HARBOR_ADMIN_PASSWORD"]),
 		DBPass:           string(sec.Data["db-password"]),
-		CoreSecret:       string(sec.Data["core-secret"]),
-		JobserviceSecret: string(sec.Data["jobservice-secret"]),
-		RegistrySecret:   string(sec.Data["registry-secret"]),
-		XSRFKey:          string(sec.Data["xsrf-key"]),
+		CoreSecret:       string(sec.Data["secret"]),
+		JobserviceSecret: string(sec.Data["JOBSERVICE_SECRET"]),
+		RegistrySecret:   string(sec.Data["REGISTRY_HTTP_SECRET"]),
+		XSRFKey:          string(sec.Data["CSRF_KEY"]),
 		EncryptionKey:    string(sec.Data["encryption-key"]),
 	}, name, nil
 }
