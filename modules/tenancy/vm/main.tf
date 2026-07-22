@@ -91,24 +91,14 @@ resource "harvester_virtualmachine" "this" {
     }
   }
 
-  # cloudinitdisk is automatically created when cloudinit is created. 
-  # We ignore the size of the cloudinitdisk as it is managed by cloudinit.
+  # cloudinitdisk is automatically created when cloudinit is created.
   dynamic "disk" {
     for_each = length(harvester_cloudinit_secret.this) > 0 ? [1] : []
     content {
       name = "cloudinitdisk"
       type = "disk"
       bus  = "virtio"
-      size = "0Gi"
     }
-  }
-
-  lifecycle {
-    ignore_changes = [
-      # Ignore the entire cloudinitdisk at index 1.
-      # The Size of the cloudinit disk is managed automatically by cloudinit and ignored in terraform.
-      disk[1].size
-    ]
   }
 }
 
