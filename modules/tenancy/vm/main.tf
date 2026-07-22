@@ -11,11 +11,25 @@ locals {
   ) : null
 
   effective_user_data = var.user_data != null ? var.user_data : local._generated_user_data
+
+  # When cloudinit_secret_name is set, reference that
+  # existing secret directly instead of creating one named
+  # "${var.name}-cloud-config". Use for VMs whose cloud-init secret already
+  # exists under a name that doesn't match this module's derived convention
+  # (e.g. a Harvester-UI generated random suffix) — renaming it would be a
+  # ForceNew replace. Harvester-UI-created VMs commonly point both the
+  # user-data and network-data refs at the same secret object, so the
+  # override applies to both.
+  cloudinit_secret_name = var.cloudinit_secret_name != null ? var.cloudinit_secret_name : (
+    length(harvester_cloudinit_secret.this) > 0 ? harvester_cloudinit_secret.this[0].name : null
+  )
+  has_cloudinit = local.cloudinit_secret_name != null
 }
 
 # Optional Harvester Cloud-Init Secret to hold the cloud-init data.
+# Skipped when var.cloudinit_secret_name references a pre-existing secret.
 resource "harvester_cloudinit_secret" "this" {
-  count = local.effective_user_data != null ? 1 : 0
+  count = local.effective_user_data != null && var.cloudinit_secret_name == null ? 1 : 0
 
   name      = "${var.name}-cloud-config"
   namespace = var.namespace
@@ -84,16 +98,19 @@ resource "harvester_virtualmachine" "this" {
   }
 
   dynamic "cloudinit" {
-    for_each = length(harvester_cloudinit_secret.this) > 0 ? [1] : []
+    for_each = local.has_cloudinit ? [1] : []
     content {
-      user_data_secret_name = harvester_cloudinit_secret.this[0].name
+      user_data_secret_name = local.cloudinit_secret_name
       network_data          = var.network_data
+      # Only set when referencing a pre-existing secret (brownfield override) —
+      # module-created secrets only ever hold user_data.
+      network_data_secret_name = var.cloudinit_secret_name
     }
   }
 
   # cloudinitdisk is automatically created when cloudinit is created.
   dynamic "disk" {
-    for_each = length(harvester_cloudinit_secret.this) > 0 ? [1] : []
+    for_each = local.has_cloudinit ? [1] : []
     content {
       name = "cloudinitdisk"
       type = "disk"
