@@ -84,6 +84,12 @@ variable "network_data" {
   default     = ""
 }
 
+variable "cloudinit_secret_name" {
+  type        = string
+  description = "Name of a pre-existing harvester_cloudinit_secret to reference for both user_data and network_data, instead of creating one named \"<name>-cloud-config\". Brownfield override for VMs whose cloud-init secret already exists under a different name (e.g. Harvester-UI generated). When set, user_data/password/ssh_authorized_keys are ignored for secret creation purposes (no new secret is created)."
+  default     = null
+}
+
 variable "create_ssh_key" {
   type        = bool
   description = "When true, create a harvester_ssh_key from ssh_public_key and attach it to the VM. Must be true for ssh_public_key to have any effect."
