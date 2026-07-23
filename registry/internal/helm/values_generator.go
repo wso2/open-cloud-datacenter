@@ -221,8 +221,6 @@ metrics:
 updateStrategy:
   type: RollingUpdate
 
-existingSecretAdminPassword: ""
-
 logLevel: warning
 
 notary:
