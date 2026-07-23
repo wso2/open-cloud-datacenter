@@ -14,12 +14,14 @@ in the backup/restore path touches the platform — the object store is the only
 thing that crosses a datacenter boundary, which is what makes cross-DC recovery
 simple.
 
-It is **database-level**: you can restore every database, a **single database**,
-or the roles alone, into any PostgreSQL VM of the same major version.
+It is **database-level**: you can restore every user database, a **single
+database**, or the roles alone, into any PostgreSQL VM of the same major version.
+(The `postgres` maintenance database is excluded — keep application data in your
+own databases.)
 
 | Protects | Restores | Use when |
 |----------|----------|----------|
-| A PostgreSQL server's databases + roles/passwords | Every database, one database, or roles — into any PostgreSQL VM | "we lost the DB VM", "we dropped a database", or "we need this data in another DC" |
+| A PostgreSQL server's user databases + roles/passwords | Every user database, one database, or roles — into any PostgreSQL VM | "we lost the DB VM", "we dropped a database", or "we need this data in another DC" |
 
 > This is the PostgreSQL counterpart to the
 > [VM Data Backups Guide](./BACKUPS.md) (restic, for plain files) and the
@@ -100,7 +102,6 @@ bucket-level actions have **no** `/*`, object-level actions do:
       "Action": [
         "s3:GetObject",
         "s3:PutObject",
-        "s3:DeleteObject",
         "s3:AbortMultipartUpload",
         "s3:ListMultipartUploadParts"
       ],
@@ -143,29 +144,36 @@ boot setup script as `locals`:
 
 ```hcl
 locals {
-  # S3 target + credentials. Written 0600, owned by postgres. NEVER include this
-  # file in a backup — it holds the object-store keys.
+  # S3 target + credentials, in systemd EnvironmentFile format (plain KEY=value,
+  # parsed literally — no shell evaluation of the values). The unit reads it via
+  # EnvironmentFile, so secrets are never sourced by a shell. Written 0600, owned
+  # by postgres. NEVER include this file in a backup — it holds the object-store keys.
   db_backup_env = <<-ENV
-    DB_S3_BUCKET="${var.db_s3_bucket}"
-    DB_S3_REGION="${var.db_s3_region}"
-    DB_S3_PREFIX="${var.db_s3_prefix}"
-    AWS_ACCESS_KEY_ID="${var.db_s3_access_key}"
-    AWS_SECRET_ACCESS_KEY="${var.db_s3_secret_key}"
+    DB_S3_BUCKET=${var.db_s3_bucket}
+    DB_S3_REGION=${var.db_s3_region}
+    DB_S3_PREFIX=${var.db_s3_prefix}
+    AWS_ACCESS_KEY_ID=${var.db_s3_access_key}
+    AWS_SECRET_ACCESS_KEY=${var.db_s3_secret_key}
   ENV
 
   # Roles first (globals, incl. password hashes), then one compressed custom-format
-  # dump per database — all streamed straight to a timestamped S3 prefix so no
-  # local disk is needed. Retention is enforced by the S3 lifecycle rule (§1).
+  # dump per user database — all streamed straight to a timestamped S3 prefix so no
+  # local disk is needed. A COMPLETE marker is written last so restore only trusts
+  # whole runs. The `postgres` maintenance DB is excluded (restoring it is unsafe);
+  # keep application data in your own databases. Assumes standard database
+  # identifiers (no whitespace); for unusual names use a manifest of encoded names.
+  # Retention is enforced by the S3 lifecycle rule (§1). Env comes from the unit.
   db_backup = <<-SH
     #!/usr/bin/env bash
     set -euo pipefail
-    source /etc/db-backup/backup.env
     TS=$(date -u +%Y%m%dT%H%M%SZ)
     DEST="s3://$DB_S3_BUCKET/$DB_S3_PREFIX/$TS"
     pg_dumpall --roles-only | aws s3 cp - "$DEST/roles.sql" --region "$DB_S3_REGION"
-    for db in $(psql -Atc "SELECT datname FROM pg_database WHERE datistemplate=false AND datname<>'postgres';"); do
+    for db in $(psql -AtXc "SELECT datname FROM pg_database WHERE datistemplate=false AND datname<>'postgres';"); do
       pg_dump -Fc -d "$db" | aws s3 cp - "$DEST/$db.dump" --region "$DB_S3_REGION"
     done
+    # Publish LAST — restore only selects prefixes that carry this marker.
+    printf 'ok\n' | aws s3 cp - "$DEST/COMPLETE" --region "$DB_S3_REGION"
   SH
 
   # Install the AWS CLI, enable the timer, and take the first backup at boot.
@@ -226,10 +234,12 @@ module "my_db_vm" {
           [Unit]
           Description=PostgreSQL logical backup to S3
           After=network-online.target postgresql.service
-          Wants=network-online.target
+          Wants=network-online.target postgresql.service
           [Service]
           Type=oneshot
           User=postgres
+          EnvironmentFile=/etc/db-backup/backup.env
+          TimeoutStartSec=0
           ExecStart=/usr/bin/bash /opt/db-backup.sh
       - path: /etc/systemd/system/db-backup.timer
         permissions: '0644'
@@ -288,14 +298,18 @@ proxy) and confirm the timer and the objects in S3:
 systemctl list-timers db-backup.timer                 # future NEXT
 sudo journalctl -u db-backup.service --no-pager | tail # last run succeeded
 
-# The dump landed under a timestamped prefix (env file is root/postgres-only):
-sudo bash -c 'source /etc/db-backup/backup.env
-  aws s3 ls "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/" --region "$DB_S3_REGION"'
+# Load the env WITHOUT sourcing (no shell evaluation of secret values), then
+# list the contents of the latest completed backup prefix:
+sudo bash -c 'while IFS="=" read -r k v; do [ -n "$k" ] && export "$k=$v"; done < /etc/db-backup/backup.env
+  TS=$(aws s3 ls "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/" --region "$DB_S3_REGION" | awk "{print \$2}" | tr -d / | sort -r \
+        | while read -r t; do aws s3 ls "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/$t/COMPLETE" --region "$DB_S3_REGION" >/dev/null 2>&1 && { echo "$t"; break; }; done)
+  aws s3 ls "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/$TS/" --region "$DB_S3_REGION"'
 ```
 
-You should see a `roles.sql` and one `<db>.dump` per database under the latest
-timestamp. Run `sudo systemctl start db-backup.service` again to take another
-point-in-time backup on demand.
+You should see a `roles.sql`, a `COMPLETE` marker, and one `<db>.dump` per user
+database under the latest completed timestamp. Run
+`sudo systemctl start db-backup.service` again to take another point-in-time
+backup on demand.
 
 ## 5. Restore
 
@@ -310,22 +324,22 @@ The real test — recover on a VM that never held the data:
    local disk:
 
 ```bash
-sudo -i -u postgres
-source /etc/db-backup/backup.env
+sudo -i -u postgres bash -c 'set -euo pipefail
+  while IFS="=" read -r k v; do [ -n "$k" ] && export "$k=$v"; done < /etc/db-backup/backup.env
 
-# pick the point in time to restore (latest shown here)
-TS=$(aws s3 ls "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/" --region "$DB_S3_REGION" \
-      | awk '{print $2}' | tr -d / | sort | tail -1)
-BASE="s3://$DB_S3_BUCKET/$DB_S3_PREFIX/$TS"
+  # pick the latest COMPLETE-marked prefix (skips partial/failed runs)
+  TS=$(aws s3 ls "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/" --region "$DB_S3_REGION" | awk "{print \$2}" | tr -d / | sort -r \
+        | while read -r t; do aws s3 ls "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/$t/COMPLETE" --region "$DB_S3_REGION" >/dev/null 2>&1 && { echo "$t"; break; }; done)
+  BASE="s3://$DB_S3_BUCKET/$DB_S3_PREFIX/$TS"
 
-# 1. roles (benign "already exists" on built-in roles)
-aws s3 cp "$BASE/roles.sql" - --region "$DB_S3_REGION" | psql -f -
+  # 1. roles (benign "already exists" notices on built-in roles are ignored)
+  aws s3 cp "$BASE/roles.sql" - --region "$DB_S3_REGION" | psql -f -
 
-# 2. every database — drop/recreate/restore, idempotent
-for key in $(aws s3 ls "$BASE/" --region "$DB_S3_REGION" | awk '{print $4}' | grep '\.dump$'); do
-  aws s3 cp "$BASE/$key" - --region "$DB_S3_REGION" \
-    | pg_restore --clean --if-exists --create -d postgres
-done
+  # 2. every database — drop/recreate/restore, idempotent, fail fast on error
+  for key in $(aws s3 ls "$BASE/" --region "$DB_S3_REGION" | awk "{print \$4}" | grep "[.]dump$"); do
+    aws s3 cp "$BASE/$key" - --region "$DB_S3_REGION" \
+      | pg_restore --exit-on-error --clean --if-exists --create -d postgres
+  done'
 ```
 
 Because roles are restored with their password hashes, application connection
@@ -337,11 +351,11 @@ You don't need the whole server — restore just one database from a chosen
 timestamp:
 
 ```bash
-sudo -i -u postgres
-source /etc/db-backup/backup.env
-TS=<timestamp>            # e.g. 20240115T010000Z, from `aws s3 ls`
-aws s3 cp "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/$TS/mydb.dump" - --region "$DB_S3_REGION" \
-  | pg_restore --clean --if-exists --create -d postgres
+sudo -i -u postgres bash -c 'set -euo pipefail
+  while IFS="=" read -r k v; do [ -n "$k" ] && export "$k=$v"; done < /etc/db-backup/backup.env
+  TS=<timestamp>            # e.g. 20240115T010000Z, from `aws s3 ls`
+  aws s3 cp "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/$TS/mydb.dump" - --region "$DB_S3_REGION" \
+    | pg_restore --exit-on-error --clean --if-exists --create -d postgres'
 ```
 
 If the database's owner role doesn't exist yet on this target, restore

@@ -101,7 +101,6 @@ bucket-level actions have **no** `/*`, object-level actions do:
       "Action": [
         "s3:GetObject",
         "s3:PutObject",
-        "s3:DeleteObject",
         "s3:AbortMultipartUpload",
         "s3:ListMultipartUploadParts"
       ],
@@ -117,8 +116,9 @@ Generate an access key pair for the user.
 
 The backup is configured entirely through the VM's **cloud-init**, passed to the
 `vm` module's `user_data`. There is no separate backup server. The timer service
-runs as root and authenticates to SQL Server with the `sa` password from a
-root-only env file.
+runs as root and authenticates to SQL Server with the `sa` password, which is
+delivered to `sqlcmd` as `SQLCMDPASSWORD` via the unit's root-only
+`EnvironmentFile` — so it never appears in a command line or process list.
 
 **`variables.tf`** — add:
 
@@ -148,41 +148,48 @@ boot setup script as `locals`:
 
 ```hcl
 locals {
-  # S3 target + credentials + the sa password. Written 0600, root-only. NEVER
-  # include this file in a backup — it holds the object-store keys and the sa login.
+  # S3 target + credentials + the sa password, in systemd EnvironmentFile format
+  # (plain KEY=value, parsed literally — no shell evaluation of the values). The
+  # unit reads it via EnvironmentFile, so secrets are never sourced by a shell.
+  # Written 0600, root-only. NEVER include this file in a backup.
   db_backup_env = <<-ENV
-    DB_S3_BUCKET="${var.db_s3_bucket}"
-    DB_S3_REGION="${var.db_s3_region}"
-    DB_S3_PREFIX="${var.db_s3_prefix}"
-    AWS_ACCESS_KEY_ID="${var.db_s3_access_key}"
-    AWS_SECRET_ACCESS_KEY="${var.db_s3_secret_key}"
-    MSSQL_SA_PASSWORD="${var.mssql_sa_password}"
+    DB_S3_BUCKET=${var.db_s3_bucket}
+    DB_S3_REGION=${var.db_s3_region}
+    DB_S3_PREFIX=${var.db_s3_prefix}
+    AWS_ACCESS_KEY_ID=${var.db_s3_access_key}
+    AWS_SECRET_ACCESS_KEY=${var.db_s3_secret_key}
+    SQLCMDPASSWORD=${var.mssql_sa_password}
   ENV
 
-  # Native compressed backup of each user database (database_id > 4 skips the
-  # system DBs) to a local disk, uploaded to a timestamped S3 prefix, then removed.
-  # Server logins are exported separately with SID + password hash so restored
-  # database users map automatically. Retention is the S3 lifecycle rule (§1).
+  # Native compressed, checksummed backup of each user database (database_id > 4
+  # skips the system DBs), verified, uploaded to a timestamped S3 prefix, then
+  # removed. A COMPLETE marker is written last so restore only trusts whole runs.
+  # Server logins are exported separately with SID + password hash so SQL-auth
+  # logins are recreated (server roles/permissions/Windows logins are NOT
+  # included). Env comes from the systemd unit; sqlcmd reads SQLCMDPASSWORD.
+  # Assumes standard database identifiers (no whitespace or ']'); for unusual
+  # names, quote with QUOTENAME and map to safe filenames via a manifest.
   db_backup = <<-SH
     #!/usr/bin/env bash
     set -euo pipefail
-    source /etc/db-backup/backup.env
     SQLCMD=/opt/mssql-tools18/bin/sqlcmd
     TS=$(date -u +%Y%m%dT%H%M%SZ)
     DEST="s3://$DB_S3_BUCKET/$DB_S3_PREFIX/$TS"
     BK=/var/opt/mssql/backup
-    mkdir -p "$BK"
+    install -d -o mssql -g mssql -m 0750 "$BK"   # SQL Server (mssql) must own it
 
-    DBS=$("$SQLCMD" -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -h -1 -W -Q \
+    DBS=$("$SQLCMD" -S localhost -U sa -C -h -1 -W -Q \
       "SET NOCOUNT ON; SELECT name FROM sys.databases WHERE database_id > 4;")
     for db in $DBS; do
-      "$SQLCMD" -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -Q \
-        "BACKUP DATABASE [$db] TO DISK='$BK/$db.bak' WITH COMPRESSION, FORMAT, INIT, STATS=25;"
+      "$SQLCMD" -S localhost -U sa -C -Q \
+        "BACKUP DATABASE [$db] TO DISK='$BK/$db.bak' WITH COMPRESSION, CHECKSUM, FORMAT, INIT, STATS=25;"
+      "$SQLCMD" -S localhost -U sa -C -Q \
+        "RESTORE VERIFYONLY FROM DISK='$BK/$db.bak' WITH CHECKSUM;"
       aws s3 cp "$BK/$db.bak" "$DEST/$db.bak" --region "$DB_S3_REGION"
       rm -f "$BK/$db.bak"
     done
 
-    "$SQLCMD" -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -y 8000 -Q \
+    "$SQLCMD" -S localhost -U sa -C -y 8000 -Q \
     "SET NOCOUNT ON;
      SELECT 'IF SUSER_ID('''+name+''') IS NULL CREATE LOGIN ['+name+'] WITH PASSWORD='
        +CONVERT(varchar(max),password_hash,1)+' HASHED, SID='+CONVERT(varchar(max),sid,1)
@@ -190,6 +197,9 @@ locals {
       | grep '^IF SUSER_ID' | sed 's/[[:space:]]*$//' > "$BK/logins.sql"
     aws s3 cp "$BK/logins.sql" "$DEST/logins.sql" --region "$DB_S3_REGION"
     rm -f "$BK/logins.sql"
+
+    # Publish LAST — restore only selects prefixes that carry this marker.
+    printf 'ok\n' | aws s3 cp - "$DEST/COMPLETE" --region "$DB_S3_REGION"
   SH
 
   # Install the AWS CLI, enable the timer, and take the first backup at boot.
@@ -250,9 +260,11 @@ module "my_db_vm" {
           [Unit]
           Description=SQL Server native backup to S3
           After=network-online.target mssql-server.service
-          Wants=network-online.target
+          Wants=network-online.target mssql-server.service
           [Service]
           Type=oneshot
+          EnvironmentFile=/etc/db-backup/backup.env
+          TimeoutStartSec=0
           ExecStart=/usr/bin/bash /opt/db-backup.sh
       - path: /etc/systemd/system/db-backup.timer
         permissions: '0644'
@@ -312,14 +324,18 @@ proxy) and confirm the timer and the objects in S3:
 systemctl list-timers db-backup.timer                 # future NEXT
 sudo journalctl -u db-backup.service --no-pager | tail # last run succeeded
 
-# The backups landed under a timestamped prefix (env file is root-only):
-sudo bash -c 'source /etc/db-backup/backup.env
-  aws s3 ls "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/" --region "$DB_S3_REGION"'
+# Load the env WITHOUT sourcing (no shell evaluation of secret values), then
+# list the contents of the latest completed backup prefix:
+sudo bash -c 'while IFS="=" read -r k v; do [ -n "$k" ] && export "$k=$v"; done < /etc/db-backup/backup.env
+  TS=$(aws s3 ls "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/" --region "$DB_S3_REGION" | awk "{print \$2}" | tr -d / | sort -r \
+        | while read -r t; do aws s3 ls "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/$t/COMPLETE" --region "$DB_S3_REGION" >/dev/null 2>&1 && { echo "$t"; break; }; done)
+  aws s3 ls "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/$TS/" --region "$DB_S3_REGION"'
 ```
 
-You should see a `logins.sql` and one `<db>.bak` per user database under the latest
-timestamp. Run `sudo systemctl start db-backup.service` again to take another
-point-in-time backup on demand.
+You should see a `logins.sql`, a `COMPLETE` marker, and one `<db>.bak` per user
+database under the latest completed timestamp. Run
+`sudo systemctl start db-backup.service` again to take another point-in-time
+backup on demand.
 
 ## 5. Restore
 
@@ -333,35 +349,46 @@ The real test — recover on a VM that never held the data:
 2. Restore logins first, then each database:
 
 ```bash
-sudo bash -c 'source /etc/db-backup/backup.env
-  SQLCMD=/opt/mssql-tools18/bin/sqlcmd
-  RS=/var/opt/mssql/backup; mkdir -p "$RS"
+sudo bash -c 'set -euo pipefail
+  while IFS="=" read -r k v; do [ -n "$k" ] && export "$k=$v"; done < /etc/db-backup/backup.env
+  SQLCMD=/opt/mssql-tools18/bin/sqlcmd   # reads the sa password from SQLCMDPASSWORD
+  RS=/var/opt/mssql/backup; install -d -o mssql -g mssql -m 0750 "$RS"
 
   # contained-DB auth must be on before restoring a contained database
-  "$SQLCMD" -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -Q \
+  "$SQLCMD" -S localhost -U sa -C -Q \
     "sp_configure '"'"'contained database authentication'"'"',1; RECONFIGURE;"
 
-  # pick the point in time to restore (latest shown here)
-  TS=$(aws s3 ls "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/" --region "$DB_S3_REGION" \
-        | awk "{print \$2}" | tr -d / | sort | tail -1)
+  # pick the latest COMPLETE-marked prefix (skips partial/failed runs)
+  TS=$(aws s3 ls "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/" --region "$DB_S3_REGION" | awk "{print \$2}" | tr -d / | sort -r \
+        | while read -r t; do aws s3 ls "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/$t/COMPLETE" --region "$DB_S3_REGION" >/dev/null 2>&1 && { echo "$t"; break; }; done)
   BASE="s3://$DB_S3_BUCKET/$DB_S3_PREFIX/$TS"
 
-  # 1. logins (SID + hash preserved → users map automatically)
+  # 1. logins (recreates SQL-auth logins with their SID + password hash)
   aws s3 cp "$BASE/logins.sql" "$RS/logins.sql" --region "$DB_S3_REGION"
-  "$SQLCMD" -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -i "$RS/logins.sql"
+  "$SQLCMD" -S localhost -U sa -C -i "$RS/logins.sql"
 
   # 2. every database — overwrite if present
   for key in $(aws s3 ls "$BASE/" --region "$DB_S3_REGION" | awk "{print \$4}" | grep "[.]bak$"); do
     db="${key%.bak}"
     aws s3 cp "$BASE/$key" "$RS/$key" --region "$DB_S3_REGION"
-    "$SQLCMD" -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -Q \
+    "$SQLCMD" -S localhost -U sa -C -Q \
       "RESTORE DATABASE [$db] FROM DISK='"'"'$RS/$key'"'"' WITH REPLACE, STATS=25;"
     rm -f "$RS/$key"
   done'
 ```
 
-Because logins are restored with their SID and password hash, application
-connection strings keep working unchanged.
+Restoring the exported logins recreates the **SQL-authenticated** logins with
+their original SID and password hash, so those applications' connection strings
+keep working. Server-role memberships, server-level permissions, default-database
+settings, and Windows/AAD logins are **not** part of this export — reapply those
+separately if your instance relies on them.
+
+> **File paths & busy databases.** `WITH REPLACE` reuses the backup's recorded
+> data/log file paths. If the target VM lays out SQL Server differently, add
+> `WITH MOVE '<logical>' TO '<path>'` for each file (get the logical names from
+> `RESTORE FILELISTONLY FROM DISK='...'`). To overwrite a database that already
+> has connections, first run
+> `ALTER DATABASE [db] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;`.
 
 ### 5.2 A single database
 
@@ -369,12 +396,13 @@ You don't need the whole server — restore just one database from a chosen
 timestamp:
 
 ```bash
-sudo bash -c 'source /etc/db-backup/backup.env
-  SQLCMD=/opt/mssql-tools18/bin/sqlcmd
+sudo bash -c 'set -euo pipefail
+  while IFS="=" read -r k v; do [ -n "$k" ] && export "$k=$v"; done < /etc/db-backup/backup.env
+  SQLCMD=/opt/mssql-tools18/bin/sqlcmd   # reads the sa password from SQLCMDPASSWORD
   TS=<timestamp>            # e.g. 20240115T010000Z, from `aws s3 ls`
-  RS=/var/opt/mssql/backup; mkdir -p "$RS"
+  RS=/var/opt/mssql/backup; install -d -o mssql -g mssql -m 0750 "$RS"
   aws s3 cp "s3://$DB_S3_BUCKET/$DB_S3_PREFIX/$TS/mydb.bak" "$RS/mydb.bak" --region "$DB_S3_REGION"
-  "$SQLCMD" -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -Q \
+  "$SQLCMD" -S localhost -U sa -C -Q \
     "RESTORE DATABASE [mydb] FROM DISK='"'"'$RS/mydb.bak'"'"' WITH REPLACE, STATS=25;"
   rm -f "$RS/mydb.bak"'
 ```
@@ -408,9 +436,15 @@ application/pipeline at the standby.
   the AWS CLI upload is robust.
 - **Turn on contained-DB auth before restoring a contained database**
   (`sp_configure 'contained database authentication',1`). §5.1 does this.
-- **Logins are server-level, not in a database backup.** They are exported and
-  restored separately, preserving SID + password hash so database users map
-  automatically.
+- **Logins are server-level, not in a database backup.** This guide exports and
+  restores **SQL-authenticated** logins only, preserving SID + password hash so
+  their database users map automatically. Server roles, server-level permissions,
+  default-database settings, and Windows/AAD logins are **not** included — reapply
+  them separately if needed.
+- **TDE-encrypted databases need their certificate first.** A `RESTORE` fails
+  unless the TDE certificate and private key from `master` are backed up and
+  restored on the target before the database. Add those steps, or scope this guide
+  to non-TDE databases.
 - **`sqlcmd` truncates long lines by default** — the login export uses `-y 8000`;
   don't drop it.
 - **Match or exceed the version.** Restore into the **same or a newer** SQL Server
@@ -448,6 +482,11 @@ back you can recover.
   denying non-TLS access. Consider S3 Object Lock for ransomware resilience.
 - **One bucket + IAM user per team**, least privilege; never write to another
   team's or the platform's bucket.
+- **Don't use `sa` in production.** This example uses `sa` for brevity. Backing up
+  databases needs only a `db_backupoperator`/backup-scoped login; only the *login
+  export* (reading `sys.sql_logins.password_hash`) needs instance-admin. Split
+  these: a least-privilege backup login for the timer, and a separate, tightly
+  controlled admin step (or a different credential) for exporting logins.
 - Store the IAM keys and the `sa` password in a secrets manager. Never commit
   `secret.tfvars` — add it to `.gitignore`.
 - Rotate the IAM keys and the `sa` password periodically.
