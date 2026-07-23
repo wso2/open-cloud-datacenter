@@ -305,6 +305,19 @@ module "my_db_vm" {
 > `runcmd`. Base64-embedding every script in `write_files` (`encoding: b64`) hides
 > it from the WAF; keep `runcmd` to `bash /opt/...`.
 
+### Configure what to back up and when
+
+Three independent knobs, all in the blocks above — none need extra variables:
+
+- **Which databases** — by default every user database (`database_id > 4`) is
+  backed up. To scope it, edit that query in `db_backup`, e.g.
+  `... WHERE database_id > 4 AND name IN ('app', 'billing');`.
+- **How often (your RPO)** — edit `OnCalendar` in the `db-backup.timer` unit; the
+  [Scheduling & Retention Reference](#scheduling--retention-reference) lists ready
+  values, and note the differential/log-backup option for a tighter RPO.
+- **How long you keep it (retention)** — the S3 lifecycle `Expiration` from §1;
+  each run is a timestamped prefix, so that many days become your restore points.
+
 ## 3. Apply
 
 ```bash
