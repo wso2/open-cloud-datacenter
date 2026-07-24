@@ -4,6 +4,14 @@ locals {
   namespace_storage_limit = var.namespace_storage_limit != null ? var.namespace_storage_limit : var.storage_limit
   namespaces              = var.namespaces != null ? (var.create_default_namespace ? distinct(concat([var.project_name], var.namespaces)) : var.namespaces) : (var.create_default_namespace ? [var.project_name] : [])
 
+  parsed_proj_cpu     = try(tonumber(regex("^[0-9.]+", var.cpu_limit)), 0)
+  parsed_proj_mem     = try(tonumber(regex("^[0-9.]+", var.memory_limit)), 0)
+  parsed_proj_storage = try(tonumber(regex("^[0-9.]+", var.storage_limit)), 0)
+
+  parsed_ns_cpu       = try(tonumber(regex("^[0-9.]+", local.namespace_cpu_limit)), 0)
+  parsed_ns_mem       = try(tonumber(regex("^[0-9.]+", local.namespace_memory_limit)), 0)
+  parsed_ns_storage   = try(tonumber(regex("^[0-9.]+", local.namespace_storage_limit)), 0)
+
   # create_net_ns is true when explicitly requested, when any VLAN variable is set
   # (all NADs live in the network namespace regardless of traffic type).
   create_net_ns     = var.create_network_namespace || (var.vlan_id != null && length(var.vlan_id) > 0) || var.vm_network_vlan_id != null || var.storage_network_vlan_id != null
@@ -48,6 +56,20 @@ resource "rancher2_project" "this" {
   # Ignoring it prevents spurious diffs on brownfield-imported projects.
   lifecycle {
     ignore_changes = [container_resource_limit]
+
+    precondition {
+      condition = var.cpu_limit == null || (
+        (local.parsed_ns_cpu * length(local.namespaces)) <= local.parsed_proj_cpu &&
+        (local.parsed_ns_mem * length(local.namespaces)) <= local.parsed_proj_mem &&
+        (local.parsed_ns_storage * length(local.namespaces)) <= local.parsed_proj_storage
+      )
+      error_message = <<-EOT
+                          Combined namespace limits exceed total project limits for ${length(local.namespaces)} namespaces.
+                          Total Requested -> CPU: ${local.parsed_ns_cpu * length(local.namespaces)}, Memory: ${local.parsed_ns_mem * length(local.namespaces)}${replace(local.namespace_memory_limit, "/^[0-9.]+/", "")}, Storage: ${local.parsed_ns_storage * length(local.namespaces)}${replace(local.namespace_storage_limit, "/^[0-9.]+/", "")}
+                          Project Quota   -> CPU: ${var.cpu_limit}, Memory: ${var.memory_limit}, Storage: ${var.storage_limit}
+                        EOT
+      }
+
     precondition {
       condition = var.cpu_limit != null || alltrue([
         var.memory_limit == null,
