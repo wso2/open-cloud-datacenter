@@ -4,14 +4,6 @@ locals {
   namespace_storage_limit = var.namespace_storage_limit != null ? var.namespace_storage_limit : var.storage_limit
   namespaces              = var.namespaces != null ? (var.create_default_namespace ? distinct(concat([var.project_name], var.namespaces)) : var.namespaces) : (var.create_default_namespace ? [var.project_name] : [])
 
-  parsed_proj_cpu     = try(tonumber(regex("^[0-9.]+", var.cpu_limit)), 0)
-  parsed_proj_mem     = try(tonumber(regex("^[0-9.]+", var.memory_limit)), 0)
-  parsed_proj_storage = try(tonumber(regex("^[0-9.]+", var.storage_limit)), 0)
-
-  parsed_ns_cpu       = try(tonumber(regex("^[0-9.]+", local.namespace_cpu_limit)), 0)
-  parsed_ns_mem       = try(tonumber(regex("^[0-9.]+", local.namespace_memory_limit)), 0)
-  parsed_ns_storage   = try(tonumber(regex("^[0-9.]+", local.namespace_storage_limit)), 0)
-
   # create_net_ns is true when explicitly requested, when any VLAN variable is set
   # (all NADs live in the network namespace regardless of traffic type).
   create_net_ns     = var.create_network_namespace || (var.vlan_id != null && length(var.vlan_id) > 0) || var.vm_network_vlan_id != null || var.storage_network_vlan_id != null
@@ -27,6 +19,47 @@ locals {
   # before the precondition fires.
   tenant_subnet  = local.use_vyos ? cidrsubnet("10.0.0.0/8", 15, max(var.vlan_id[0] - 1000, 0)) : null
   tenant_gateway = local.use_vyos ? cidrhost(local.tenant_subnet, 1) : null
+
+  # Count of namespaces to be created. At least 1 so that the even-split fallback
+  namespace_count = max(length(local.namespaces), 1)
+
+  project_quota_fields = var.cpu_limit == null ? {} : {
+    for k, v in {
+      limits_cpu       = var.cpu_limit
+      limits_memory    = var.memory_limit
+      requests_storage = var.storage_limit
+    } : k => v if v != null
+  }
+
+  # Auto-split fallback: divide each "<number><unit>" project value bynamespace_count, keeping the unit suffix.
+  namespace_quota_divided = {
+    for k, v in local.project_quota_fields :
+    k => "${format("%.3f", max(tonumber(regex("^[0-9]+(?:\\.[0-9]+)?", v)) / local.namespace_count, 0.001))}${regex("[^0-9.]*$", v)}"
+  }
+
+  # Explicit per-namespace overrides the default quota. only included when the caller set them.
+  namespace_quota_explicit = {
+    for k, v in {
+      limits_cpu       = var.namespace_cpu_limit
+      limits_memory    = var.namespace_memory_limit
+      requests_storage = var.namespace_storage_limit
+    } : k => v if v != null
+  }
+
+  # Per-namespace quota: explicit override wins over the even split.
+  namespace_quota_limit = merge(local.namespace_quota_divided, local.namespace_quota_explicit)
+
+  # Validation: ensure that every explicit namespace_*_limit, when multiplied by the number of namespaces, lands on exactly the corresponding project-level limit, in the same unit.
+  namespace_quota_validation = {
+    for k, v in local.namespace_quota_explicit :
+    k => {
+      ns_number      = tonumber(regex("^[0-9]+(?:\\.[0-9]+)?", v))
+      ns_unit        = regex("[^0-9.]*$", v)
+      project_number = tonumber(regex("^[0-9]+(?:\\.[0-9]+)?", local.project_quota_fields[k]))
+      project_unit   = regex("[^0-9.]*$", local.project_quota_fields[k])
+    }
+    if contains(keys(local.project_quota_fields), k)
+  }
 }
 
 resource "rancher2_project" "this" {
@@ -56,20 +89,6 @@ resource "rancher2_project" "this" {
   # Ignoring it prevents spurious diffs on brownfield-imported projects.
   lifecycle {
     ignore_changes = [container_resource_limit]
-
-    precondition {
-      condition = var.cpu_limit == null || (
-        (local.parsed_ns_cpu * length(local.namespaces)) <= local.parsed_proj_cpu &&
-        (local.parsed_ns_mem * length(local.namespaces)) <= local.parsed_proj_mem &&
-        (local.parsed_ns_storage * length(local.namespaces)) <= local.parsed_proj_storage
-      )
-      error_message = <<-EOT
-                          Combined namespace limits exceed total project limits for ${length(local.namespaces)} namespaces.
-                          Total Requested -> CPU: ${local.parsed_ns_cpu * length(local.namespaces)}, Memory: ${local.parsed_ns_mem * length(local.namespaces)}${replace(local.namespace_memory_limit, "/^[0-9.]+/", "")}, Storage: ${local.parsed_ns_storage * length(local.namespaces)}${replace(local.namespace_storage_limit, "/^[0-9.]+/", "")}
-                          Project Quota   -> CPU: ${var.cpu_limit}, Memory: ${var.memory_limit}, Storage: ${var.storage_limit}
-                        EOT
-      }
-
     precondition {
       condition = var.cpu_limit != null || alltrue([
         var.memory_limit == null,
@@ -79,6 +98,15 @@ resource "rancher2_project" "this" {
         var.namespace_storage_limit == null,
       ])
       error_message = "Quota variables (memory_limit, storage_limit, namespace_*_limit) are only applied when cpu_limit is set. Either set cpu_limit or remove the other quota variables."
+    }
+
+    # Every explicit namespace_*_limit must, once multiplied by the number  of namespaces, land on exactly the corresponding project-level limit, in the same unit.
+    precondition {
+      condition = alltrue([
+        for k, v in local.namespace_quota_validation :
+        v.ns_unit == v.project_unit && abs(v.ns_number * local.namespace_count - v.project_number) < 0.0001
+      ])
+      error_message = "namespace_cpu_limit , namespace_memory_limit , namespace_storage_limit must; when set, sum exactly to the corresponding project-level limit (namespace_count × per-namespace value of cpu_limit, memory_limit, storage_limit), using the same unit suffix. Adjust the namespace_*_limit values, the project limit, or the number of namespaces so they line up."
     }
     precondition {
       condition     = !local.use_vyos || length(var.vlan_id) == 1
@@ -102,10 +130,30 @@ resource "rancher2_namespace" "this" {
   project_id       = rancher2_project.this.id
   wait_for_cluster = false
 
-  # resource_quota intentionally omitted — the project-level quota already
-  # enforces the aggregate ceiling across all namespaces. A per-namespace
-  # quota would block VM creation when Rancher auto-applies a zero-limit
-  # ResourceQuota to namespaces created via the API.
+  /*
+   * When the project has no quota (cpu_limit = null), do not apply any ResourceQuota
+   * to the namespace. This allows the default quota controller to apply a zero-limit
+   * ResourceQuota, which is the desired behaviour for a quota-less project.
+   *
+   * When the project has a quota (cpu_limit set), apply an explicit
+   * resource_quota to every namespace — either the explicit namespace_*_limit
+   * values (validated above to sum to the project total) or an even split of
+   * the project quota across namespace_count namespaces. 
+   * This avoids Rancher auto-applying a zero-limit ResourceQuota to namespaces created via the
+   * API, which would otherwise block multiple namespace creation and VM creation.
+   *
+   **/
+
+  dynamic "resource_quota" {
+    for_each = var.cpu_limit != null ? [1] : []
+    content {
+      limit {
+        limits_cpu       = lookup(local.namespace_quota_limit, "limits_cpu", null)
+        limits_memory    = lookup(local.namespace_quota_limit, "limits_memory", null)
+        requests_storage = lookup(local.namespace_quota_limit, "requests_storage", null)
+      }
+    }
+  }
 
   # field.cattle.io/projectId is required for the Harvester UI to show
   # resource quota information correctly for namespaces in this project.
