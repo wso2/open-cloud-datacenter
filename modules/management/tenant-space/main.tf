@@ -1,7 +1,4 @@
 locals {
-  namespace_cpu_limit     = var.namespace_cpu_limit != null ? var.namespace_cpu_limit : var.cpu_limit
-  namespace_memory_limit  = var.namespace_memory_limit != null ? var.namespace_memory_limit : var.memory_limit
-  namespace_storage_limit = var.namespace_storage_limit != null ? var.namespace_storage_limit : var.storage_limit
   namespaces              = var.namespaces != null ? (var.create_default_namespace ? distinct(concat([var.project_name], var.namespaces)) : var.namespaces) : (var.create_default_namespace ? [var.project_name] : [])
 
   # create_net_ns is true when explicitly requested, when any VLAN variable is set
@@ -21,7 +18,7 @@ locals {
   tenant_gateway = local.use_vyos ? cidrhost(local.tenant_subnet, 1) : null
 
   # Count of namespaces to be created. At least 1 so that the even-split fallback
-  namespace_count = max(length(local.namespaces), 1)
+  namespace_count = max(length(toset(local.namespaces)), 1)
 
   project_quota_fields = var.cpu_limit == null ? {} : {
     for k, v in {
@@ -34,7 +31,13 @@ locals {
   # Auto-split fallback: divide each "<number><unit>" project value bynamespace_count, keeping the unit suffix.
   namespace_quota_divided = {
     for k, v in local.project_quota_fields :
-    k => "${format("%.3f", max(tonumber(regex("^[0-9]+(?:\\.[0-9]+)?", v)) / local.namespace_count, 0.001))}${regex("[^0-9.]*$", v)}"
+    k => "${floor(tonumber(regex("^[0-9]+(?:\\.[0-9]+)?", v)) / local.namespace_count * 1000) / 1000}${regex("[^0-9.]*$", v)}"
+  }
+
+  # Validate auto split causes the namespace resources near zero
+  namespace_quota_divided_nonzero = {
+    for k, v in local.namespace_quota_divided :
+    k => tonumber(regex("^[0-9]+(?:\\.[0-9]+)?", v)) > 0
   }
 
   # Explicit per-namespace overrides the default quota. only included when the caller set them.
@@ -78,9 +81,9 @@ resource "rancher2_project" "this" {
         requests_storage = var.storage_limit
       }
       namespace_default_limit {
-        limits_cpu       = local.namespace_cpu_limit
-        limits_memory    = local.namespace_memory_limit
-        requests_storage = local.namespace_storage_limit
+        limits_cpu       = lookup(local.namespace_quota_limit, "limits_cpu", null)
+        limits_memory    = lookup(local.namespace_quota_limit, "limits_memory", null)
+        requests_storage = lookup(local.namespace_quota_limit, "requests_storage", null)
       }
     }
   }
@@ -108,6 +111,16 @@ resource "rancher2_project" "this" {
       ])
       error_message = "namespace_cpu_limit , namespace_memory_limit , namespace_storage_limit must; when set, sum exactly to the corresponding project-level limit (namespace_count × per-namespace value of cpu_limit, memory_limit, storage_limit), using the same unit suffix. Adjust the namespace_*_limit values, the project limit, or the number of namespaces so they line up."
     }
+
+     precondition {
+      # When auto-splitting the project quota across multiple namespaces, ensure that the resulting per-namespace value does not round down to zero at 3-decimal precision. This prevents creating a ResourceQuota with zero limits, which would block VM creation in the namespace.
+      condition = alltrue([
+        for k, ok in local.namespace_quota_divided_nonzero :
+        ok || contains(keys(local.namespace_quota_explicit), k)
+      ])
+      error_message = "One or more auto-split namespace quota values (cpu_limit / memory_limit / storage_limit divided by the namespace count) round down to zero at 3-decimal precision. Reduce the namespace count, increase the project limit, or set the corresponding namespace_*_limit explicitly."
+    }
+
     precondition {
       condition     = !local.use_vyos || length(var.vlan_id) == 1
       error_message = "VyOS path requires exactly one VLAN ID. Set vyos_endpoint = null for multi-VLAN auto-route configurations."
