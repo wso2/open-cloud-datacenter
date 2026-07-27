@@ -1,5 +1,4 @@
 // Terraform resource definition for dcapi_project.
-// Calls internal/client/project.go for API calls; knows nothing about HTTP internals.
 package resources
 
 import (
@@ -17,6 +16,7 @@ func ResourceProject() *schema.Resource {
 	
 	return &schema.Resource{
 
+		// lifecycle functions
 		CreateContext: resourceProjectCreate,
 		ReadContext:   resourceProjectRead,
 		UpdateContext: resourceProjectUpdate,
@@ -169,49 +169,28 @@ func resourceProjectCreate(ctx context.Context, d *schema.ResourceData, meta int
 	d.SetId(fmt.Sprintf("%s/%s", tenantID, project.ID))
 
 	var diags diag.Diagnostics
-	
-	if err := d.Set("project_uuid", project.ProjectUUID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("tenant_uuid", project.TenantUUID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("cpu_cores", project.CPUCores); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("memory_gb", project.MemoryGB); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("storage_gb", project.StorageGB); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("max_vnets", project.MaxVNets); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("max_clusters", project.MaxClusters); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("max_volumes", project.MaxVolumes); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("max_public_ips", project.MaxPublicIPs); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_at", project.CreatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("updated_at", project.UpdatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_by", project.CreatedBy); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "project_uuid", project.ProjectUUID)
+	diags = appendSet(diags, d, "tenant_uuid", project.TenantUUID)
+	diags = appendSet(diags, d, "cpu_cores", project.CPUCores)
+	diags = appendSet(diags, d, "memory_gb", project.MemoryGB)
+	diags = appendSet(diags, d, "storage_gb", project.StorageGB)
+	diags = appendSet(diags, d, "max_vnets", project.MaxVNets)
+	diags = appendSet(diags, d, "max_clusters", project.MaxClusters)
+	diags = appendSet(diags, d, "max_volumes", project.MaxVolumes)
+	diags = appendSet(diags, d, "max_public_ips", project.MaxPublicIPs)
+	diags = appendSet(diags, d, "created_at", project.CreatedAt)
+	diags = appendSet(diags, d, "updated_at", project.UpdatedAt)
+	diags = appendSet(diags, d, "created_by", project.CreatedBy)
 	return diags
 }
 
 // resourceProjectRead fetches current state from the API and refreshes Terraform state.
 // Calls d.SetId("") and returns nil when the project no longer exists (external drift).
 func resourceProjectRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	
+	// meta holds the shared *DCAPIClient; 
+	// d.Id() is the composite "tenant_id/project_id" set by Create.
+
 	c := meta.(*client.DCAPIClient)
 
 	parts := strings.SplitN(d.Id(), "/", 2)
@@ -232,54 +211,22 @@ func resourceProjectRead(ctx context.Context, d *schema.ResourceData, meta inter
 
 	var diags diag.Diagnostics
 
-	if err := d.Set("project_id", project.ID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("tenant_id", project.TenantID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("name", project.Name); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("description", project.Description); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("cpu_cores", project.CPUCores); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("memory_gb", project.MemoryGB); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("storage_gb", project.StorageGB); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("max_vnets", project.MaxVNets); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("max_clusters", project.MaxClusters); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("max_volumes", project.MaxVolumes); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("max_public_ips", project.MaxPublicIPs); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("project_uuid", project.ProjectUUID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("tenant_uuid", project.TenantUUID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_at", project.CreatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("updated_at", project.UpdatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_by", project.CreatedBy); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "project_id", project.ID)
+	diags = appendSet(diags, d, "tenant_id", project.TenantID)
+	diags = appendSet(diags, d, "name", project.Name)
+	diags = appendSet(diags, d, "description", project.Description)
+	diags = appendSet(diags, d, "cpu_cores", project.CPUCores)
+	diags = appendSet(diags, d, "memory_gb", project.MemoryGB)
+	diags = appendSet(diags, d, "storage_gb", project.StorageGB)
+	diags = appendSet(diags, d, "max_vnets", project.MaxVNets)
+	diags = appendSet(diags, d, "max_clusters", project.MaxClusters)
+	diags = appendSet(diags, d, "max_volumes", project.MaxVolumes)
+	diags = appendSet(diags, d, "max_public_ips", project.MaxPublicIPs)
+	diags = appendSet(diags, d, "project_uuid", project.ProjectUUID)
+	diags = appendSet(diags, d, "tenant_uuid", project.TenantUUID)
+	diags = appendSet(diags, d, "created_at", project.CreatedAt)
+	diags = appendSet(diags, d, "updated_at", project.UpdatedAt)
+	diags = appendSet(diags, d, "created_by", project.CreatedBy)
 	return diags
 }
 
@@ -314,18 +261,10 @@ func resourceProjectUpdate(ctx context.Context, d *schema.ResourceData, meta int
 	}
 
 	var diags diag.Diagnostics
-	if err := d.Set("cpu_cores", project.CPUCores); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("memory_gb", project.MemoryGB); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("storage_gb", project.StorageGB); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("updated_at", project.UpdatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "cpu_cores", project.CPUCores)
+	diags = appendSet(diags, d, "memory_gb", project.MemoryGB)
+	diags = appendSet(diags, d, "storage_gb", project.StorageGB)
+	diags = appendSet(diags, d, "updated_at", project.UpdatedAt)
 	return diags
 }
 

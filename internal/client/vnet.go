@@ -74,8 +74,36 @@ func (c *DCAPIClient) GetVNet(ctx context.Context, tenantID, projectID, vnetID s
 	return &vnet, nil
 }
 
-// DeleteVNet sends DELETE .../vnets/{vnetID}.
-// Deletion is async (202). Returns HTTP 409 if subnets still exist inside the VNet.
+// ListVNets sends GET /v1/tenants/{tenantID}/projects/{projectID}/vnets.
+// There is no "get by name" endpoint — the dcapi_vnet data source calls this and filters
+// client-side to resolve a human-readable name to a VNet's UUID.
+func (c *DCAPIClient) ListVNets(ctx context.Context, tenantID, projectID string) ([]VNetResponse, error) {
+	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/vnets", tenantID, projectID)
+
+	respBytes, err := c.doRequest(ctx, "GET", path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("ListVNets: %w", err)
+	}
+
+	var vnets []VNetResponse
+	if err := json.Unmarshal(respBytes, &vnets); err != nil {
+		return nil, fmt.Errorf("ListVNets: failed to parse response: %w", err)
+	}
+	return vnets, nil
+}
+
+// DeleteVNet sends DELETE /v1/tenants/{tenantID}/projects/{projectID}/vnets/{vnetID}.
+//
+// The API returns HTTP 202 Accepted — deletion is ASYNCHRONOUS. This function only
+// INITIATES the delete; the caller must poll with GetVNet until it returns (nil, nil)
+// to confirm the VNet is actually gone.
+//
+// Returns:
+//   nil   — deletion was accepted by the API (HTTP 202).
+//   error — may contain "HTTP 409" if subnets still exist inside this VNet (the DC-API
+//            blocks VNet deletion until all child subnets are removed). The error message
+//            will contain "HTTP 409" which the resource layer checks for to produce a
+//            more helpful message to the user.
 func (c *DCAPIClient) DeleteVNet(ctx context.Context, tenantID, projectID, vnetID string) error {
 	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/vnets/%s", tenantID, projectID, vnetID)
 

@@ -9,82 +9,61 @@ terraform {
 
 provider "dcapi" {}
 
-resource "dcapi_project" "example" {
-  tenant_id  = "my-org"
-  project_id = "my-project"
+resource "dcapi_project" "project-s87" {
+  tenant_id  = "tenant-s87"
+  project_id = "vm-project-s87"
 
-  name        = "Infrastructure Team"
-  description = "Core infrastructure resources: VNets, clusters, and shared VMs."
+  name        = "project-s87"
+  description = "Vm created to test the vm vpc mode"
 
-  cpu_cores  = 20
-  memory_gb  = 64
-  storage_gb = 500
-
-  max_vnets      = 5
-  max_clusters   = 2
-  max_volumes    = 20
-  max_public_ips = 3
 }
 
-resource "dcapi_vnet" "example" {
-  tenant_id  = dcapi_project.example.tenant_id
-  project_id = dcapi_project.example.project_id
+resource "dcapi_vnet" "vnet-s87" {
+  tenant_id  = dcapi_project.project-s87.tenant_id   
+  project_id = dcapi_project.project-s87.project_id  
 
-  name          = "prod-vpc"
+  name          = "vnet-s87"
   address_space = ["10.1.0.0/16"]
   region        = "lk"
-  description   = "Production VPC"
+  description   = "vnet created to test the vm vpc mode"
 }
 
-resource "dcapi_subnet" "app" {
-  tenant_id  = dcapi_vnet.example.tenant_id
-  project_id = dcapi_vnet.example.project_id
-  vnet_id    = dcapi_vnet.example.vnet_uuid
+resource "dcapi_subnet" "subnet-s87" {
+  tenant_id  = dcapi_vnet.vnet-s87.tenant_id   
+  project_id = dcapi_vnet.vnet-s87.project_id  
+  vnet_id    = dcapi_vnet.vnet-s87.vnet_uuid   
 
-  name        = "app-subnet"
+  name        = "subnet-s87"
   cidr        = "10.1.1.0/24"
-  description = "Application tier subnet"
+  description = "subnet created to test the vm vpc mode"
 }
 
-# VPC mode: supply vnet_id + subnet_id.
-# Legacy bridge mode: supply network_name instead (mutually exclusive with vnet_id/subnet_id).
-resource "dcapi_virtual_machine" "web" {
-  tenant_id  = dcapi_subnet.app.tenant_id
-  project_id = dcapi_subnet.app.project_id
+resource "dcapi_virtual_machine" "vm-s87" {
 
-  name       = "web-01"
-  size       = "medium"
+  tenant_id  = dcapi_subnet.subnet-s87.tenant_id   
+  project_id = dcapi_subnet.subnet-s87.project_id  
+
+  name = "vm-s87"
+  size = "medium"
   image_name = "rancher-infra/ubuntu-22-04"
 
-  vnet_id   = dcapi_subnet.app.vnet_id
-  subnet_id = dcapi_subnet.app.subnet_uuid
+  vnet_id   = dcapi_subnet.subnet-s87.vnet_id    
+  subnet_id = dcapi_subnet.subnet-s87.subnet_uuid     
 }
 
 output "vm_ip" {
-  value       = dcapi_virtual_machine.web.ip_address
-  description = "IP address assigned to the VM."
+  value       = dcapi_virtual_machine.vm-s87.ip_address
+  description = "IP address assigned to the vm-s87 VM by DC-API."
 }
 
-# Retrieve with: terraform output -raw vm_private_key
-# The private key is shown once at creation — store it securely.
 output "vm_private_key" {
-  value       = dcapi_virtual_machine.web.private_key
+  value       = dcapi_virtual_machine.vm-s87.private_key
   sensitive   = true
-  description = "SSH private key. Available immediately after apply; not recoverable if state is lost."
+  description = "SSH private key for vm-s87 VM. Only available right after terraform apply."
 }
 
 output "vm_console_password" {
-  value       = dcapi_virtual_machine.web.console_password
+  value       = dcapi_virtual_machine.vm-s87.console_password
   sensitive   = true
-  description = "Web-console password. Available immediately after apply; not recoverable if state is lost."
-}
-
-output "subnet_id" {
-  value       = dcapi_subnet.app.id
-  description = "UUID of the created Subnet."
-}
-
-output "subnet_gateway" {
-  value       = dcapi_subnet.app.gateway
-  description = "Gateway IP assigned by the API."
+  description = "Web-console password for vm-s87 VM. Only available right after terraform apply."
 }

@@ -14,7 +14,11 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+
+	// resource — resource.StateChangeConf: the correct polling loop for async operations.
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
+
+	// schema — schema.Resource, schema.Schema, schema.ResourceData, TypeString, TypeInt, etc.
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"terraform-provider-dcapi/internal/client"
@@ -163,7 +167,11 @@ func ResourceVirtualMachine() *schema.Resource {
 
 // resourceVMCreate creates a VM, immediately stores the one-time secrets, polls until
 // ACTIVE, then calls Read to sync the final state.
+
 func resourceVMCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	
+	// Type assertion: meta is interface{}; .(*client.DCAPIClient) extracts the typed pointer.
+	// configureProvider (provider.go) stored a *DCAPIClient in meta — this is always safe.
 	c := meta.(*client.DCAPIClient)
 
 	tenantID := d.Get("tenant_id").(string)
@@ -214,27 +222,14 @@ func resourceVMCreate(ctx context.Context, d *schema.ResourceData, meta interfac
 
 	// Store shown-once secrets immediately — the API never returns them again.
 	var diags diag.Diagnostics
-	if err := d.Set("private_key", resp.PrivateKey); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("console_password", resp.ConsolePassword); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("status", resp.Resource.Status); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("provider_type", resp.Resource.ProviderType); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("ip_address", resp.Resource.IPAddress); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("message", resp.Resource.Message); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_at", resp.Resource.CreatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "private_key", resp.PrivateKey)
+	diags = appendSet(diags, d, "console_password", resp.ConsolePassword)
+	diags = appendSet(diags, d, "status", resp.Resource.Status)
+	diags = appendSet(diags, d, "provider_type", resp.Resource.ProviderType)
+	diags = appendSet(diags, d, "ip_address", resp.Resource.IPAddress)
+	diags = appendSet(diags, d, "message", resp.Resource.Message)
+	diags = appendSet(diags, d, "created_at", resp.Resource.CreatedAt)
+	
 	if diags.HasError() {
 		return diags
 	}
@@ -247,7 +242,6 @@ func resourceVMCreate(ctx context.Context, d *schema.ResourceData, meta interfac
 }
 
 // resourceVMRead fetches the current VM state from the API and updates Terraform state.
-// It does NOT overwrite private_key or console_password — the GET response never includes them.
 func resourceVMRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	c := meta.(*client.DCAPIClient)
 
@@ -269,42 +263,33 @@ func resourceVMRead(ctx context.Context, d *schema.ResourceData, meta interface{
 	}
 
 	var diags diag.Diagnostics
-	if err := d.Set("name", vm.Name); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("size", vm.Size); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("status", vm.Status); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("provider_type", vm.ProviderType); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("ip_address", vm.IPAddress); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("message", vm.Message); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_at", vm.CreatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("tenant_id", tenantID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("project_id", projectID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "name", vm.Name)
+	diags = appendSet(diags, d, "size", vm.Size)
+	diags = appendSet(diags, d, "status", vm.Status)
+	diags = appendSet(diags, d, "provider_type", vm.ProviderType)
+	diags = appendSet(diags, d, "ip_address", vm.IPAddress)
+	diags = appendSet(diags, d, "message", vm.Message)
+	diags = appendSet(diags, d, "created_at", vm.CreatedAt)
+	diags = appendSet(diags, d, "tenant_id", tenantID)
+	diags = appendSet(diags, d, "project_id", projectID)
 
-	// Preserve shown-once secrets — the GET response never includes them.
-	// Reading and writing back the existing state value keeps them unchanged.
-	if err := d.Set("private_key", d.Get("private_key").(string)); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("console_password", d.Get("console_password").(string)); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	// ── Preserve the shown-once secrets ───────────────────────────────────────────────
+	// The GET response does not include private_key or console_password — these were
+	// returned exactly once at creation and the API has discarded them.
+	//
+	// d.Get("private_key").(string) reads the STRING VALUE currently stored in Terraform
+	// state (the value we wrote during resourceVMCreate). The .(string) is a type assertion:
+	// d.Get returns interface{}, and we assert it holds a string.
+	//
+	// We immediately write the same value back with d.Set(). This is intentionally a no-op
+	// for the value itself, but it tells Terraform "I acknowledge this field; it has not
+	// changed." Without this, Terraform might flag the empty read response as a drift and
+	// plan to overwrite the secret with "".
+	existingPrivateKey := d.Get("private_key").(string)
+	existingConsolePassword := d.Get("console_password").(string)
+
+	diags = appendSet(diags, d, "private_key", existingPrivateKey)
+	diags = appendSet(diags, d, "console_password", existingConsolePassword)
 
 	return diags
 }
@@ -335,11 +320,17 @@ func resourceVMDelete(ctx context.Context, d *schema.ResourceData, meta interfac
 // VM provisioning (image pull + OS boot) is slower than VNet/Subnet provisioning —
 // hence the 15-minute create timeout in ResourceVirtualMachine().
 func waitForVMActive(ctx context.Context, c *client.DCAPIClient, tenantID, projectID, vmID string, timeout time.Duration) error {
-	conf := &resource.StateChangeConf{
-		Pending:    []string{"PENDING"},
+	
+	conf := &retry.StateChangeConf{
+		
+		// PENDING: image is being pulled and VM is booting; keep waiting.
+		Pending: []string{"PENDING"},
+		
+		// ACTIVE: VM is running, ip_address is populated; stop and return success.
 		Target:     []string{"ACTIVE"},
 		Timeout:    timeout,
 		MinTimeout: 15 * time.Second,
+		
 		Refresh: func() (interface{}, string, error) {
 			vm, err := c.GetVM(ctx, tenantID, projectID, vmID)
 			if err != nil {
@@ -361,8 +352,9 @@ func waitForVMActive(ctx context.Context, c *client.DCAPIClient, tenantID, proje
 
 // waitForVMDeleted polls until the VM is gone (HTTP 404) following an async DELETE.
 func waitForVMDeleted(ctx context.Context, c *client.DCAPIClient, tenantID, projectID, vmID string, timeout time.Duration) error {
-	conf := &resource.StateChangeConf{
-		// "ACTIVE" is included because the GET may briefly return ACTIVE before the hypervisor accepts the shutdown.
+	conf := &retry.StateChangeConf{
+		// ACTIVE: briefly seen between DELETE and the hypervisor accepting the shutdown request.
+		// DELETING: the VM is being cleaned up by the hypervisor.
 		Pending:    []string{"ACTIVE", "DELETING"},
 		Target:     []string{"DELETED"},
 		Timeout:    timeout,

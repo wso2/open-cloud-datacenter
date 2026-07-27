@@ -158,34 +158,16 @@ func resourceBastionCreate(ctx context.Context, d *schema.ResourceData, meta int
 	d.SetId(fmt.Sprintf("%s/%s/%s", tenantID, projectID, resp.Resource.ID))
 
 	var diags diag.Diagnostics
-	if err := d.Set("bastion_id", resp.Resource.ID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("status", resp.Resource.Status); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("provider_type", resp.Resource.ProviderType); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("mgmt_ip", resp.Resource.MgmtIP); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("internal_ip", resp.Resource.InternalIP); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("message", resp.Resource.Message); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_at", resp.Resource.CreatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "bastion_id", resp.Resource.ID)
+	diags = appendSet(diags, d, "status", resp.Resource.Status)
+	diags = appendSet(diags, d, "provider_type", resp.Resource.ProviderType)
+	diags = appendSet(diags, d, "mgmt_ip", resp.Resource.MgmtIP)
+	diags = appendSet(diags, d, "internal_ip", resp.Resource.InternalIP)
+	diags = appendSet(diags, d, "message", resp.Resource.Message)
+	diags = appendSet(diags, d, "created_at", resp.Resource.CreatedAt)
 	// Store the shown-once secrets before polling — if polling times out the secrets are not lost.
-	if err := d.Set("private_key", resp.PrivateKey); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("console_password", resp.ConsolePassword); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "private_key", resp.PrivateKey)
+	diags = appendSet(diags, d, "console_password", resp.ConsolePassword)
 	if diags.HasError() {
 		return diags
 	}
@@ -219,52 +201,25 @@ func resourceBastionRead(ctx context.Context, d *schema.ResourceData, meta inter
 	}
 
 	var diags diag.Diagnostics
-	if err := d.Set("bastion_id", bastion.ID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("tenant_id", bastion.TenantID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("name", bastion.Name); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("vnet_id", bastion.VNetID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("subnet_id", bastion.SubnetID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("description", bastion.Description); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("status", bastion.Status); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("provider_type", bastion.ProviderType); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("mgmt_ip", bastion.MgmtIP); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("internal_ip", bastion.InternalIP); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("message", bastion.Message); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_at", bastion.CreatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "bastion_id", bastion.ID)
+	diags = appendSet(diags, d, "tenant_id", bastion.TenantID)
+	diags = appendSet(diags, d, "name", bastion.Name)
+	diags = appendSet(diags, d, "vnet_id", bastion.VNetID)
+	diags = appendSet(diags, d, "subnet_id", bastion.SubnetID)
+	diags = appendSet(diags, d, "description", bastion.Description)
+	diags = appendSet(diags, d, "status", bastion.Status)
+	diags = appendSet(diags, d, "provider_type", bastion.ProviderType)
+	diags = appendSet(diags, d, "mgmt_ip", bastion.MgmtIP)
+	diags = appendSet(diags, d, "internal_ip", bastion.InternalIP)
+	diags = appendSet(diags, d, "message", bastion.Message)
+	diags = appendSet(diags, d, "created_at", bastion.CreatedAt)
 
 	// Preserve the shown-once secrets — the GET response never includes them.
 	existingPrivateKey := d.Get("private_key").(string)
 	existingConsolePassword := d.Get("console_password").(string)
-	if err := d.Set("private_key", existingPrivateKey); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("console_password", existingConsolePassword); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	
+	diags = appendSet(diags, d, "private_key", existingPrivateKey)
+	diags = appendSet(diags, d, "console_password", existingConsolePassword)
 
 	return diags
 }

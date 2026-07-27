@@ -1,7 +1,11 @@
 // VirtualMachine-related API calls for the DC-API client.
-// VMs sit directly under projects (/v1/tenants/{t}/projects/{p}/virtual-machines/{id}).
+// VMs sit directly under projects in the hierarchy — the API path is
+// /v1/tenants/{t}/projects/{p}/virtual-machines/{vm_id}. In VPC mode, vnet_id and
+// subnet_id are JSON body fields (not URL path components), unlike Subnet which nests inside VNet URLs.
 //
-// VMs support two mutually exclusive networking modes:
+// VMs support two mutually EXCLUSIVE networking modes — only one may be used per VM:
+//   Option A — Legacy bridge mode: provide network_name (e.g. "iaas/vm-network-001")
+//   Option B — VPC mode:           provide BOTH vnet_id AND subnet_id
 //
 //	Option A — Legacy bridge mode: provide network_name (e.g. "iaas/vm-network-001")
 //	Option B — VPC mode:           provide BOTH vnet_id AND subnet_id
@@ -17,13 +21,36 @@ import (
 // VMCreateRequest maps to POST /v1/tenants/{tenant_id}/projects/{project_id}/virtual-machines.
 // network_name and (vnet_id + subnet_id) are mutually exclusive networking modes.
 type VMCreateRequest struct {
-	Name        string `json:"name"`
-	Size        string `json:"size"`
-	DiskGB      int    `json:"disk_gb,omitempty"`
-	ImageName   string `json:"image_name"`
-	NetworkName string `json:"network_name,omitempty"` // Option A: legacy bridge mode
-	VNetID      string `json:"vnet_id,omitempty"`      // Option B: VPC mode (requires SubnetID)
-	SubnetID    string `json:"subnet_id,omitempty"`    // Option B: VPC mode (requires VNetID)
+	// Name is the hostname label for this VM. REQUIRED. Maximum 63 characters.
+	Name string `json:"name"`
+
+	// Size determines the fixed CPU/RAM bundle. REQUIRED.
+	// Valid values: "small" (2vCPU/8GB RAM), "medium" (4/16), "large" (8/32), "xlarge" (16/64).
+	// The resource layer validates this before the API call; the API would also reject invalid values.
+	Size string `json:"size"`
+
+	// DiskGB is the boot disk size in gigabytes. OPTIONAL.
+	// When 0 (zero value for int), omitempty omits it from JSON and the API uses the
+	// size-specific default disk size (minimum 10 GB for VMs).
+	DiskGB int `json:"disk_gb,omitempty"`
+
+	// ImageName is the VM image identifier in "namespace/resource-name" format. REQUIRED.
+	// Example: "rancher-infra/ubuntu-22-04". Get valid values from the Image data source.
+	ImageName string `json:"image_name"`
+
+	// NetworkName is the legacy bridge-mode network identifier (e.g. "iaas/vm-network-001").
+	// OPTION A — mutually exclusive with VNetID and SubnetID.
+	// omitempty sends this field ONLY when the user provides it. When VPC mode is used,
+	// this is empty string (the zero value) so omitempty drops it from the JSON body entirely.
+	NetworkName string `json:"network_name,omitempty"`
+
+	// VNetID is the UUID of the VNet in VPC mode. OPTION B (requires SubnetID too).
+	// Mutually exclusive with NetworkName. omitempty drops it when empty.
+	VNetID string `json:"vnet_id,omitempty"`
+
+	// SubnetID is the UUID of the Subnet in VPC mode. OPTION B (requires VNetID too).
+	// Mutually exclusive with NetworkName. omitempty drops it when empty.
+	SubnetID string `json:"subnet_id,omitempty"`
 }
 
 // VMResource is the inner "resource" object inside the create response (202).
@@ -67,6 +94,7 @@ type VMReadResponse struct {
 // The response includes private_key and console_password — shown once; the caller must
 // store them in Terraform state immediately as they are never returned again.
 func (c *DCAPIClient) CreateVM(ctx context.Context, tenantID, projectID string, req VMCreateRequest) (*VMCreateResponse, error) {
+	
 	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/virtual-machines", tenantID, projectID)
 
 	respBytes, err := c.doRequest(ctx, "POST", path, req)
@@ -86,6 +114,7 @@ func (c *DCAPIClient) CreateVM(ctx context.Context, tenantID, projectID string, 
 // Returns (nil, nil) on HTTP 404 — signals drift to the caller.
 // The GET response does not include private_key or console_password.
 func (c *DCAPIClient) GetVM(ctx context.Context, tenantID, projectID, vmID string) (*VMReadResponse, error) {
+	
 	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/virtual-machines/%s", tenantID, projectID, vmID)
 
 	respBytes, err := c.doRequest(ctx, "GET", path, nil)

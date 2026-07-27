@@ -152,21 +152,11 @@ func resourceVNetCreate(ctx context.Context, d *schema.ResourceData, meta interf
 	}
 
 	var diags diag.Diagnostics
-	if err := d.Set("status", vnet.Status); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("provider_type", vnet.ProviderType); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("message", vnet.Message); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_at", vnet.CreatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("updated_at", vnet.UpdatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "status", vnet.Status)
+	diags = appendSet(diags, d, "provider_type", vnet.ProviderType)
+	diags = appendSet(diags, d, "message", vnet.Message)
+	diags = appendSet(diags, d, "created_at", vnet.CreatedAt)
+	diags = appendSet(diags, d, "updated_at", vnet.UpdatedAt)
 	if diags.HasError() {
 		return diags
 	}
@@ -199,43 +189,22 @@ func resourceVNetRead(ctx context.Context, d *schema.ResourceData, meta interfac
 	}
 
 	var diags diag.Diagnostics
-	if err := d.Set("name", vnet.Name); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("address_space", vnet.AddressSpace); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("region", vnet.Region); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("description", vnet.Description); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	// Re-set path params from our state ID — the API does not echo ProjectID in the response body.
-	if err := d.Set("tenant_id", tenantID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("project_id", projectID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("vnet_uuid", vnetID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("status", vnet.Status); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("provider_type", vnet.ProviderType); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("message", vnet.Message); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_at", vnet.CreatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("updated_at", vnet.UpdatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "name", vnet.Name)
+	// address_space is []string from the API — Terraform's TypeList stores it correctly.
+	diags = appendSet(diags, d, "address_space", vnet.AddressSpace)
+	diags = appendSet(diags, d, "region", vnet.Region)
+	diags = appendSet(diags, d, "description", vnet.Description)
+	// Re-set the path params from our parsed state ID. The API echoes TenantID
+	// in the response body (vnet.TenantID) but not ProjectID — reading them from
+	// our own ID is the safest, consistent approach.
+	diags = appendSet(diags, d, "tenant_id", tenantID)
+	diags = appendSet(diags, d, "project_id", projectID)
+	diags = appendSet(diags, d, "vnet_uuid", vnetID)
+	diags = appendSet(diags, d, "status", vnet.Status)
+	diags = appendSet(diags, d, "provider_type", vnet.ProviderType)
+	diags = appendSet(diags, d, "message", vnet.Message)
+	diags = appendSet(diags, d, "created_at", vnet.CreatedAt)
+	diags = appendSet(diags, d, "updated_at", vnet.UpdatedAt)
 	return diags
 }
 

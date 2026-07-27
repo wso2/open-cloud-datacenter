@@ -104,6 +104,22 @@ func (c *DCAPIClient) GetRouteTable(ctx context.Context, tenantID, projectID, vn
 	return &rt, nil
 }
 
+// ListRouteTables sends GET .../vnets/{vnetID}/route-tables.
+// There is no "get by name" endpoint — the dcapi_route_table data source calls this and
+// filters client-side to resolve a human-readable name to a route table's UUID.
+func (c *DCAPIClient) ListRouteTables(ctx context.Context, tenantID, projectID, vnetID string) ([]RouteTableResponse, error) {
+	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/vnets/%s/route-tables", tenantID, projectID, vnetID)
+	respBytes, err := c.doRequest(ctx, "GET", path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("ListRouteTables: %w", err)
+	}
+	var rts []RouteTableResponse
+	if err := json.Unmarshal(respBytes, &rts); err != nil {
+		return nil, fmt.Errorf("ListRouteTables: failed to parse response: %w", err)
+	}
+	return rts, nil
+}
+
 // UpdateRouteTable sends PUT .../vnets/{vnetID}/route-tables/{rtID}.
 // Routes is a full-replace — the entire routes array is replaced with what is sent.
 // Returns 200 OK (sync — no polling required).

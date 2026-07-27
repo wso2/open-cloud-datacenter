@@ -1,6 +1,4 @@
 // Package client handles all HTTP communication with the DC-API.
-// It knows nothing about Terraform — no schema, no ResourceData, no diag.
-
 package client
 
 import (
@@ -17,7 +15,6 @@ import (
 // Created once by configureProvider (provider.go) and passed to every resource CRUD function
 // in internal/resources/ as the meta interface{} parameter (retrieved via type assertion).
 // All five files — tenant.go, project.go, vnet.go, subnet.go, vm.go — call methods on it.
-
 type DCAPIClient struct {
 	baseURL    string
 	token      string
@@ -25,7 +22,6 @@ type DCAPIClient struct {
 }
 
 // NewClient constructs a DCAPIClient. Returns a pointer so the single instance is shared.
-
 func NewClient(baseURL, token string) (*DCAPIClient, error) {
 	return &DCAPIClient{
 		baseURL:    strings.TrimRight(baseURL, "/"),
@@ -63,17 +59,36 @@ type quotaErrorResponse struct {
 
 func (c *DCAPIClient) doRequest(ctx context.Context, method, path string, body interface{}) ([]byte, error) {
 	
+	// reciever c means it reffered to the current object of the DCAPIClient struct, so it can access its fields like baseURL and token.
 	url := c.baseURL + path
 
 	var requestBody io.Reader
 
-	if body != nil {		
-		jsonBytes, err := json.Marshal(body)		
+	if body != nil {
+
+		// create a json file which is represented as byte slice
+		// []byte{'{', '"', 'n', 'a', 'm', 'e', '"', ':', '"', 'A', 'l', 'i', 'c', 'e', '"', ',', '"', 'a', 'g', 'e', '"', ':', '2', '5', '}'}
+		// [123 34 110 97 109 101 34 58 34 65 108 105 99 101 34 44 34 97 103 101 34 58 50 53 125]
+		jsonBytes, err := json.Marshal(body)
+		
 		if err != nil {
 			return nil, fmt.Errorf("doRequest: failed to encode request body: %w", err)
-		}		
+		}
+		
+		// // A Reader implements the [io.Reader], [io.ReaderAt], [io.WriterTo], [io.Seeker],
+		// // [io.ByteScanner], and [io.RuneScanner] interfaces by reading from
+		// // a byte slice.
+		// // Unlike a [Buffer], a Reader is read-only and supports seeking.
+		// // The zero value for Reader operates like a Reader of an empty slice.
+		// type Reader struct {
+		// 	s        []byte
+		// 	i        int64 // current reading index
+		// 	prevRune int   // index of previous rune; or < 0
+		// }
+		
 		requestBody = bytes.NewReader(jsonBytes)
 	}
+
 
 	req, err := http.NewRequestWithContext(ctx, method, url, requestBody)
 	
@@ -81,9 +96,10 @@ func (c *DCAPIClient) doRequest(ctx context.Context, method, path string, body i
 		return nil, fmt.Errorf("doRequest: failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+c.token)	
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/json") // Tells the server what response format you want
 	
+	// body is nil for GET/DELETE, so don't set Content-Type in that case. Otherwise, set it to application/json.
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -93,8 +109,21 @@ func (c *DCAPIClient) doRequest(ctx context.Context, method, path string, body i
 		return nil, fmt.Errorf("doRequest %s %s: network error: %w", method, url, err)
 	}
 	
+
+	// From httpClient.Do() docs:
+	//
+	// If the returned error is nil, the [Response] will contain a non-nil
+	// Body which the user is expected to close. If the Body is not both
+	// read to EOF and closed, the [Client]'s underlying [RoundTripper]
+	// (typically [Transport]) may not be able to re-use a persistent TCP
+	// connection to the server for a subsequent "keep-alive" request.
+	//
+	// defer schedules Close() to run when doRequest returns, preventing TCP connection leaks.
 	defer resp.Body.Close()
 
+	// if the server returns a JSON response, then respBytes will contain the UTF-8 bytes of that text.
+	// respBytes is byte slice
+	// Read the entire stream from resp.Body until EOF and return it as a single []byte
 	respBytes, err := io.ReadAll(resp.Body)
 	
 	if err != nil {
@@ -124,6 +153,8 @@ func (c *DCAPIClient) doRequest(ctx context.Context, method, path string, body i
 			return nil, fmt.Errorf("DC-API returned HTTP %d: %s", resp.StatusCode, apiErr.Error)
 		}
 
+		// If the response body is not valid JSON or doesn't contain an "error" field, 
+		// return the raw response body as a string.
 		return nil, fmt.Errorf("DC-API returned HTTP %d: %s", resp.StatusCode, string(respBytes))
 	}
 
