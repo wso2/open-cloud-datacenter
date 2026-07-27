@@ -37,7 +37,7 @@ locals {
   # Validate auto split causes the namespace resources near zero
   namespace_quota_divided_nonzero = {
     for k, v in local.namespace_quota_divided :
-    k => tonumber(regex("^[0-9]+(?:\\.[0-9]+)?", v)) > 0
+    k => tonumber(regex("^[0-9]+(?:\\.[0-9]+)?", v)) >= 0.001
   }
 
   # Explicit per-namespace overrides the default quota. only included when the caller set them.
@@ -107,9 +107,9 @@ resource "rancher2_project" "this" {
     precondition {
       condition = alltrue([
         for k, v in local.namespace_quota_validation :
-        v.ns_unit == v.project_unit && abs(v.ns_number * local.namespace_count - v.project_number) < 0.0001
+        v.ns_unit == v.project_unit && v.ns_number * local.namespace_count <= v.project_number
       ])
-      error_message = "namespace_cpu_limit , namespace_memory_limit , namespace_storage_limit must; when set, sum exactly to the corresponding project-level limit (namespace_count × per-namespace value of cpu_limit, memory_limit, storage_limit), using the same unit suffix. Adjust the namespace_*_limit values, the project limit, or the number of namespaces so they line up."
+      error_message = "namespace_cpu_limit, namespace_memory_limit, namespace_storage_limit must, when set, sum to at most the corresponding project-level limit (namespace_count × per-namespace value <= cpu_limit/memory_limit/storage_limit), using the same unit suffix. Adjust the namespace_*_limit values, the project limit, or the number of namespaces so they fit."
     }
 
      precondition {
