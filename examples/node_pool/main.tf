@@ -7,13 +7,12 @@ terraform {
   }
 }
 
-provider "dcapi" {}
+provider "dcapi" {}  # reads DCAPI_ENDPOINT, DCAPI_TOKEN env vars
 
 resource "dcapi_node_pool" "gpu" {
   tenant_id  = "my-org"
   project_id = "my-project"
-  # Use dcapi_cluster.prod.cluster_id — not dcapi_cluster.prod.id.
-  cluster_id = "880e8400-e29b-41d4-a716-446655440000"
+  cluster_id = "880e8400-e29b-41d4-a716-446655440000"  # dcapi_cluster.prod.cluster_id
 
   name    = "gpu-pool"
   size    = "xlarge"

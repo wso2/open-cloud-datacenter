@@ -10,7 +10,7 @@ terraform {
 provider "dcapi" {}
 
 resource "dcapi_project" "example" {
-  tenant_id  = "my-org"
+  tenant_id  = "tenant-s87"
   project_id = "my-project"
 
   name        = "Infrastructure Team"

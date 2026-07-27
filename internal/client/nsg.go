@@ -103,6 +103,22 @@ func (c *DCAPIClient) GetNSG(ctx context.Context, tenantID, projectID, sgID stri
 	return &nsg, nil
 }
 
+// ListNSGs sends GET .../security-groups.
+// There is no "get by name" endpoint — the dcapi_network_security_group data source calls
+// this and filters client-side to resolve a human-readable name to an NSG's UUID.
+func (c *DCAPIClient) ListNSGs(ctx context.Context, tenantID, projectID string) ([]NSGResponse, error) {
+	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/security-groups", tenantID, projectID)
+	respBytes, err := c.doRequest(ctx, "GET", path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("ListNSGs: %w", err)
+	}
+	var nsgs []NSGResponse
+	if err := json.Unmarshal(respBytes, &nsgs); err != nil {
+		return nil, fmt.Errorf("ListNSGs: failed to parse response: %w", err)
+	}
+	return nsgs, nil
+}
+
 // UpdateNSGRules sends PUT .../security-groups/{sgID}/rules.
 // The entire rules array is replaced with what is sent. Returns 200 OK (sync).
 func (c *DCAPIClient) UpdateNSGRules(ctx context.Context, tenantID, projectID, sgID string, req NSGUpdateRulesRequest) (*NSGResponse, error) {

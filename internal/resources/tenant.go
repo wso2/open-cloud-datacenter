@@ -116,28 +116,14 @@ func resourceTenantCreate(ctx context.Context, d *schema.ResourceData, meta inte
 	d.SetId(tenant.ID)
 
 	var diags diag.Diagnostics
-	if err := d.Set("tenant_uuid", tenant.TenantUUID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("asgardeo_group", tenant.AsgardeoGroup); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_at", tenant.CreatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_by", tenant.CreatedBy); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "tenant_uuid", tenant.TenantUUID)
+	diags = appendSet(diags, d, "asgardeo_group", tenant.AsgardeoGroup)
+	diags = appendSet(diags, d, "created_at", tenant.CreatedAt)
+	diags = appendSet(diags, d, "created_by", tenant.CreatedBy)
 	// Store resolved cap values — the API substitutes platform defaults when 0 was sent.
-	if err := d.Set("cpu_cores_cap", tenant.CPUCoresCap); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("memory_gb_cap", tenant.MemoryGBCap); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("storage_gb_cap", tenant.StorageGBCap); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "cpu_cores_cap", tenant.CPUCoresCap)
+	diags = appendSet(diags, d, "memory_gb_cap", tenant.MemoryGBCap)
+	diags = appendSet(diags, d, "storage_gb_cap", tenant.StorageGBCap)
 	return diags
 }
 
@@ -158,33 +144,15 @@ func resourceTenantRead(ctx context.Context, d *schema.ResourceData, meta interf
 	}
 
 	var diags diag.Diagnostics
-	if err := d.Set("name", tenant.Name); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("description", tenant.Description); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("cpu_cores_cap", tenant.CPUCoresCap); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("memory_gb_cap", tenant.MemoryGBCap); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("storage_gb_cap", tenant.StorageGBCap); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("tenant_uuid", tenant.TenantUUID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("asgardeo_group", tenant.AsgardeoGroup); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_at", tenant.CreatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_by", tenant.CreatedBy); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "name", tenant.Name)
+	diags = appendSet(diags, d, "description", tenant.Description)
+	diags = appendSet(diags, d, "cpu_cores_cap", tenant.CPUCoresCap)
+	diags = appendSet(diags, d, "memory_gb_cap", tenant.MemoryGBCap)
+	diags = appendSet(diags, d, "storage_gb_cap", tenant.StorageGBCap)
+	diags = appendSet(diags, d, "tenant_uuid", tenant.TenantUUID)
+	diags = appendSet(diags, d, "asgardeo_group", tenant.AsgardeoGroup)
+	diags = appendSet(diags, d, "created_at", tenant.CreatedAt)
+	diags = appendSet(diags, d, "created_by", tenant.CreatedBy)
 	return diags
 }
 
@@ -214,15 +182,9 @@ func resourceTenantUpdate(ctx context.Context, d *schema.ResourceData, meta inte
 	}
 
 	var diags diag.Diagnostics
-	if err := d.Set("cpu_cores_cap", tenant.CPUCoresCap); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("memory_gb_cap", tenant.MemoryGBCap); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("storage_gb_cap", tenant.StorageGBCap); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "cpu_cores_cap", tenant.CPUCoresCap)
+	diags = appendSet(diags, d, "memory_gb_cap", tenant.MemoryGBCap)
+	diags = appendSet(diags, d, "storage_gb_cap", tenant.StorageGBCap)
 	return diags
 }
 

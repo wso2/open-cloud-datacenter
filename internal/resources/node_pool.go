@@ -6,10 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"terraform-provider-dcapi/internal/client"
+
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 // ResourceNodePool returns the schema.Resource for "dcapi_node_pool".
@@ -285,7 +286,7 @@ func resourceNodePoolDelete(ctx context.Context, d *schema.ResourceData, meta in
 }
 
 func waitForNodePoolReady(ctx context.Context, c *client.DCAPIClient, tenantID, projectID, clusterID, poolName string, timeout time.Duration) error {
-	conf := &resource.StateChangeConf{
+	conf := &retry.StateChangeConf{
 		Pending:    []string{"provisioning", "scaling"},
 		Target:     []string{"ready"},
 		Timeout:    timeout,
@@ -309,7 +310,7 @@ func waitForNodePoolReady(ctx context.Context, c *client.DCAPIClient, tenantID, 
 }
 
 func waitForNodePoolDeleted(ctx context.Context, c *client.DCAPIClient, tenantID, projectID, clusterID, poolName string, timeout time.Duration) error {
-	conf := &resource.StateChangeConf{
+	conf := &retry.StateChangeConf{
 		Pending:    []string{"ready", "provisioning", "scaling", "deleting"},
 		Target:     []string{"DELETED"},
 		Timeout:    timeout,

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"terraform-provider-dcapi/internal/client"
 )
@@ -391,7 +391,7 @@ func resourceClusterDelete(ctx context.Context, d *schema.ResourceData, meta int
 }
 
 func waitForClusterActive(ctx context.Context, c *client.DCAPIClient, tenantID, projectID, clusterID string, timeout time.Duration) error {
-	conf := &resource.StateChangeConf{
+	conf := &retry.StateChangeConf{
 		Pending:    []string{"PENDING"},
 		Target:     []string{"ACTIVE"},
 		Timeout:    timeout,
@@ -415,8 +415,8 @@ func waitForClusterActive(ctx context.Context, c *client.DCAPIClient, tenantID, 
 }
 
 func waitForClusterDeleted(ctx context.Context, c *client.DCAPIClient, tenantID, projectID, clusterID string, timeout time.Duration) error {
-	conf := &resource.StateChangeConf{
-		Pending:    []string{"ACTIVE", "DELETING"},
+	conf := &retry.StateChangeConf{
+		Pending:    []string{"ACTIVE", "DELETING", "FAILED"},
 		Target:     []string{"DELETED"},
 		Timeout:    timeout,
 		MinTimeout: 15 * time.Second,
@@ -494,12 +494,4 @@ func expandWorkerPools(d *schema.ResourceData) []client.ClusterWorkerPool {
 		pools[i] = pool
 	}
 	return pools
-}
-
-// appendSet calls d.Set and appends any error into the diagnostics slice.
-func appendSet(diags diag.Diagnostics, d *schema.ResourceData, key string, val interface{}) diag.Diagnostics {
-	if err := d.Set(key, val); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	return diags
 }

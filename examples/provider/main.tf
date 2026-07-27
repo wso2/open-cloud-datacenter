@@ -7,13 +7,4 @@ terraform {
   }
 }
 
-# Option 1: explicit values (local testing only — never commit real tokens)
-# provider "dcapi" {
-#   endpoint = "https://dcapi.example.com"
-#   token    = "dcapi_sa_xxxxx_yyyyy"
-# }
-
-# Option 2: environment variables (recommended)
-#   export DCAPI_ENDPOINT="https://dcapi.example.com"
-#   export DCAPI_TOKEN="dcapi_sa_xxxxx_yyyyy"
 provider "dcapi" {}

@@ -116,16 +116,10 @@ func resourceServiceAccountCreate(ctx context.Context, d *schema.ResourceData, m
 	d.SetId(fmt.Sprintf("%s/%s/%s", tenantID, projectID, sa.ID))
 
 	var diags diag.Diagnostics
-	if err := d.Set("sa_id", sa.ID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_at", sa.CreatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "sa_id", sa.ID)
+	diags = appendSet(diags, d, "created_at", sa.CreatedAt)
 	// Store the token immediately — the API will never return it again.
-	if err := d.Set("token", sa.Token); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "token", sa.Token)
 	return diags
 }
 
@@ -151,38 +145,22 @@ func resourceServiceAccountRead(ctx context.Context, d *schema.ResourceData, met
 	}
 
 	var diags diag.Diagnostics
-	if err := d.Set("sa_id", sa.ID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("tenant_id", sa.TenantID); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("name", sa.Name); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("role", sa.Role); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("description", sa.Description); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
-	if err := d.Set("created_at", sa.CreatedAt); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "sa_id", sa.ID)
+	diags = appendSet(diags, d, "tenant_id", sa.TenantID)
+	diags = appendSet(diags, d, "name", sa.Name)
+	diags = appendSet(diags, d, "role", sa.Role)
+	diags = appendSet(diags, d, "description", sa.Description)
+	diags = appendSet(diags, d, "created_at", sa.CreatedAt)
 
 	lastUsed := ""
 	if sa.LastUsed != nil {
 		lastUsed = *sa.LastUsed
 	}
-	if err := d.Set("last_used", lastUsed); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "last_used", lastUsed)
 
 	// Preserve the token from state — the GET response never includes it.
 	// Reading the existing state value and writing it back keeps it unchanged.
-	if err := d.Set("token", d.Get("token").(string)); err != nil {
-		diags = append(diags, diag.FromErr(err)...)
-	}
+	diags = appendSet(diags, d, "token", d.Get("token").(string))
 
 	return diags
 }

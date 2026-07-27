@@ -29,18 +29,22 @@ type TenantUpdateRequest struct {
 	StorageGBCap *int `json:"storage_gb_cap,omitempty"`
 }
 
-// TenantResponse is the JSON shape returned by Create (201), List (200), and Update (200).
+// TenantResponse is the JSON shape returned by Create (201) and Update (200).
+// List (200) actually returns the narrower TenantSummary shape (id, name, roles) — Roles is
+// included here with omitempty so GetTenantByID's list-and-scan still captures it without
+// affecting the Create/Update unmarshal, which simply leaves it empty.
 type TenantResponse struct {
-	ID            string `json:"id"`
-	TenantUUID    string `json:"tenant_uuid"`
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	AsgardeoGroup string `json:"asgardeo_group"`
-	CPUCoresCap   int    `json:"cpu_cores_cap"`
-	MemoryGBCap   int    `json:"memory_gb_cap"`
-	StorageGBCap  int    `json:"storage_gb_cap"`
-	CreatedAt     string `json:"created_at"`
-	CreatedBy     string `json:"created_by"`
+	ID            string   `json:"id"`
+	TenantUUID    string   `json:"tenant_uuid"`
+	Name          string   `json:"name"`
+	Description   string   `json:"description"`
+	AsgardeoGroup string   `json:"asgardeo_group"`
+	CPUCoresCap   int      `json:"cpu_cores_cap"`
+	MemoryGBCap   int      `json:"memory_gb_cap"`
+	StorageGBCap  int      `json:"storage_gb_cap"`
+	CreatedAt     string   `json:"created_at"`
+	CreatedBy     string   `json:"created_by"`
+	Roles         []string `json:"roles,omitempty"`
 }
 
 // CreateTenant sends POST /v1/admin/tenants and returns the created tenant.

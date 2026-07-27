@@ -76,6 +76,24 @@ func (c *DCAPIClient) GetSubnet(ctx context.Context, tenantID, projectID, vnetID
 	return &subnet, nil
 }
 
+// ListSubnets sends GET /v1/tenants/{tenantID}/projects/{projectID}/vnets/{vnetID}/subnets.
+// There is no "get by name" endpoint — the dcapi_subnet data source calls this and filters
+// client-side to resolve a human-readable name to a Subnet's UUID.
+func (c *DCAPIClient) ListSubnets(ctx context.Context, tenantID, projectID, vnetID string) ([]SubnetResponse, error) {
+	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/vnets/%s/subnets", tenantID, projectID, vnetID)
+
+	respBytes, err := c.doRequest(ctx, "GET", path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("ListSubnets: %w", err)
+	}
+
+	var subnets []SubnetResponse
+	if err := json.Unmarshal(respBytes, &subnets); err != nil {
+		return nil, fmt.Errorf("ListSubnets: failed to parse response: %w", err)
+	}
+	return subnets, nil
+}
+
 // DeleteSubnet sends DELETE .../vnets/{vnetID}/subnets/{subnetID}.
 // Deletion is async (202). Returns HTTP 409 if NSG attachments exist on this subnet.
 // Deleting the last subnet in a VNet triggers extra cleanup (NAT gateway, CoreDNS teardown),

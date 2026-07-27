@@ -10,12 +10,12 @@ terraform {
 provider "dcapi" {}
 
 resource "dcapi_vnet" "example" {
-  tenant_id  = "my-org"
+  tenant_id  = "tenant-s87"
   project_id = "my-project"
 
-  name          = "prod-vpc"
+  name          = "prod-vpc-s87"
   address_space = ["10.1.0.0/16"]
-  region        = "lk-dev"
+  region        = "lk"
 }
 
 resource "dcapi_subnet" "example" {

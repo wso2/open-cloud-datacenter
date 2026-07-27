@@ -1,7 +1,4 @@
 // Bastion-related API calls for the DC-API client.
-// Bastions are project-scoped SSH jump hosts that require a VNet and Subnet (VPC-only).
-// Like VMs, the create response is async (202) and wraps the resource in a "resource" key
-// alongside two shown-once secrets (private_key, console_password).
 package client
 
 import (
@@ -93,7 +90,7 @@ func (c *DCAPIClient) GetBastion(ctx context.Context, tenantID, projectID, basti
 }
 
 // DeleteBastion sends DELETE /v1/tenants/{tenantID}/projects/{projectID}/bastions/{bastionID}.
-// Deletion is async — the caller must poll GetBastion until (nil, nil) to confirm removal.
+// Deletion is async the caller must poll GetBastion until (nil, nil) to confirm removal.
 func (c *DCAPIClient) DeleteBastion(ctx context.Context, tenantID, projectID, bastionID string) error {
 	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/bastions/%s", tenantID, projectID, bastionID)
 	_, err := c.doRequest(ctx, "DELETE", path, nil)
