@@ -32,3 +32,8 @@ go.work
 # master key and dev secrets never go to git
 **/master-key
 **/dev-secrets/
+
+# Personal/local deployment overlay (real cluster IPs, StorageClass names,
+# etc.) — see config/local/kustomization.yaml. The .example template stays
+# tracked; the real patch file never does.
+config/local/manager_local_patch.yaml

@@ -1,0 +1,17 @@
+# Personal/local deployment overlay — never committed (see ../../.gitignore).
+#
+# config/manager/manager.yaml intentionally ships with generic placeholder
+# values (BASE_DOMAIN, STORAGE_CLASS) so the repo stays usable by anyone who
+# clones it. This overlay layers your own real cluster values on top of
+# config/default without ever touching the tracked base files.
+#
+# Usage:
+#   kustomize build config/local | kubectl apply -f -
+#
+# manager_local_patch.yaml (sibling to this file, gitignored) holds the
+# actual values — create it from manager_local_patch.yaml.example.
+resources:
+- ../default
+
+patches:
+- path: manager_local_patch.yaml

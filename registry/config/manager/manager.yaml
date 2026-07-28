@@ -44,23 +44,32 @@ spec:
         name: manager
         env:
         # REQUIRED: the base domain used to build registry URLs
-        # (https://registry.<tenant>.<BASE_DOMAIN>).
+        # (https://registry.<tenant>.<BASE_DOMAIN>). Replace with your own
+        # domain; the value below (a documentation-reserved example address,
+        # RFC 5737) resolves via nip.io for clusters without a real DNS
+        # domain — nip.io maps <any-ip>.nip.io back to that IP, which is
+        # useful for local/private clusters but not required in general.
         - name: BASE_DOMAIN
-          value: "192.168.10.6.nip.io"
+          value: "192.0.2.1.nip.io"
         # cert-manager ClusterIssuer for Harbor's per-tenant ingress TLS.
-        # Let's Encrypt cannot validate a private nip.io host; the platform uses
-        # a CA-based internal issuer (one CA signs every tenant cert). Confirmed
-        # present + Ready on the cluster: `kubectl get clusterissuer`.
+        # Let's Encrypt cannot validate a private/nip.io host, so a
+        # CA-based internal issuer is used instead (one CA signs every
+        # tenant cert). Must already exist on the cluster: `kubectl get
+        # clusterissuer`. Use "letsencrypt-prod" instead if BASE_DOMAIN is a
+        # real, publicly resolvable domain.
         - name: CERT_ISSUER
           value: "internal-ca"
-        # Harbor serves that internal-CA cert (the operator doesn't hold the CA),
-        # so the operator's own HTTPS calls to the Harbor API skip verification.
+        # Harbor serves that internal-CA cert, and the operator doesn't hold
+        # the CA to verify it against, so the operator's own HTTPS calls to
+        # the Harbor API skip TLS verification. Set to "false" once CERT_ISSUER
+        # is a publicly trusted issuer.
         - name: HARBOR_INSECURE_TLS
           value: "true"
-        # Longhorn StorageClass for Harbor's PVCs (cluster default; what the
-        # existing tenant Harbors use).
+        # StorageClass for Harbor's PVCs. Must support allowVolumeExpansion
+        # for plan upgrades to be able to grow storage. Replace with the
+        # StorageClass name available on your cluster.
         - name: STORAGE_CLASS
-          value: "harvester-longhorn-2r"
+          value: "longhorn"
         # Optional Harbor/Helm settings (defaults shown; override as needed).
         # - name: INGRESS_CLASS
         #   value: "nginx"
