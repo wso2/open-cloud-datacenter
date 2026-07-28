@@ -1,0 +1,217 @@
+package harbor
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+// newTestClient points a Client at a local httptest.Server instead of a real Harbor instance.
+func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Server) {
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	return NewClient(srv.URL, "test-admin-pass"), srv
+}
+
+func TestPing(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		wantErr    bool
+	}{
+		{"harbor up", http.StatusOK, false},
+		{"pods scheduled but not ready", http.StatusServiceUnavailable, true},
+		{"harbor core crashed", http.StatusInternalServerError, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v2.0/ping" {
+					t.Errorf("Ping hit unexpected path %q", r.URL.Path)
+				}
+				if r.Method != http.MethodGet {
+					t.Errorf("Ping used method %q, want GET", r.Method)
+				}
+				w.WriteHeader(tt.statusCode)
+			})
+			err := cli.Ping(context.Background())
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Ping() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestConfigure(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		wantErr    bool
+	}{
+		{"applied, 200", http.StatusOK, false},
+		{"applied, 204 no content", http.StatusNoContent, false},
+		{"rejected", http.StatusBadRequest, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotBody map[string]interface{}
+			cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPut {
+					t.Errorf("Configure used method %q, want PUT", r.Method)
+				}
+				if r.URL.Path != "/api/v2.0/configurations" {
+					t.Errorf("Configure hit unexpected path %q", r.URL.Path)
+				}
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				w.WriteHeader(tt.statusCode)
+			})
+			err := cli.Configure(context.Background())
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Configure() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				if gotBody["auth_mode"] != "db_auth" {
+					t.Errorf("Configure sent auth_mode=%v, want db_auth", gotBody["auth_mode"])
+				}
+				if gotBody["self_registration"] != false {
+					t.Errorf("Configure sent self_registration=%v, want false", gotBody["self_registration"])
+				}
+			}
+		})
+	}
+}
+
+func TestCreateHarborProject(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		wantErr    bool
+	}{
+		{"newly created", http.StatusCreated, false},
+		{"already existed (200)", http.StatusOK, false},
+		{"already existed (409 conflict) — idempotent by design", http.StatusConflict, false},
+		{"harbor rejected the request", http.StatusBadRequest, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotBody map[string]interface{}
+			cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v2.0/projects" {
+					t.Errorf("CreateHarborProject hit unexpected path %q", r.URL.Path)
+				}
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				w.WriteHeader(tt.statusCode)
+			})
+			err := cli.CreateHarborProject(context.Background(), "acme-project")
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("CreateHarborProject() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && gotBody["project_name"] != "acme-project" {
+				t.Errorf("CreateHarborProject sent project_name=%v, want acme-project", gotBody["project_name"])
+			}
+		})
+	}
+}
+
+func TestCreateProjectRobotAccount(t *testing.T) {
+	t.Run("newly created robot returns credentials", func(t *testing.T) {
+		wantRobot := RobotAccount{Name: "robot$acme-project+ci-robot", Secret: "s3cr3t-token", ID: 42}
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v2.0/robots" {
+				t.Errorf("CreateProjectRobotAccount hit unexpected path %q", r.URL.Path)
+			}
+			var gotBody map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			if gotBody["level"] != "project" {
+				t.Errorf(`CreateProjectRobotAccount sent level=%v, want "project"`, gotBody["level"])
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(wantRobot)
+		})
+		robot, err := cli.CreateProjectRobotAccount(context.Background(), "acme-project", "ci-robot")
+		if err != nil {
+			t.Fatalf("CreateProjectRobotAccount() error = %v", err)
+		}
+		if robot.Secret != wantRobot.Secret || robot.ID != wantRobot.ID {
+			t.Errorf("CreateProjectRobotAccount() = %+v, want %+v", robot, wantRobot)
+		}
+	})
+
+	// This test documents a real, current asymmetry rather than papering over it:
+	// CreateHarborProject explicitly treats 409 as success (see above), but
+	// CreateProjectRobotAccount does not — it goes through the generic post()
+	// helper, which only accepts 201/200. If a robot with the same deterministic
+	// name already exists (e.g. left behind by a Retain-policy delete), this call
+	// fails permanently instead of being idempotent like project creation is.
+	// If this ever gets fixed to tolerate 409, this test should be updated to
+	// wantErr=false.
+	t.Run("duplicate robot name currently errors (known inconsistency, not idempotent)", func(t *testing.T) {
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusConflict)
+		})
+		_, err := cli.CreateProjectRobotAccount(context.Background(), "acme-project", "ci-robot")
+		if err == nil {
+			t.Fatal("CreateProjectRobotAccount() with a 409 response returned nil error; " +
+				"if 409-tolerance was added, update this test to expect success")
+		}
+	})
+}
+
+func TestDeleteProject(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		wantErr    bool
+	}{
+		{"deleted, 200", http.StatusOK, false},
+		{"deleted, 204 no content", http.StatusNoContent, false},
+		{"already gone, 404 treated as success", http.StatusNotFound, false},
+		{"project has repositories, 412 refused", http.StatusPreconditionFailed, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodDelete {
+					t.Errorf("DeleteProject used method %q, want DELETE", r.Method)
+				}
+				wantPath := "/api/v2.0/projects/acme-project"
+				if r.URL.Path != wantPath {
+					t.Errorf("DeleteProject hit path %q, want %q", r.URL.Path, wantPath)
+				}
+				w.WriteHeader(tt.statusCode)
+			})
+			err := cli.DeleteProject(context.Background(), "acme-project")
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("DeleteProject() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// Ping deliberately bypasses do() — Harbor's /ping endpoint needs no auth, so
+// it's not the right call to prove auth headers are set. Configure goes
+// through put() -> do(), which is where Basic Auth and Content-Type actually
+// get attached.
+func TestDo_SetsBasicAuthAndHeaders(t *testing.T) {
+	cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		if !ok {
+			t.Fatal("request had no Basic Auth credentials")
+		}
+		if user != "admin" {
+			t.Errorf("BasicAuth username = %q, want %q", user, "admin")
+		}
+		if pass != "test-admin-pass" {
+			t.Errorf("BasicAuth password = %q, want %q", pass, "test-admin-pass")
+		}
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", r.Header.Get("Content-Type"))
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	if err := cli.Configure(context.Background()); err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
+}
