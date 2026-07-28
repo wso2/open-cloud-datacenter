@@ -26,7 +26,7 @@ const instanceFinalizer = "registry.opencloud.wso2.com/instance-cleanup"
 
 // RegistryInstanceReconciler provisions one Harbor project + robot account per
 // registry. The robot credentials are written into an owner-referenced K8s
-// Secret; dc-api reads that Secret directly (no DB, no HTTP gateway).
+// Secret, which dc-api reads directly.
 type RegistryInstanceReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme

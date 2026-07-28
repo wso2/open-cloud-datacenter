@@ -5,10 +5,9 @@ import (
 	"os"
 )
 
-// Config holds the operator's configuration. In the Pattern-A design the
-// operator is a pure controller-runtime manager: the only external state it
-// needs is how to render + install the Harbor Helm chart. No database, no auth,
-// no HTTP gateway.
+// Config holds the operator's configuration. The operator is a
+// controller-runtime manager whose only external state is what it needs to
+// render and install the Harbor Helm chart.
 type Config struct {
 	Helm HelmConfig
 }

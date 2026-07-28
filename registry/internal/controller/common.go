@@ -1,8 +1,8 @@
-// Package controller holds the two Pattern-A reconcilers for the registry
-// operator: RegistryBackend (one Harbor per tenant) and RegistryInstance (one
-// Harbor project + robot per registry). The Custom Resource is the single
-// source of truth — there is no database, worker, or HTTP gateway. All work
-// happens in the reconcile loop, and slow waits are handled with RequeueAfter.
+// Package controller holds the two reconcilers for the registry operator:
+// RegistryBackend (one Harbor per tenant) and RegistryInstance (one Harbor
+// project + robot account per registry). The Custom Resource is the single
+// source of truth, and all work happens inside the reconcile loop, with slow
+// waits handled via RequeueAfter.
 package controller
 
 import (

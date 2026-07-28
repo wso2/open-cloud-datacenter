@@ -44,9 +44,8 @@ func main() {
 		logger.Fatal("failed to create helm deployer", zap.Error(err))
 	}
 
-	// Pure controller-runtime manager. Leader election is ON so that running
-	// multiple replicas yields exactly one active reconciler (hot standby for
-	// failover) — no bespoke DB lock needed.
+	// Leader election is ON so that running multiple replicas yields exactly
+	// one active reconciler (hot standby for failover).
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		HealthProbeBindAddress: ":8081",

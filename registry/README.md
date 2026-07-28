@@ -12,12 +12,11 @@ Tested on **Harvester 1.7.1** (RKE2 v1.34.3).
 - **API**: `RegistryBackend` (one shared Harbor per tenant) and
   `RegistryInstance` (one Harbor project + robot account per registry) in group
   `registry.opencloud.wso2.com/v1alpha1`.
-- **Pattern**: a pure controller-runtime operator. The Custom Resource is the
-  single source of truth — there is **no database, no background worker, and no
-  HTTP gateway**. Both reconcilers do all their work in the reconcile loop,
-  polling slow external steps with `RequeueAfter`. Leader election is enabled,
-  so running multiple replicas yields exactly one active reconciler (hot
-  standby for failover).
+- **Pattern**: a controller-runtime operator. The Custom Resource is the
+  single source of truth. Both reconcilers do all their work in the reconcile
+  loop, polling slow external steps with `RequeueAfter`. Leader election is
+  enabled, so running multiple replicas yields exactly one active reconciler
+  (hot standby for failover).
 - **RegistryBackend reconciler**: generates Harbor's admin + database passwords
   into an owned Secret, ensures the tenant's `<tenantID>-management` namespace
   exists (creating it if absent), installs Harbor via Helm into it, polls the

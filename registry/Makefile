@@ -1,13 +1,18 @@
 # Registry operator — provisions per-tenant Harbor registries via CRDs.
 # Layout follows the KeyVault operator (crds/keyvault) conventions.
 
-IMG ?= e20449/registry-provisioner:latest
+IMG ?= ghcr.io/sandaruwijewardhana/registry-provisioner:latest
 CONTAINER_TOOL ?= docker
 
 # Tooling
 LOCALBIN ?= $(shell pwd)/bin
+KUBECTL ?= kubectl
+KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-CONTROLLER_TOOLS_VERSION ?= v0.16.4
+
+## Tool Versions — kept in sync with the keyvault/database operators' Makefiles.
+KUSTOMIZE_VERSION ?= v5.8.1
+CONTROLLER_TOOLS_VERSION ?= v0.20.1
 
 .PHONY: all
 all: build
@@ -61,27 +66,68 @@ docker-push: ## Push the container image ($(IMG)).
 
 ##@ Deployment
 
+ifndef ignore-not-found
+  ignore-not-found = false
+endif
+
 .PHONY: install
-install: ## Install the CRDs into the cluster (KUBECONFIG / --context as needed).
-	kubectl apply -k config/crd
+install: kustomize ## Install the CRDs into the cluster (KUBECONFIG / --context as needed).
+	"$(KUSTOMIZE)" build config/crd | "$(KUBECTL)" apply -f -
 
 .PHONY: uninstall
-uninstall: ## Remove the CRDs from the cluster.
-	kubectl delete -k config/crd --ignore-not-found=true
+uninstall: kustomize ## Remove the CRDs from the cluster.
+	"$(KUSTOMIZE)" build config/crd | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: deploy
-deploy: ## Deploy the operator (namespace, RBAC, CRDs, manager). Override IMG in config/default.
-	kubectl apply -k config/default
+deploy: kustomize ## Deploy the operator (namespace, RBAC, CRDs, manager) with generic placeholder config. Override IMG as needed.
+	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
+	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply -f -
 
 .PHONY: undeploy
-undeploy: ## Remove the operator from the cluster.
-	kubectl delete -k config/default --ignore-not-found=true
+undeploy: kustomize ## Remove the operator from the cluster.
+	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
+
+.PHONY: deploy-local
+deploy-local: kustomize ## Deploy using config/local — your real BASE_DOMAIN/STORAGE_CLASS (see config/local/manager_local_patch.yaml.example).
+	@test -f config/local/manager_local_patch.yaml || { \
+		echo "config/local/manager_local_patch.yaml not found."; \
+		echo "Copy config/local/manager_local_patch.yaml.example to config/local/manager_local_patch.yaml and fill in your real values first."; \
+		exit 1; \
+	}
+	"$(KUSTOMIZE)" build config/local | "$(KUBECTL)" apply -f -
+
+.PHONY: undeploy-local
+undeploy-local: kustomize ## Remove the operator deployed via deploy-local.
+	"$(KUSTOMIZE)" build config/local | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
 
 ##@ Tools
 
 $(LOCALBIN):
 	mkdir -p "$(LOCALBIN)"
 
+.PHONY: kustomize
+kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
+$(KUSTOMIZE): $(LOCALBIN)
+	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+
 .PHONY: controller-gen
-controller-gen: $(LOCALBIN) ## Install controller-gen locally if missing.
-	@test -s "$(CONTROLLER_GEN)" || GOBIN="$(LOCALBIN)" go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION)
+controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
+$(CONTROLLER_GEN): $(LOCALBIN)
+	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
+
+# go-install-tool will 'go install' any package with custom target and name of
+# binary, if it doesn't exist. Matches keyvault/database's Makefile exactly.
+# $1 - target path with name of binary
+# $2 - package url which can be installed
+# $3 - specific version of package
+define go-install-tool
+@[ -f "$(1)-$(3)" ] && [ "$$(readlink -- "$(1)" 2>/dev/null)" = "$(1)-$(3)" ] || { \
+set -e; \
+package=$(2)@$(3) ;\
+echo "Downloading $${package}" ;\
+rm -f "$(1)" ;\
+GOBIN="$(LOCALBIN)" go install $${package} ;\
+mv "$(LOCALBIN)/$$(basename "$(1)")" "$(1)-$(3)" ;\
+} ;\
+ln -sf "$$(realpath "$(1)-$(3)")" "$(1)"
+endef

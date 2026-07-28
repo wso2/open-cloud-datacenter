@@ -12,5 +12,5 @@ resources:
 # `kustomize edit set image controller=<repo>/<image>:<tag>`).
 images:
 - name: controller
-  newName: e20449/registry-provisioner
+  newName: ghcr.io/sandaruwijewardhana/registry-provisioner
   newTag: latest

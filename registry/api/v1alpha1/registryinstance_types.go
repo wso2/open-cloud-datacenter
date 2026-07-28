@@ -76,9 +76,6 @@ type RegistryInstanceStatus struct {
 	// holding the robot username + token for this registry. Owned by this CR.
 	CredentialsSecretName string `json:"credentialsSecretName,omitempty"`
 
-	// Progress is retained for API compatibility; no longer populated.
-	Progress map[string]string `json:"progress,omitempty"`
-
 	// Message contains error details when Phase is Failed.
 	Message string `json:"message,omitempty"`
 }

@@ -62,9 +62,6 @@ type RegistryBackendStatus struct {
 	// Harbor's admin + database passwords. Owned by this CR.
 	AdminSecretName string `json:"adminSecretName,omitempty"`
 
-	// Progress is retained for API compatibility; no longer populated.
-	Progress map[string]string `json:"progress,omitempty"`
-
 	// Message contains error details when Phase is Failed.
 	Message string `json:"message,omitempty"`
 }
