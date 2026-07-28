@@ -63,22 +63,6 @@ func (c *Client) Ping(ctx context.Context) error {
 	return nil
 }
 
-// WaitReady polls /api/v2.0/ping until Harbor responds or ctx is cancelled.
-func (c *Client) WaitReady(ctx context.Context) error {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timed out waiting for Harbor to be ready")
-		case <-ticker.C:
-			if err := c.Ping(ctx); err == nil {
-				return nil
-			}
-		}
-	}
-}
-
 // Configure sets Harbor system-level configuration.
 func (c *Client) Configure(ctx context.Context) error {
 	body := map[string]interface{}{
@@ -95,50 +79,6 @@ func (c *Client) Configure(ctx context.Context) error {
 		},
 	}
 	return c.put(ctx, "/api/v2.0/configurations", body)
-}
-
-// CreateProject creates the default "library" project.
-// 409 Conflict is treated as success — Harbor auto-creates "library" on first startup.
-func (c *Client) CreateProject(ctx context.Context) error {
-	body := map[string]interface{}{
-		"project_name": "library",
-		"public":       false,
-		"metadata": map[string]string{
-			"auto_scan":    "true",
-			"prevent_vul": "false",
-		},
-	}
-	return c.do(ctx, "POST", "/api/v2.0/projects", body, nil,
-		http.StatusCreated, http.StatusOK, http.StatusConflict)
-}
-
-// CreateRobotAccount creates the CI/CD robot account and returns its credentials.
-func (c *Client) CreateRobotAccount(ctx context.Context) (*RobotAccount, error) {
-	body := map[string]interface{}{
-		"name":     "ci-default",
-		"duration": 365,
-		"level":    "system",
-		"permissions": []map[string]interface{}{
-			{
-				"kind":      "project",
-				"namespace": "library",
-				"access": []map[string]string{
-					{"resource": "repository", "action": "push"},
-					{"resource": "repository", "action": "pull"},
-					{"resource": "artifact", "action": "read"},
-					{"resource": "tag", "action": "create"},
-					{"resource": "tag", "action": "delete"},
-					{"resource": "scan", "action": "create"},
-				},
-			},
-		},
-	}
-
-	var robot RobotAccount
-	if err := c.post(ctx, "/api/v2.0/robots", body, &robot); err != nil {
-		return nil, err
-	}
-	return &robot, nil
 }
 
 // CreateHarborProject creates a Harbor project with the given name.
@@ -194,22 +134,6 @@ func (c *Client) CreateProjectRobotAccount(ctx context.Context, projectName, rob
 func (c *Client) DeleteProject(ctx context.Context, projectName string) error {
 	return c.do(ctx, "DELETE", "/api/v2.0/projects/"+projectName, nil, nil,
 		http.StatusOK, http.StatusNoContent, http.StatusNotFound)
-}
-
-// Bootstrap runs the full first-run setup: configure → create project → create robot.
-// Returns the robot account credentials.
-func (c *Client) Bootstrap(ctx context.Context) (*RobotAccount, error) {
-	if err := c.Configure(ctx); err != nil {
-		return nil, fmt.Errorf("configure harbor: %w", err)
-	}
-	if err := c.CreateProject(ctx); err != nil {
-		return nil, fmt.Errorf("create library project: %w", err)
-	}
-	robot, err := c.CreateRobotAccount(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("create robot account: %w", err)
-	}
-	return robot, nil
 }
 
 // --- HTTP helpers ---
