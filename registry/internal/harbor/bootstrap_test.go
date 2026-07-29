@@ -104,15 +104,87 @@ func TestCreateHarborProject(t *testing.T) {
 				_ = json.NewDecoder(r.Body).Decode(&gotBody)
 				w.WriteHeader(tt.statusCode)
 			})
-			err := cli.CreateHarborProject(context.Background(), "acme-project")
+			err := cli.CreateHarborProject(context.Background(), "acme-project", 5*1024*1024*1024)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("CreateHarborProject() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if !tt.wantErr && gotBody["project_name"] != "acme-project" {
-				t.Errorf("CreateHarborProject sent project_name=%v, want acme-project", gotBody["project_name"])
+			if !tt.wantErr {
+				if gotBody["project_name"] != "acme-project" {
+					t.Errorf("CreateHarborProject sent project_name=%v, want acme-project", gotBody["project_name"])
+				}
+				if gotBody["storage_limit"] != float64(5*1024*1024*1024) {
+					t.Errorf("CreateHarborProject sent storage_limit=%v, want %d", gotBody["storage_limit"], 5*1024*1024*1024)
+				}
 			}
 		})
 	}
+}
+
+func TestGetProject(t *testing.T) {
+	cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		wantPath := "/api/v2.0/projects/acme-project"
+		if r.URL.Path != wantPath {
+			t.Errorf("GetProject hit path %q, want %q", r.URL.Path, wantPath)
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("GetProject used method %q, want GET", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"project_id": 7})
+	})
+	proj, err := cli.GetProject(context.Background(), "acme-project")
+	if err != nil {
+		t.Fatalf("GetProject() error = %v", err)
+	}
+	if proj.ProjectID != 7 {
+		t.Errorf("GetProject().ProjectID = %d, want 7", proj.ProjectID)
+	}
+}
+
+func TestEnsureProjectQuota(t *testing.T) {
+	t.Run("finds the quota by project reference and updates it", func(t *testing.T) {
+		var gotUpdatePath string
+		var gotBody map[string]interface{}
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/api/v2.0/quotas":
+				if got := r.URL.Query().Get("reference_id"); got != "7" {
+					t.Errorf("quota list reference_id = %q, want 7", got)
+				}
+				if got := r.URL.Query().Get("reference"); got != "project" {
+					t.Errorf("quota list reference = %q, want project", got)
+				}
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode([]map[string]interface{}{{"id": 99}})
+			case r.Method == http.MethodPut:
+				gotUpdatePath = r.URL.Path
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				w.WriteHeader(http.StatusOK)
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			}
+		})
+		if err := cli.EnsureProjectQuota(context.Background(), 7, 5*1024*1024*1024); err != nil {
+			t.Fatalf("EnsureProjectQuota() error = %v", err)
+		}
+		if gotUpdatePath != "/api/v2.0/quotas/99" {
+			t.Errorf("PUT went to %q, want /api/v2.0/quotas/99", gotUpdatePath)
+		}
+		hard, ok := gotBody["hard"].(map[string]interface{})
+		if !ok || hard["storage"] != float64(5*1024*1024*1024) {
+			t.Errorf("PUT body hard.storage = %v, want %d", gotBody["hard"], 5*1024*1024*1024)
+		}
+	})
+
+	t.Run("no quota found for the project errors instead of silently no-op'ing", func(t *testing.T) {
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{})
+		})
+		if err := cli.EnsureProjectQuota(context.Background(), 7, 5*1024*1024*1024); err == nil {
+			t.Fatal("EnsureProjectQuota() error = nil, want an error when no quota is found")
+		}
+	})
 }
 
 func TestCreateProjectRobotAccount(t *testing.T) {

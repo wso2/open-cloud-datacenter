@@ -10,6 +10,9 @@ spec:
   tenantID: sample-tenant
   projectID: sample-project
   registryName: sample-registry
+  # Sets this project's Harbor storage quota (starter=5Gi, professional=20Gi,
+  # enterprise=100Gi). Changing this on an existing RegistryInstance updates
+  # the quota on the next reconcile.
   plan: starter
   # Retain (default) leaves the Harbor project on delete; Delete removes it.
   reclaimPolicy: Retain

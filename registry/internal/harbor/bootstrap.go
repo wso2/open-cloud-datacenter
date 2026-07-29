@@ -66,11 +66,11 @@ func (c *Client) Ping(ctx context.Context) error {
 // Configure sets Harbor system-level configuration.
 func (c *Client) Configure(ctx context.Context) error {
 	body := map[string]interface{}{
-		"auth_mode":                       "db_auth",
-		"project_creation_restriction":    "adminonly",
-		"robot_token_duration":            365,
-		"self_registration":               false,
-		"read_only":                       false,
+		"auth_mode":                    "db_auth",
+		"project_creation_restriction": "adminonly",
+		"robot_token_duration":         365,
+		"self_registration":            false,
+		"read_only":                    false,
 		"scan_all_policy": map[string]interface{}{
 			"type": "scheduled",
 			"parameter": map[string]string{
@@ -81,19 +81,66 @@ func (c *Client) Configure(ctx context.Context) error {
 	return c.put(ctx, "/api/v2.0/configurations", body)
 }
 
-// CreateHarborProject creates a Harbor project with the given name.
-// 409 Conflict is treated as success (already exists — Harbor auto-creates "library").
-func (c *Client) CreateHarborProject(ctx context.Context, projectName string) error {
+// CreateHarborProject creates a Harbor project with the given name and an
+// initial storage quota (bytes; -1 means unlimited). 409 Conflict is treated
+// as success (already exists) — storage_limit only takes effect on the
+// first, successful creation; an existing project's quota is changed
+// separately via EnsureProjectQuota, which is safe to call on every
+// reconcile regardless of whether the project is new or pre-existing.
+func (c *Client) CreateHarborProject(ctx context.Context, projectName string, storageLimitBytes int64) error {
 	body := map[string]interface{}{
-		"project_name": projectName,
-		"public":       false,
+		"project_name":  projectName,
+		"public":        false,
+		"storage_limit": storageLimitBytes,
 		"metadata": map[string]string{
-			"auto_scan":    "true",
+			"auto_scan":   "true",
 			"prevent_vul": "false",
 		},
 	}
 	return c.do(ctx, "POST", "/api/v2.0/projects", body, nil,
 		http.StatusCreated, http.StatusOK, http.StatusConflict)
+}
+
+// Project is the subset of Harbor's project object this client needs.
+type Project struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+// GetProject fetches a Harbor project by name.
+func (c *Client) GetProject(ctx context.Context, projectName string) (*Project, error) {
+	var p Project
+	if err := c.do(ctx, "GET", "/api/v2.0/projects/"+projectName, nil, &p, http.StatusOK); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// EnsureProjectQuota sets a project's storage quota to exactly
+// storageLimitBytes (-1 for unlimited). Every Harbor project already has a
+// quota object created automatically alongside it; this looks that quota up
+// by the project's ID and updates its hard limit. Safe to call every
+// reconcile — setting an unchanged value is a no-op, and it's how a plan
+// change on an existing RegistryInstance actually takes effect. Harbor
+// itself rejects lowering the quota below the project's current usage, which
+// surfaces here as an error for the caller to report and retry.
+func (c *Client) EnsureProjectQuota(ctx context.Context, projectID, storageLimitBytes int64) error {
+	var quotas []struct {
+		ID int64 `json:"id"`
+	}
+	path := fmt.Sprintf("/api/v2.0/quotas?reference=project&reference_id=%d", projectID)
+	if err := c.do(ctx, "GET", path, nil, &quotas, http.StatusOK); err != nil {
+		return fmt.Errorf("list quota for project %d: %w", projectID, err)
+	}
+	if len(quotas) == 0 {
+		return fmt.Errorf("no quota found for project %d", projectID)
+	}
+	body := map[string]interface{}{
+		"hard": map[string]int64{"storage": storageLimitBytes},
+	}
+	if err := c.put(ctx, fmt.Sprintf("/api/v2.0/quotas/%d", quotas[0].ID), body); err != nil {
+		return fmt.Errorf("update quota %d: %w", quotas[0].ID, err)
+	}
+	return nil
 }
 
 // CreateProjectRobotAccount creates a project-scoped robot account with push/pull/delete.

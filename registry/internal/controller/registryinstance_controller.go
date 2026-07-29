@@ -78,10 +78,32 @@ func (r *RegistryInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	registryURL := backend.Status.RegistryURL
 	cli := r.harborClient(registryURL, adminPass)
 
-	// 3. Create the Harbor project (idempotent — 409 treated as success).
+	// 3. Create the Harbor project with its plan's storage quota (idempotent
+	// — 409 treated as success on creation).
+	plan := cr.Spec.Plan
+	if plan == "" {
+		plan = "starter"
+	}
+	quotaBytes, err := projectQuotaBytes(plan)
+	if err != nil {
+		return r.transient(ctx, &cr, "resolve plan", err)
+	}
 	projectName := projectNameFor(&cr)
-	if err := cli.CreateHarborProject(ctx, projectName); err != nil {
+	if err := cli.CreateHarborProject(ctx, projectName, quotaBytes); err != nil {
 		return r.transient(ctx, &cr, "create Harbor project", err)
+	}
+
+	// 3b. Converge the project's quota to the plan's size every reconcile.
+	// CreateHarborProject's storage_limit only takes effect on first create,
+	// so this is what actually applies a plan change on an existing
+	// RegistryInstance — the same level-triggered convergence pattern the
+	// Backend reconciler uses for Helm values and PVC sizes.
+	proj, err := cli.GetProject(ctx, projectName)
+	if err != nil {
+		return r.transient(ctx, &cr, "get Harbor project", err)
+	}
+	if err := cli.EnsureProjectQuota(ctx, proj.ProjectID, quotaBytes); err != nil {
+		return r.transient(ctx, &cr, "set project quota", err)
 	}
 
 	// 4. Mint the robot account ONCE and persist creds in an owned Secret.
@@ -256,6 +278,26 @@ func projectNameFor(cr *registryv1alpha1.RegistryInstance) string {
 		return cr.Spec.RegistryName
 	}
 	return cr.Spec.ProjectID
+}
+
+// projectQuotaGi maps a plan to its Harbor project storage quota, in
+// gibibytes. This is separate from the Backend's TenantPlan sizes (those size
+// the entire shared Harbor deployment across every tenant project; this sizes
+// one project's slice of it).
+var projectQuotaGi = map[string]int64{
+	"starter":      5,
+	"professional": 20,
+	"enterprise":   100,
+}
+
+// projectQuotaBytes resolves a plan to a Harbor project storage quota in
+// bytes, the unit ProjectReq.storage_limit and the quota API both expect.
+func projectQuotaBytes(plan string) (int64, error) {
+	gi, ok := projectQuotaGi[plan]
+	if !ok {
+		return 0, fmt.Errorf("unknown plan %q; valid: starter, professional, enterprise", plan)
+	}
+	return gi * 1024 * 1024 * 1024, nil
 }
 
 func credentialsSecretName(cr *registryv1alpha1.RegistryInstance) string {
