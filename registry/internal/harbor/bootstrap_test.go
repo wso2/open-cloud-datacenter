@@ -3,6 +3,7 @@ package harbor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -90,7 +91,7 @@ func TestCreateHarborProject(t *testing.T) {
 		wantErr    bool
 	}{
 		{"newly created", http.StatusCreated, false},
-		{"already existed (200)", http.StatusOK, false},
+		{"200 is not a documented Harbor response for this endpoint — rejected, not treated as success", http.StatusOK, true},
 		{"already existed (409 conflict) — idempotent by design", http.StatusConflict, false},
 		{"harbor rejected the request", http.StatusBadRequest, true},
 	}
@@ -121,30 +122,70 @@ func TestCreateHarborProject(t *testing.T) {
 }
 
 func TestGetProject(t *testing.T) {
-	cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		wantPath := "/api/v2.0/projects/acme-project"
-		if r.URL.Path != wantPath {
-			t.Errorf("GetProject hit path %q, want %q", r.URL.Path, wantPath)
+	t.Run("found", func(t *testing.T) {
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			wantPath := "/api/v2.0/projects/acme-project"
+			if r.URL.Path != wantPath {
+				t.Errorf("GetProject hit path %q, want %q", r.URL.Path, wantPath)
+			}
+			if r.Method != http.MethodGet {
+				t.Errorf("GetProject used method %q, want GET", r.Method)
+			}
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"project_id": 7})
+		})
+		proj, err := cli.GetProject(context.Background(), "acme-project")
+		if err != nil {
+			t.Fatalf("GetProject() error = %v", err)
 		}
-		if r.Method != http.MethodGet {
-			t.Errorf("GetProject used method %q, want GET", r.Method)
+		if proj.ProjectID != 7 {
+			t.Errorf("GetProject().ProjectID = %d, want 7", proj.ProjectID)
 		}
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"project_id": 7})
 	})
-	proj, err := cli.GetProject(context.Background(), "acme-project")
-	if err != nil {
-		t.Fatalf("GetProject() error = %v", err)
-	}
-	if proj.ProjectID != 7 {
-		t.Errorf("GetProject().ProjectID = %d, want 7", proj.ProjectID)
-	}
+
+	t.Run("project name with special characters is path-escaped", func(t *testing.T) {
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			wantPath := "/api/v2.0/projects/acme%2Fweird"
+			if r.URL.EscapedPath() != wantPath {
+				t.Errorf("GetProject hit path %q, want %q", r.URL.EscapedPath(), wantPath)
+			}
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"project_id": 1})
+		})
+		if _, err := cli.GetProject(context.Background(), "acme/weird"); err != nil {
+			t.Fatalf("GetProject() error = %v", err)
+		}
+	})
+
+	t.Run("404 maps to ErrProjectNotFound", func(t *testing.T) {
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		})
+		_, err := cli.GetProject(context.Background(), "ghost-project")
+		if !errors.Is(err, ErrProjectNotFound) {
+			t.Fatalf("GetProject() error = %v, want ErrProjectNotFound", err)
+		}
+	})
+
+	t.Run("500 is a generic error, not ErrProjectNotFound", func(t *testing.T) {
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		})
+		_, err := cli.GetProject(context.Background(), "acme-project")
+		if err == nil {
+			t.Fatal("GetProject() error = nil, want an error on 500")
+		}
+		if errors.Is(err, ErrProjectNotFound) {
+			t.Fatal("GetProject() on a 500 incorrectly reported ErrProjectNotFound")
+		}
+	})
 }
 
 func TestEnsureProjectQuota(t *testing.T) {
-	t.Run("finds the quota by project reference and updates it", func(t *testing.T) {
+	t.Run("finds the quota by project reference and updates it when it differs", func(t *testing.T) {
 		var gotUpdatePath string
 		var gotBody map[string]interface{}
+		var putCalled bool
 		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.Method == http.MethodGet && r.URL.Path == "/api/v2.0/quotas":
@@ -155,8 +196,11 @@ func TestEnsureProjectQuota(t *testing.T) {
 					t.Errorf("quota list reference = %q, want project", got)
 				}
 				w.WriteHeader(http.StatusOK)
-				_ = json.NewEncoder(w).Encode([]map[string]interface{}{{"id": 99}})
+				_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+					{"id": 99, "hard": map[string]interface{}{"storage": 1 * 1024 * 1024 * 1024}},
+				})
 			case r.Method == http.MethodPut:
+				putCalled = true
 				gotUpdatePath = r.URL.Path
 				_ = json.NewDecoder(r.Body).Decode(&gotBody)
 				w.WriteHeader(http.StatusOK)
@@ -167,12 +211,58 @@ func TestEnsureProjectQuota(t *testing.T) {
 		if err := cli.EnsureProjectQuota(context.Background(), 7, 5*1024*1024*1024); err != nil {
 			t.Fatalf("EnsureProjectQuota() error = %v", err)
 		}
+		if !putCalled {
+			t.Fatal("EnsureProjectQuota() did not PUT despite the quota differing from desired")
+		}
 		if gotUpdatePath != "/api/v2.0/quotas/99" {
 			t.Errorf("PUT went to %q, want /api/v2.0/quotas/99", gotUpdatePath)
 		}
 		hard, ok := gotBody["hard"].(map[string]interface{})
 		if !ok || hard["storage"] != float64(5*1024*1024*1024) {
 			t.Errorf("PUT body hard.storage = %v, want %d", gotBody["hard"], 5*1024*1024*1024)
+		}
+	})
+
+	t.Run("already at the desired value skips the write entirely", func(t *testing.T) {
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPut {
+				t.Fatal("EnsureProjectQuota() issued a PUT when the quota already matched")
+			}
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"id": 99, "hard": map[string]interface{}{"storage": 5 * 1024 * 1024 * 1024}},
+			})
+		})
+		if err := cli.EnsureProjectQuota(context.Background(), 7, 5*1024*1024*1024); err != nil {
+			t.Fatalf("EnsureProjectQuota() error = %v", err)
+		}
+	})
+
+	t.Run("-1 (unlimited) round-trips as a valid target value", func(t *testing.T) {
+		var putCalled bool
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+					{"id": 99, "hard": map[string]interface{}{"storage": 5 * 1024 * 1024 * 1024}},
+				})
+			case http.MethodPut:
+				putCalled = true
+				var body map[string]interface{}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				hard, _ := body["hard"].(map[string]interface{})
+				if hard["storage"] != float64(-1) {
+					t.Errorf("PUT body hard.storage = %v, want -1", hard["storage"])
+				}
+				w.WriteHeader(http.StatusOK)
+			}
+		})
+		if err := cli.EnsureProjectQuota(context.Background(), 7, -1); err != nil {
+			t.Fatalf("EnsureProjectQuota() error = %v", err)
+		}
+		if !putCalled {
+			t.Fatal("EnsureProjectQuota() did not PUT when moving from a limited to an unlimited (-1) quota")
 		}
 	})
 
@@ -183,6 +273,22 @@ func TestEnsureProjectQuota(t *testing.T) {
 		})
 		if err := cli.EnsureProjectQuota(context.Background(), 7, 5*1024*1024*1024); err == nil {
 			t.Fatal("EnsureProjectQuota() error = nil, want an error when no quota is found")
+		}
+	})
+
+	t.Run("more than one quota returned errors instead of guessing which one is ours", func(t *testing.T) {
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPut {
+				t.Fatal("EnsureProjectQuota() issued a PUT despite an ambiguous quota list")
+			}
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"id": 99, "hard": map[string]interface{}{"storage": 1 * 1024 * 1024 * 1024}},
+				{"id": 100, "hard": map[string]interface{}{"storage": 2 * 1024 * 1024 * 1024}},
+			})
+		})
+		if err := cli.EnsureProjectQuota(context.Background(), 7, 5*1024*1024*1024); err == nil {
+			t.Fatal("EnsureProjectQuota() error = nil, want an error when more than one quota is returned")
 		}
 	})
 }

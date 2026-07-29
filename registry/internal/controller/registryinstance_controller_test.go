@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	registryv1alpha1 "github.com/wso2/open-cloud-datacenter/crds/registry/api/v1alpha1"
 )
@@ -150,6 +152,71 @@ func TestResolveBackend_ReadyPhaseButMissingSecretNameStillWaits(t *testing.T) {
 	}
 	if got != nil {
 		t.Error("resolveBackend() returned a backend despite AdminSecretName being empty")
+	}
+}
+
+// --- fail(): the terminal-error path for spec-level errors ---
+
+func TestFail_SetsFailedPhaseAndReturnsTerminalError(t *testing.T) {
+	instance := &registryv1alpha1.RegistryInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "ri-sample", Namespace: "registry-system"},
+		Spec: registryv1alpha1.RegistryInstanceSpec{
+			Plan: "not-a-real-plan",
+		},
+	}
+	fc := fake.NewClientBuilder().
+		WithScheme(newTestScheme(t)).
+		WithStatusSubresource(&registryv1alpha1.RegistryInstance{}).
+		WithObjects(instance).
+		Build()
+
+	r := newInstanceReconciler(t, fc)
+	cause := errors.New(`unknown plan "not-a-real-plan"; valid: starter, professional, enterprise`)
+	res, err := r.fail(context.Background(), instance, "resolve plan", cause)
+
+	if res.Requeue || res.RequeueAfter != 0 {
+		t.Errorf("fail() result = %+v, want a zero Result (TerminalError means the runtime must not requeue)", res)
+	}
+	if !errors.Is(err, reconcile.TerminalError(nil)) {
+		t.Errorf("fail() err = %v, want a reconcile.TerminalError wrapping %v", err, cause)
+	}
+	if !errors.Is(err, cause) {
+		t.Errorf("fail() err = %v, does not wrap the original cause %v", err, cause)
+	}
+
+	var fresh registryv1alpha1.RegistryInstance
+	if err := fc.Get(context.Background(), client.ObjectKeyFromObject(instance), &fresh); err != nil {
+		t.Fatalf("Get() after fail() error = %v", err)
+	}
+	if fresh.Status.Phase != phaseFailed {
+		t.Errorf("fail() left Status.Phase = %q, want %q", fresh.Status.Phase, phaseFailed)
+	}
+}
+
+// --- projectQuotaBytes: plan-name validation delegates to helm.PlanFor ---
+
+func TestProjectQuotaBytes(t *testing.T) {
+	tests := []struct {
+		plan    string
+		want    int64
+		wantErr bool
+	}{
+		{"starter", 5 * 1024 * 1024 * 1024, false},
+		{"professional", 20 * 1024 * 1024 * 1024, false},
+		{"enterprise", 100 * 1024 * 1024 * 1024, false},
+		{"not-a-real-plan", 0, true},
+		{"", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.plan, func(t *testing.T) {
+			got, err := projectQuotaBytes(tt.plan)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("projectQuotaBytes(%q) error = %v, wantErr %v", tt.plan, err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("projectQuotaBytes(%q) = %d, want %d", tt.plan, got, tt.want)
+			}
+		})
 	}
 }
 

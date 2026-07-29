@@ -16,17 +16,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	registryv1alpha1 "github.com/wso2/open-cloud-datacenter/crds/registry/api/v1alpha1"
 	"github.com/wso2/open-cloud-datacenter/crds/registry/internal/config"
 	"github.com/wso2/open-cloud-datacenter/crds/registry/internal/harbor"
+	"github.com/wso2/open-cloud-datacenter/crds/registry/internal/helm"
 )
 
 const instanceFinalizer = "registry.opencloud.wso2.com/instance-cleanup"
 
 // RegistryInstanceReconciler provisions one Harbor project + robot account per
 // registry. The robot credentials are written into an owner-referenced K8s
-// Secret, which dc-api reads directly.
+// Secret; dc-api reads that Secret directly (no DB, no HTTP gateway).
 type RegistryInstanceReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
@@ -84,9 +86,15 @@ func (r *RegistryInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	if plan == "" {
 		plan = "starter"
 	}
+	// An unrecognized plan is a spec-level error, not a Harbor/network hiccup
+	// — no amount of retrying fixes it, so it goes through fail() (matching
+	// how RegistryBackendReconciler treats helm.PlanFor's identical error
+	// shape), not transient(). In practice this is normally caught by the
+	// CRD's own enum+default before it ever reaches here; this is the
+	// defensive path for an older/unmigrated CR or a bypassed validation.
 	quotaBytes, err := projectQuotaBytes(plan)
 	if err != nil {
-		return r.transient(ctx, &cr, "resolve plan", err)
+		return r.fail(ctx, &cr, "resolve plan", err)
 	}
 	projectName := projectNameFor(&cr)
 	if err := cli.CreateHarborProject(ctx, projectName, quotaBytes); err != nil {
@@ -97,12 +105,31 @@ func (r *RegistryInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// CreateHarborProject's storage_limit only takes effect on first create,
 	// so this is what actually applies a plan change on an existing
 	// RegistryInstance — the same level-triggered convergence pattern the
-	// Backend reconciler uses for Helm values and PVC sizes.
+	// Backend reconciler uses for Helm values and PVC sizes. Kept on every
+	// reconcile deliberately (not skipped once "converged") — this is also
+	// the drift check that notices the project having been deleted
+	// out-of-band; skipping it to save round trips would remove that
+	// self-healing property.
 	proj, err := cli.GetProject(ctx, projectName)
 	if err != nil {
 		return r.transient(ctx, &cr, "get Harbor project", err)
 	}
+	if proj.ProjectID == 0 {
+		// A malformed-but-200 response would otherwise silently flow into
+		// EnsureProjectQuota as reference_id=0, which fails with a confusing
+		// "no quota found for project 0" that hides the real cause.
+		return r.transient(ctx, &cr, "get Harbor project", fmt.Errorf("Harbor returned a project with no project_id for %q", projectName))
+	}
 	if err := cli.EnsureProjectQuota(ctx, proj.ProjectID, quotaBytes); err != nil {
+		// Harbor legitimately rejects lowering a quota below current usage —
+		// that's not a bug, but it also isn't a transient blip: it won't
+		// resolve until the tenant frees space or the plan is reverted.
+		// There's no distinct condition for that either way yet (would need
+		// a typed error from EnsureProjectQuota to tell it apart from a real
+		// network error, which Harbor's response shape hasn't been verified
+		// closely enough to build yet — see harbor-integration-specialist),
+		// so this deliberately stays on transient rather than fail(): unlike
+		// an invalid plan name, this condition can resolve on its own.
 		return r.transient(ctx, &cr, "set project quota", err)
 	}
 
@@ -203,10 +230,12 @@ func (r *RegistryInstanceReconciler) ensureCredentials(ctx context.Context, cr *
 // removes the Harbor project upstream (best-effort). The credentials Secret is
 // GC'd via its owner reference.
 func (r *RegistryInstanceReconciler) handleDelete(ctx context.Context, cr *registryv1alpha1.RegistryInstance, log logr.Logger) (ctrl.Result, error) {
+	//Here finalizer not added but delete set means already deleted CR but reconciled for one last time.
 	if !controllerutil.ContainsFinalizer(cr, instanceFinalizer) {
 		return ctrl.Result{}, nil
 	}
 
+	//If reclaim policy is Delete, then remove the project from the backend.
 	if cr.Spec.ReclaimPolicy == reclaimDelete {
 		if err := r.cleanupUpstream(ctx, cr, log); err != nil {
 			// If the Backend is simply gone, don't trap the CR forever.
@@ -283,7 +312,9 @@ func projectNameFor(cr *registryv1alpha1.RegistryInstance) string {
 // projectQuotaGi maps a plan to its Harbor project storage quota, in
 // gibibytes. This is separate from the Backend's TenantPlan sizes (those size
 // the entire shared Harbor deployment across every tenant project; this sizes
-// one project's slice of it).
+// one project's slice of it) — but the set of valid plan *names* is shared,
+// not reimplemented: projectQuotaBytes below delegates that check to
+// helm.PlanFor rather than re-validating against a second, independent list.
 var projectQuotaGi = map[string]int64{
 	"starter":      5,
 	"professional": 20,
@@ -292,10 +323,25 @@ var projectQuotaGi = map[string]int64{
 
 // projectQuotaBytes resolves a plan to a Harbor project storage quota in
 // bytes, the unit ProjectReq.storage_limit and the quota API both expect.
+// Plan-name validation is delegated to helm.PlanFor so there's exactly one
+// place that knows which plan names are valid — this and helm.PlanFor's
+// plans map previously each had their own independent copy of that name set
+// (down to duplicating PlanFor's own error message), so adding or renaming a
+// plan tier meant remembering to update both in lockstep with no compiler
+// check tying them together. This does mean projectQuotaGi must still be
+// kept in sync (it maps the same names to a different attribute, project
+// quota size vs. Backend deployment size), but at least the "is this plan
+// name valid at all" question now has one answer, not two.
 func projectQuotaBytes(plan string) (int64, error) {
+	if _, err := helm.PlanFor(plan); err != nil {
+		return 0, err
+	}
 	gi, ok := projectQuotaGi[plan]
 	if !ok {
-		return 0, fmt.Errorf("unknown plan %q; valid: starter, professional, enterprise", plan)
+		// helm.PlanFor validated the name; if it's missing here, this map
+		// itself has drifted out of sync with helm.plans — fail loudly
+		// rather than silently defaulting to some size.
+		return 0, fmt.Errorf("plan %q is valid but has no configured Harbor project quota", plan)
 	}
 	return gi * 1024 * 1024 * 1024, nil
 }
@@ -362,6 +408,21 @@ func (r *RegistryInstanceReconciler) transient(ctx context.Context, cr *registry
 		setReady(&s.Conditions, cr.Generation, metav1.ConditionFalse, reasonTransient, msg)
 	})
 	return ctrl.Result{}, cause
+}
+
+// fail is a terminal spec error: sets Failed and returns the error, matching
+// RegistryBackendReconciler.fail. Unlike transient(), retrying this cannot
+// help — only a user edit to the CR spec can, and that edit re-triggers
+// reconcile via the watch.
+func (r *RegistryInstanceReconciler) fail(ctx context.Context, cr *registryv1alpha1.RegistryInstance, step string, cause error) (ctrl.Result, error) {
+	msg := fmt.Sprintf("%s: %v", step, cause)
+	r.Recorder.Event(cr, corev1.EventTypeWarning, reasonError, msg)
+	_ = r.patchStatus(ctx, client.ObjectKeyFromObject(cr), func(s *registryv1alpha1.RegistryInstanceStatus) {
+		s.Phase = phaseFailed
+		s.Message = msg
+		setReady(&s.Conditions, cr.Generation, metav1.ConditionFalse, reasonError, msg)
+	})
+	return ctrl.Result{}, reconcile.TerminalError(cause)
 }
 
 func (r *RegistryInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
