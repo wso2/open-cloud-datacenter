@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -19,6 +20,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	registryv1alpha1 "github.com/wso2/open-cloud-datacenter/crds/registry/api/v1alpha1"
+	"github.com/wso2/open-cloud-datacenter/crds/registry/internal/helm"
 )
 
 func newTestScheme(t *testing.T) *runtime.Scheme {
@@ -265,4 +267,39 @@ func TestDeletePVCs_OnlyDeletesMatchingLabeledPVCs(t *testing.T) {
 	assertExists(matching.Name, false)
 	assertExists(otherTenant.Name, true)
 	assertExists(unlabeled.Name, true)
+}
+
+// --- ensureStorageSize: growing a PVC with no existing Requests map ---
+
+func TestEnsureStorageSize_HandlesNilRequestsMapWithoutPanicking(t *testing.T) {
+	cr := &registryv1alpha1.RegistryBackend{
+		Spec: registryv1alpha1.RegistryBackendSpec{TenantID: "acme"},
+	}
+	ns := "acme-management"
+
+	// No Spec.Resources.Requests set at all — Requests is a nil map, the
+	// exact shape that panics on a plain map-index assignment.
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "data-harbor-acme-registry", Namespace: ns},
+	}
+
+	fc := fake.NewClientBuilder().
+		WithScheme(newTestScheme(t)).
+		WithObjects(pvc).
+		Build()
+
+	r := newBackendReconciler(t, fc)
+	plan := helm.TenantPlan{RegistryStorage: "50Gi", DBStorage: "5Gi"}
+	if err := r.ensureStorageSize(context.Background(), cr, ns, plan); err != nil {
+		t.Fatalf("ensureStorageSize() error = %v, want nil", err)
+	}
+
+	var got corev1.PersistentVolumeClaim
+	if err := fc.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: pvc.Name}, &got); err != nil {
+		t.Fatalf("Get() after ensureStorageSize error = %v", err)
+	}
+	want := resource.MustParse("50Gi")
+	if gotQty := got.Spec.Resources.Requests[corev1.ResourceStorage]; gotQty.Cmp(want) != 0 {
+		t.Errorf("PVC storage request = %s, want %s", gotQty.String(), want.String())
+	}
 }

@@ -300,6 +300,9 @@ func (r *RegistryBackendReconciler) ensureStorageSize(ctx context.Context, cr *r
 		if desired.Cmp(current) <= 0 {
 			continue // grow-only
 		}
+		if pvc.Spec.Resources.Requests == nil {
+			pvc.Spec.Resources.Requests = corev1.ResourceList{}
+		}
 		pvc.Spec.Resources.Requests[corev1.ResourceStorage] = desired
 		if err := r.Update(ctx, pvc); err != nil {
 			return fmt.Errorf("expand PVC %s to %s: %w", pvc.Name, want, err)
