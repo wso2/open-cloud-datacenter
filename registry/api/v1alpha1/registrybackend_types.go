@@ -21,8 +21,10 @@ type RegistryBackend struct {
 }
 
 type RegistryBackendSpec struct {
-	// TenantID is the unique identifier for the tenant.
-	// The Harbor Helm release and namespace are derived from this.
+	// TenantID is the unique identifier for the tenant, deriving the Harbor
+	// Helm release, namespace, and URL. Immutable — changing it would
+	// repoint the Backend at a new Harbor target without reclaiming the old one.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="tenantID is immutable"
 	TenantID string `json:"tenantID"`
 
 	// Plan selects the Harbor resource profile. Upgrades only
