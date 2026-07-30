@@ -192,7 +192,7 @@ func (c *Client) CreateProjectRobotAccount(ctx context.Context, projectName, rob
 // Harbor refuses to delete a non-empty project, so we surface that as an error
 // (the caller leaves cleanup to an admin rather than silently orphaning data).
 func (c *Client) DeleteProject(ctx context.Context, projectName string) error {
-	return c.do(ctx, "DELETE", "/api/v2.0/projects/"+projectName, nil, nil,
+	return c.do(ctx, "DELETE", "/api/v2.0/projects/"+url.PathEscape(projectName), nil, nil,
 		http.StatusOK, http.StatusNoContent, http.StatusNotFound)
 }
 

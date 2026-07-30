@@ -366,6 +366,19 @@ func TestDeleteProject(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("project name with special characters is path-escaped", func(t *testing.T) {
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			wantPath := "/api/v2.0/projects/acme%2Fweird"
+			if r.URL.EscapedPath() != wantPath {
+				t.Errorf("DeleteProject hit path %q, want %q", r.URL.EscapedPath(), wantPath)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+		if err := cli.DeleteProject(context.Background(), "acme/weird"); err != nil {
+			t.Fatalf("DeleteProject() error = %v", err)
+		}
+	})
 }
 
 // Ping deliberately bypasses do() — Harbor's /ping endpoint needs no auth, so
