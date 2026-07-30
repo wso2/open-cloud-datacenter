@@ -91,7 +91,7 @@ func TestCreateHarborProject(t *testing.T) {
 		wantErr    bool
 	}{
 		{"newly created", http.StatusCreated, false},
-		{"200 is not a documented Harbor response for this endpoint — rejected, not treated as success", http.StatusOK, true},
+		{"200 is undocumented for this endpoint, so it is an error", http.StatusOK, true},
 		{"already existed (409 conflict) — idempotent by design", http.StatusConflict, false},
 		{"harbor rejected the request", http.StatusBadRequest, true},
 	}
@@ -317,15 +317,10 @@ func TestCreateProjectRobotAccount(t *testing.T) {
 		}
 	})
 
-	// This test documents a real, current asymmetry rather than papering over it:
-	// CreateHarborProject explicitly treats 409 as success (see above), but
-	// CreateProjectRobotAccount does not — it goes through the generic post()
-	// helper, which only accepts 201/200. If a robot with the same deterministic
-	// name already exists (e.g. left behind by a Retain-policy delete), this call
-	// fails permanently instead of being idempotent like project creation is.
-	// If this ever gets fixed to tolerate 409, this test should be updated to
-	// wantErr=false.
-	t.Run("duplicate robot name currently errors (known inconsistency, not idempotent)", func(t *testing.T) {
+	// Unlike CreateHarborProject, this call is not 409-tolerant: it uses post(),
+	// which accepts only 201/200. A robot left behind by a Retain-policy delete
+	// therefore blocks re-provisioning under the same name.
+	t.Run("duplicate robot name errors, unlike project creation", func(t *testing.T) {
 		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusConflict)
 		})

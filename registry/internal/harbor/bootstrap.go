@@ -210,8 +210,8 @@ func (c *Client) put(ctx context.Context, path string, body interface{}) error {
 	return c.do(ctx, "PUT", path, body, nil, http.StatusOK, http.StatusNoContent)
 }
 
-// StatusError carries Harbor's real HTTP status so callers can match a
-// specific code (e.g. 404) via errors.As instead of parsing error text.
+// StatusError carries Harbor's HTTP status so callers can match a specific
+// code (e.g. 404) with errors.As.
 type StatusError struct {
 	Method     string
 	Path       string
