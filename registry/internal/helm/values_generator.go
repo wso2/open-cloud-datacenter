@@ -73,8 +73,19 @@ func PlanFor(name string) (TenantPlan, error) {
 	return p, nil
 }
 
+// quote renders a Go-quoted string, which happens to also be a valid YAML
+// double-quoted scalar (YAML's escape set is a superset of Go's for the
+// characters Go's %q ever produces). Used on every template field derived
+// from TenantID or operator config, so a value containing a colon, newline,
+// or quote can never break the surrounding YAML structure or inject a new key.
+func quote(s string) string {
+	return fmt.Sprintf("%q", s)
+}
+
+var templateFuncs = template.FuncMap{"quote": quote}
+
 func GenerateValues(in ValuesInput) ([]byte, error) {
-	tmpl, err := template.New("harbor-values").Parse(harborValuesTemplate)
+	tmpl, err := template.New("harbor-values").Funcs(templateFuncs).Parse(harborValuesTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("parse template: %w", err)
 	}
@@ -92,19 +103,19 @@ expose:
     enabled: true
     certSource: secret
     secret:
-      secretName: {{.TenantID}}-harbor-tls
+      secretName: {{printf "%s-harbor-tls" .TenantID | quote}}
   ingress:
     hosts:
-      core: registry.{{.TenantID}}.{{.BaseDomain}}
-    className: {{.IngressClass}}
+      core: {{printf "registry.%s.%s" .TenantID .BaseDomain | quote}}
+    className: {{.IngressClass | quote}}
     annotations:
-      kubernetes.io/ingress.class: {{.IngressClass}}
-      cert-manager.io/cluster-issuer: {{.CertIssuer}}
+      kubernetes.io/ingress.class: {{.IngressClass | quote}}
+      cert-manager.io/cluster-issuer: {{.CertIssuer | quote}}
       nginx.ingress.kubernetes.io/proxy-body-size: "0"
       nginx.ingress.kubernetes.io/proxy-read-timeout: "900"
       nginx.ingress.kubernetes.io/proxy-send-timeout: "900"
 
-externalURL: https://registry.{{.TenantID}}.{{.BaseDomain}}
+externalURL: {{printf "https://registry.%s.%s" .TenantID .BaseDomain | quote}}
 
 # Read directly from our owned Secret (key: HARBOR_ADMIN_PASSWORD) instead of
 # a literal value — keeps the admin password out of the Helm release record.
@@ -121,21 +132,21 @@ persistence:
   resourcePolicy: keep
   persistentVolumeClaim:
     registry:
-      storageClass: {{.StorageClass}}
-      size: {{.Plan.RegistryStorage}}
+      storageClass: {{.StorageClass | quote}}
+      size: {{.Plan.RegistryStorage | quote}}
       accessMode: ReadWriteOnce
     jobservice:
       jobLog:
-        storageClass: {{.StorageClass}}
+        storageClass: {{.StorageClass | quote}}
         size: 1Gi
     database:
-      storageClass: {{.StorageClass}}
-      size: {{.Plan.DBStorage}}
+      storageClass: {{.StorageClass | quote}}
+      size: {{.Plan.DBStorage | quote}}
     redis:
-      storageClass: {{.StorageClass}}
+      storageClass: {{.StorageClass | quote}}
       size: 1Gi
     trivy:
-      storageClass: {{.StorageClass}}
+      storageClass: {{.StorageClass | quote}}
       size: 5Gi
 
 database:
@@ -157,19 +168,19 @@ core:
   existingXsrfSecretKey: CSRF_KEY
   resources:
     requests:
-      cpu: {{.Plan.CoreCPUReq}}
-      memory: {{.Plan.CoreMemReq}}
+      cpu: {{.Plan.CoreCPUReq | quote}}
+      memory: {{.Plan.CoreMemReq | quote}}
     limits:
-      cpu: {{.Plan.CoreCPULimit}}
-      memory: {{.Plan.CoreMemLimit}}
+      cpu: {{.Plan.CoreCPULimit | quote}}
+      memory: {{.Plan.CoreMemLimit | quote}}
 
 registry:
   # Read directly from our owned Secret instead of a literal value.
   existingSecret: "{{.SecretName}}"
   resources:
     requests:
-      cpu: {{.Plan.RegistryCPUReq}}
-      memory: {{.Plan.RegistryMemReq}}
+      cpu: {{.Plan.RegistryCPUReq | quote}}
+      memory: {{.Plan.RegistryMemReq | quote}}
     limits:
       cpu: 500m
       memory: 512Mi
