@@ -26,8 +26,8 @@ Tested on **Harvester 1.7.1** (RKE2 v1.34.3).
   a Harbor project, mints a project-scoped robot account **once**, and writes
   the robot credentials into an **owner-referenced K8s Secret**
   (`registry-credentials-<name>`) that dc-api reads directly.
-- **Lifecycle**: phase-based (`Pending → Provisioning → Ready →
-  Failed / Terminating`) with standard status conditions, `observedGeneration`,
+- **Lifecycle**: phase-based (`Provisioning → Ready → Failed / Terminating`;
+  empty until the first reconcile) with standard status conditions, `observedGeneration`,
   and Kubernetes Events. Finalizers guarantee cleanup; a Backend refuses
   deletion while `RegistryInstance`s still reference it. `spec.reclaimPolicy`
   (`Retain` | `Delete`) controls whether Harbor's PVCs / project are destroyed

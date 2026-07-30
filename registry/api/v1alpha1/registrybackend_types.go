@@ -43,8 +43,9 @@ type RegistryBackendSpec struct {
 }
 
 type RegistryBackendStatus struct {
-	// Phase is the lifecycle state of the Harbor deployment.
-	// +kubebuilder:validation:Enum=Pending;Provisioning;Ready;Failed;Terminating
+	// Phase is the lifecycle state of the Harbor deployment. Empty until the
+	// first reconcile.
+	// +kubebuilder:validation:Enum=Provisioning;Ready;Failed;Terminating
 	Phase string `json:"phase,omitempty"`
 
 	// ObservedGeneration is the .metadata.generation the controller last

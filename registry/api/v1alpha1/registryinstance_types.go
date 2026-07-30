@@ -58,8 +58,9 @@ type RegistryInstanceSpec struct {
 }
 
 type RegistryInstanceStatus struct {
-	// Phase is the lifecycle state of this registry instance.
-	// +kubebuilder:validation:Enum=Pending;Provisioning;Ready;Failed;Terminating
+	// Phase is the lifecycle state of this registry instance. Empty until the
+	// first reconcile.
+	// +kubebuilder:validation:Enum=Provisioning;Ready;Failed;Terminating
 	Phase string `json:"phase,omitempty"`
 
 	// ObservedGeneration is the .metadata.generation the controller last

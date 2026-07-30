@@ -164,9 +164,10 @@ spec:
                 format: int64
                 type: integer
               phase:
-                description: Phase is the lifecycle state of the Harbor deployment.
+                description: |-
+                  Phase is the lifecycle state of the Harbor deployment. Empty until the
+                  first reconcile.
                 enum:
-                - Pending
                 - Provisioning
                 - Ready
                 - Failed
