@@ -14,7 +14,10 @@ spec:
     scheme: https
     bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
     tlsConfig:
-      insecureSkipVerify: false
+      # The serving certificate is self-signed for localhost, so it cannot be
+      # verified against the Service DNS name. Scrapes are authenticated by the
+      # bearer token above. Apply monitor_tls_patch.yaml to verify instead.
+      insecureSkipVerify: true
   selector:
     matchLabels:
       control-plane: controller-manager

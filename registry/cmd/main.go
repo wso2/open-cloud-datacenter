@@ -50,11 +50,10 @@ func main() {
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		HealthProbeBindAddress: ":8081",
-		// Serves metrics over HTTPS with the API server validating the
-		// scraper's bearer token — the RBAC (metrics-auth-role) and
-		// NetworkPolicy (allow-metrics-traffic, port 8443) are already
-		// scaffolded for this. CertDir is left unset so controller-runtime
-		// generates and rotates a self-signed serving cert automatically.
+		// Metrics served over HTTPS; the API server validates each scraper's
+		// bearer token. With CertDir unset the serving certificate is
+		// self-signed for localhost, so set CertDir to a cert-manager
+		// certificate covering the Service DNS name to make it verifiable.
 		Metrics: metricsserver.Options{
 			BindAddress:    ":8443",
 			SecureServing:  true,

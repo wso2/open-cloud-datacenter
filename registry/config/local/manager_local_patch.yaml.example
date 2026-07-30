@@ -17,8 +17,9 @@ spec:
           value: "REPLACE_WITH_YOUR_REAL_BASE_DOMAIN"
         - name: STORAGE_CLASS
           value: "REPLACE_WITH_YOUR_REAL_STORAGE_CLASS"
-        # Only if CERT_ISSUER is an internal CA you haven't wired into the
-        # operator's trust store yet. Never set this to "true" in the
-        # tracked config/manager/manager.yaml default.
+        # An internal CA issuer requires skipping verification, since the
+        # operator cannot verify certificates it signs.
+        - name: CERT_ISSUER
+          value: "internal-ca"
         - name: HARBOR_INSECURE_TLS
           value: "true"

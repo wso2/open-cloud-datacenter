@@ -51,17 +51,13 @@ spec:
         # useful for local/private clusters but not required in general.
         - name: BASE_DOMAIN
           value: "192.0.2.1.nip.io"
-        # cert-manager ClusterIssuer for Harbor's per-tenant ingress TLS.
-        # Let's Encrypt cannot validate a private/nip.io host, so a
-        # CA-based internal issuer is used instead (one CA signs every
-        # tenant cert). Must already exist on the cluster: `kubectl get
-        # clusterissuer`. Use "letsencrypt-prod" instead if BASE_DOMAIN is a
-        # real, publicly resolvable domain.
+        # cert-manager ClusterIssuer for Harbor's per-tenant ingress TLS. Must
+        # already exist: `kubectl get clusterissuer`. An internal CA issuer
+        # requires HARBOR_INSECURE_TLS=true below, since the operator has no
+        # way to verify certificates it signs.
         - name: CERT_ISSUER
-          value: "internal-ca"
-        # Skips verification of Harbor's TLS cert. Set to "true" only if
-        # CERT_ISSUER is an internal CA the operator can't verify, and prefer
-        # doing so in a config/local overlay (see manager_local_patch.yaml.example).
+          value: "letsencrypt-prod"
+        # Skips verification of Harbor's TLS certificate.
         - name: HARBOR_INSECURE_TLS
           value: "false"
         # StorageClass for Harbor's PVCs. Must support allowVolumeExpansion
