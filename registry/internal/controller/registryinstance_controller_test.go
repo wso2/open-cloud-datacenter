@@ -3,13 +3,17 @@ package controller
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	registryv1alpha1 "github.com/wso2/open-cloud-datacenter/crds/registry/api/v1alpha1"
@@ -217,6 +221,61 @@ func TestProjectQuotaBytes(t *testing.T) {
 				t.Errorf("projectQuotaBytes(%q) = %d, want %d", tt.plan, got, tt.want)
 			}
 		})
+	}
+}
+
+// --- cleanupUpstream: must read the same Secret key the Backend writes ---
+
+func TestCleanupUpstream_ReadsCorrectAdminSecretKey(t *testing.T) {
+	var gotAuthPass, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		gotPath = r.URL.Path
+		_, gotAuthPass, _ = r.BasicAuth()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	backend := &registryv1alpha1.RegistryBackend{
+		ObjectMeta: metav1.ObjectMeta{Name: "rb-acme", Namespace: "registry-system"},
+		Status: registryv1alpha1.RegistryBackendStatus{
+			Phase:           phaseReady,
+			AdminSecretName: "rb-acme-harbor-admin",
+			RegistryURL:     srv.URL,
+		},
+	}
+	// Matches the exact key registrybackend_controller.go's harborSecretGenerators
+	// writes — this test fails immediately if that key ever drifts again.
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "rb-acme-harbor-admin", Namespace: "registry-system"},
+		Data:       map[string][]byte{"HARBOR_ADMIN_PASSWORD": []byte("s3cr3t")},
+	}
+	instance := &registryv1alpha1.RegistryInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "ri-sample", Namespace: "registry-system"},
+		Spec: registryv1alpha1.RegistryInstanceSpec{
+			RegistryName:  "sample-registry",
+			ReclaimPolicy: reclaimDelete,
+			BackendRef:    registryv1alpha1.BackendRef{Name: "rb-acme", Namespace: "registry-system"},
+		},
+	}
+
+	fc := fake.NewClientBuilder().
+		WithScheme(newTestScheme(t)).
+		WithObjects(backend, secret, instance).
+		Build()
+
+	r := newInstanceReconciler(t, fc)
+	if err := r.cleanupUpstream(context.Background(), instance, logf.Log); err != nil {
+		t.Fatalf("cleanupUpstream() error = %v, want nil", err)
+	}
+	if gotAuthPass != "s3cr3t" {
+		t.Errorf("Harbor DELETE request authenticated with password %q, want %q — wrong Secret key was read", gotAuthPass, "s3cr3t")
+	}
+	if gotPath != "/api/v2.0/projects/sample-registry" {
+		t.Errorf("Harbor DELETE request path = %q, want the sample-registry project", gotPath)
 	}
 }
 

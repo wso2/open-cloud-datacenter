@@ -241,7 +241,7 @@ func (r *RegistryInstanceReconciler) cleanupUpstream(ctx context.Context, cr *re
 	if backend.Status.Phase != phaseReady || backend.Status.AdminSecretName == "" {
 		return nil // nothing reachable to clean up
 	}
-	adminPass, err := r.readSecretKey(ctx, backend.Namespace, backend.Status.AdminSecretName, "admin-password")
+	adminPass, err := r.readSecretKey(ctx, backend.Namespace, backend.Status.AdminSecretName, "HARBOR_ADMIN_PASSWORD")
 	if err != nil {
 		return err
 	}
