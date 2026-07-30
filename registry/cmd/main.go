@@ -21,6 +21,7 @@ import (
 
 var scheme = runtime.NewScheme()
 
+// init registers the API types with the scheme and creates Helm's scratch dirs.
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(registryv1alpha1.AddToScheme(scheme))
@@ -30,6 +31,7 @@ func init() {
 	_ = os.MkdirAll("/tmp/helm-charts", 0700)
 }
 
+// main starts the controller manager and both reconcilers.
 func main() {
 	logger, _ := zap.NewProduction()
 	defer func() { _ = logger.Sync() }()

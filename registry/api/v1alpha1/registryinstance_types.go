@@ -27,6 +27,7 @@ type BackendRef struct {
 	Namespace string `json:"namespace"`
 }
 
+// RegistryInstanceSpec is the desired state of one Harbor project.
 type RegistryInstanceSpec struct {
 	// TenantID is the unique identifier for the tenant (e.g. "acme").
 	TenantID string `json:"tenantID"`
@@ -57,6 +58,7 @@ type RegistryInstanceSpec struct {
 	ReclaimPolicy string `json:"reclaimPolicy,omitempty"`
 }
 
+// RegistryInstanceStatus is the observed state of one Harbor project.
 type RegistryInstanceStatus struct {
 	// Phase is the lifecycle state of this registry instance. Empty until the
 	// first reconcile.
@@ -88,6 +90,7 @@ type RegistryInstanceList struct {
 	Items           []RegistryInstance `json:"items"`
 }
 
+// init registers RegistryInstance and its list type with the scheme.
 func init() {
 	SchemeBuilder.Register(&RegistryInstance{}, &RegistryInstanceList{})
 }

@@ -53,6 +53,8 @@ type RegistryBackendReconciler struct {
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
 
+// Reconcile converges one tenant's Harbor deployment: credentials, namespace,
+// Helm release, PVC sizes, then readiness.
 func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -401,6 +403,7 @@ func (r *RegistryBackendReconciler) ensureNamespace(ctx context.Context, name st
 	return nil
 }
 
+// harborClient returns a Harbor client honouring the configured TLS mode.
 func (r *RegistryBackendReconciler) harborClient(url, adminPass string) *harbor.Client {
 	if r.HelmCfg.InsecureHarborTLS {
 		return harbor.NewInsecureClient(url, adminPass)
@@ -410,6 +413,7 @@ func (r *RegistryBackendReconciler) harborClient(url, adminPass string) *harbor.
 
 // --- status helpers ---
 
+// patchStatus applies mutate to the latest status, retrying once on conflict.
 func (r *RegistryBackendReconciler) patchStatus(ctx context.Context, key client.ObjectKey, mutate func(*registryv1alpha1.RegistryBackendStatus)) error {
 	for attempt := 0; attempt < 2; attempt++ {
 		var fresh registryv1alpha1.RegistryBackend
@@ -477,6 +481,7 @@ func (r *RegistryBackendReconciler) fail(ctx context.Context, cr *registryv1alph
 	return ctrl.Result{}, reconcile.TerminalError(cause)
 }
 
+// SetupWithManager registers the controller with the manager.
 func (r *RegistryBackendReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&registryv1alpha1.RegistryBackend{}).

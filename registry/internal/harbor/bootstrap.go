@@ -21,12 +21,14 @@ type Client struct {
 	http     *http.Client
 }
 
+// RobotAccount is a Harbor robot account and its generated secret.
 type RobotAccount struct {
 	Name   string `json:"name"`
 	Secret string `json:"secret"`
 	ID     int64  `json:"id"`
 }
 
+// NewClient returns a Harbor client that verifies the server certificate.
 func NewClient(baseURL, adminPassword string) *Client {
 	return &Client{
 		baseURL:  baseURL,
@@ -198,14 +200,17 @@ func (c *Client) DeleteProject(ctx context.Context, projectName string) error {
 
 // --- HTTP helpers ---
 
+// get issues a GET request and decodes the response body into out.
 func (c *Client) get(ctx context.Context, path string, out interface{}, acceptCodes ...int) error {
 	return c.do(ctx, "GET", path, nil, out, acceptCodes...)
 }
 
+// post issues a POST request and decodes the response body into out.
 func (c *Client) post(ctx context.Context, path string, body interface{}, out interface{}) error {
 	return c.do(ctx, "POST", path, body, out, http.StatusCreated, http.StatusOK)
 }
 
+// put issues a PUT request, discarding the response body.
 func (c *Client) put(ctx context.Context, path string, body interface{}) error {
 	return c.do(ctx, "PUT", path, body, nil, http.StatusOK, http.StatusNoContent)
 }
@@ -219,10 +224,13 @@ type StatusError struct {
 	Body       string
 }
 
+// Error implements the error interface.
 func (e *StatusError) Error() string {
 	return fmt.Sprintf("harbor %s %s returned %d: %s", e.Method, e.Path, e.StatusCode, e.Body)
 }
 
+// do performs an authenticated request, returning a StatusError when the
+// response status is outside acceptCodes.
 func (c *Client) do(ctx context.Context, method, path string, body interface{}, out interface{}, acceptCodes ...int) error {
 	var bodyReader io.Reader
 	if body != nil {

@@ -24,12 +24,12 @@ import (
 	"github.com/wso2/open-cloud-datacenter/crds/registry/internal/config"
 )
 
-// Deployer installs/upgrades/uninstalls Harbor Helm releases.
-// The provisioner runs directly on Harvester so Helm uses the pod's in-cluster config.
 // chartCacheRoot holds the extracted Harbor chart. It lives under /tmp because
 // the container's root filesystem is read-only.
 var chartCacheRoot = "/tmp/helm-charts"
 
+// Deployer installs/upgrades/uninstalls Harbor Helm releases.
+// The provisioner runs directly on Harvester so Helm uses the pod's in-cluster config.
 type Deployer struct {
 	cfg    config.HelmConfig
 	logger *zap.Logger
@@ -50,6 +50,7 @@ func NewDeployer(cfg config.HelmConfig, logger *zap.Logger) (*Deployer, error) {
 	return d, nil
 }
 
+// ensureRepo verifies the Harbor chart repository is reachable.
 func (d *Deployer) ensureRepo() error {
 	entry := &repo.Entry{
 		Name: "harbor",
@@ -170,6 +171,7 @@ func freezeStorageSizes(desired, deployed map[string]interface{}) {
 	}
 }
 
+// nestedGet returns the value at path in m, reporting whether it exists.
 func nestedGet(m map[string]interface{}, path []string) (interface{}, bool) {
 	var cur interface{} = m
 	for _, k := range path {
@@ -184,6 +186,7 @@ func nestedGet(m map[string]interface{}, path []string) (interface{}, bool) {
 	return cur, true
 }
 
+// nestedSet writes v at path in m, doing nothing if the path is absent.
 func nestedSet(m map[string]interface{}, path []string, v interface{}) {
 	cur := m
 	for _, k := range path[:len(path)-1] {
@@ -290,6 +293,8 @@ func (d *Deployer) loadChart() (*chart.Chart, error) {
 	return loader.Load(chartDir)
 }
 
+// writeTempValues writes values to a temporary file and returns its path
+// along with a cleanup func that deletes it.
 func writeTempValues(tenantID string, values []byte) (path string, cleanup func(), err error) {
 	f, err := os.CreateTemp("/tmp/helm-values", fmt.Sprintf("harbor-%s-*.yaml", tenantID))
 	if err != nil {
@@ -305,6 +310,7 @@ func writeTempValues(tenantID string, values []byte) (path string, cleanup func(
 	return f.Name(), cleanup, nil
 }
 
+// parseValuesFile reads and unmarshals a YAML values file.
 func parseValuesFile(path string) (map[string]interface{}, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -317,10 +323,12 @@ func parseValuesFile(path string) (map[string]interface{}, error) {
 	return vals, nil
 }
 
+// yamlToMap unmarshals YAML into out.
 func yamlToMap(data []byte, out map[string]interface{}) error {
 	return yaml.Unmarshal(data, out)
 }
 
+// releaseName returns the Helm release name for a tenant.
 func releaseName(tenantID string) string {
 	return fmt.Sprintf("harbor-%s", tenantID)
 }

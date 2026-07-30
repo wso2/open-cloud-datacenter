@@ -53,6 +53,8 @@ spec:
           metadata:
             type: object
           spec:
+            description: RegistryBackendSpec is the desired state of a tenant's Harbor
+              deployment.
             properties:
               plan:
                 default: starter
@@ -94,6 +96,8 @@ spec:
             - tenantID
             type: object
           status:
+            description: RegistryBackendStatus is the observed state of a tenant's
+              Harbor deployment.
             properties:
               adminSecretName:
                 description: |-

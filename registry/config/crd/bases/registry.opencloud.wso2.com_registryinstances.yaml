@@ -52,6 +52,7 @@ spec:
           metadata:
             type: object
           spec:
+            description: RegistryInstanceSpec is the desired state of one Harbor project.
             properties:
               backendRef:
                 description: |-
@@ -105,6 +106,8 @@ spec:
             - tenantID
             type: object
           status:
+            description: RegistryInstanceStatus is the observed state of one Harbor
+              project.
             properties:
               conditions:
                 description: Conditions holds standard Kubernetes status conditions.

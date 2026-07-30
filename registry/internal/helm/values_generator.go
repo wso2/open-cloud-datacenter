@@ -6,6 +6,7 @@ import (
 	"text/template"
 )
 
+// TenantPlan is the resource profile applied to a tenant's Harbor deployment.
 type TenantPlan struct {
 	RegistryStorage string // e.g. "50Gi"
 	DBStorage       string // e.g. "5Gi"
@@ -35,6 +36,7 @@ var plans = map[string]TenantPlan{
 	},
 }
 
+// ValuesInput is the data rendered into the Harbor chart values template.
 type ValuesInput struct {
 	TenantID     string
 	BaseDomain   string
@@ -65,6 +67,7 @@ type ValuesInput struct {
 	EncryptionKey string // secretKey — encrypts stored credentials (16 chars)
 }
 
+// PlanFor returns the resource profile for a plan name.
 func PlanFor(name string) (TenantPlan, error) {
 	p, ok := plans[name]
 	if !ok {
@@ -82,6 +85,7 @@ func quote(s string) string {
 
 var templateFuncs = template.FuncMap{"quote": quote}
 
+// GenerateValues renders the Harbor chart values for one tenant.
 func GenerateValues(in ValuesInput) ([]byte, error) {
 	tmpl, err := template.New("harbor-values").Funcs(templateFuncs).Parse(harborValuesTemplate)
 	if err != nil {

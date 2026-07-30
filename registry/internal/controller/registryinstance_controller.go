@@ -42,6 +42,8 @@ type RegistryInstanceReconciler struct {
 // +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registrybackends,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;delete
 
+// Reconcile converges one Harbor project: quota, robot account, and the
+// credentials Secret, once the referenced Backend is Ready.
 func (r *RegistryInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -230,6 +232,7 @@ func (r *RegistryInstanceReconciler) handleDelete(ctx context.Context, cr *regis
 	return ctrl.Result{}, nil
 }
 
+// cleanupUpstream deletes the Harbor project backing this instance.
 func (r *RegistryInstanceReconciler) cleanupUpstream(ctx context.Context, cr *registryv1alpha1.RegistryInstance, log logr.Logger) error {
 	var backend registryv1alpha1.RegistryBackend
 	if err := r.Get(ctx, client.ObjectKey{
@@ -254,6 +257,7 @@ func (r *RegistryInstanceReconciler) cleanupUpstream(ctx context.Context, cr *re
 	return nil
 }
 
+// readSecretKey returns one key's value from a Secret.
 func (r *RegistryInstanceReconciler) readSecretKey(ctx context.Context, namespace, name, key string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("secret name is empty")
@@ -269,6 +273,7 @@ func (r *RegistryInstanceReconciler) readSecretKey(ctx context.Context, namespac
 	return string(v), nil
 }
 
+// harborClient returns a Harbor client honouring the configured TLS mode.
 func (r *RegistryInstanceReconciler) harborClient(url, adminPass string) *harbor.Client {
 	if r.HelmCfg.InsecureHarborTLS {
 		return harbor.NewInsecureClient(url, adminPass)
@@ -310,10 +315,12 @@ func projectQuotaBytes(plan string) (int64, error) {
 	return gi * 1024 * 1024 * 1024, nil
 }
 
+// credentialsSecretName returns the name of the robot credentials Secret.
 func credentialsSecretName(cr *registryv1alpha1.RegistryInstance) string {
 	return "registry-credentials-" + cr.Name
 }
 
+// shortSuffix returns the CR name lowercased and truncated to 12 characters.
 func shortSuffix(cr *registryv1alpha1.RegistryInstance) string {
 	s := cr.Name
 	if len(s) > 12 {
@@ -336,6 +343,7 @@ func propagatedLabels(cr *registryv1alpha1.RegistryInstance) map[string]string {
 
 // --- status helpers ---
 
+// patchStatus applies mutate to the latest status, retrying once on conflict.
 func (r *RegistryInstanceReconciler) patchStatus(ctx context.Context, key client.ObjectKey, mutate func(*registryv1alpha1.RegistryInstanceStatus)) error {
 	for attempt := 0; attempt < 2; attempt++ {
 		var fresh registryv1alpha1.RegistryInstance
@@ -354,6 +362,7 @@ func (r *RegistryInstanceReconciler) patchStatus(ctx context.Context, key client
 	return fmt.Errorf("status update: too many conflicts")
 }
 
+// provisioning records a wait state and requeues after the given delay.
 func (r *RegistryInstanceReconciler) provisioning(ctx context.Context, cr *registryv1alpha1.RegistryInstance, msg string, after time.Duration) (ctrl.Result, error) {
 	err := r.patchStatus(ctx, client.ObjectKeyFromObject(cr), func(s *registryv1alpha1.RegistryInstanceStatus) {
 		s.Phase = phaseProvisioning
@@ -363,6 +372,7 @@ func (r *RegistryInstanceReconciler) provisioning(ctx context.Context, cr *regis
 	return ctrl.Result{RequeueAfter: after}, err
 }
 
+// transient records a retryable failure and returns the error for backoff.
 func (r *RegistryInstanceReconciler) transient(ctx context.Context, cr *registryv1alpha1.RegistryInstance, step string, cause error) (ctrl.Result, error) {
 	msg := fmt.Sprintf("%s: %v", step, cause)
 	r.Recorder.Event(cr, corev1.EventTypeWarning, reasonTransient, msg)
@@ -387,6 +397,7 @@ func (r *RegistryInstanceReconciler) fail(ctx context.Context, cr *registryv1alp
 	return ctrl.Result{}, reconcile.TerminalError(cause)
 }
 
+// SetupWithManager registers the controller with the manager.
 func (r *RegistryInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&registryv1alpha1.RegistryInstance{}).

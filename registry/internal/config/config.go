@@ -12,6 +12,7 @@ type Config struct {
 	Helm HelmConfig
 }
 
+// HelmConfig holds the settings used to render and install the Harbor chart.
 type HelmConfig struct {
 	HarborRepoURL  string
 	HarborChartVer string
@@ -24,6 +25,7 @@ type HelmConfig struct {
 	InsecureHarborTLS bool
 }
 
+// Load builds the operator configuration from environment variables.
 func Load() (*Config, error) {
 	return &Config{
 		Helm: HelmConfig{
@@ -38,6 +40,7 @@ func Load() (*Config, error) {
 	}, nil
 }
 
+// mustEnv returns the value of key, panicking if it is unset or empty.
 func mustEnv(key string) string {
 	v := os.Getenv(key)
 	if v == "" {
@@ -46,6 +49,7 @@ func mustEnv(key string) string {
 	return v
 }
 
+// envStr returns the value of key, or def if it is unset or empty.
 func envStr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -53,6 +57,7 @@ func envStr(key, def string) string {
 	return def
 }
 
+// envBool returns true when key is "true" or "1", or def if key is unset.
 func envBool(key string, def bool) bool {
 	if v := os.Getenv(key); v != "" {
 		return v == "true" || v == "1"

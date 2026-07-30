@@ -20,6 +20,7 @@ type RegistryBackend struct {
 	Status RegistryBackendStatus `json:"status,omitempty"`
 }
 
+// RegistryBackendSpec is the desired state of a tenant's Harbor deployment.
 type RegistryBackendSpec struct {
 	// TenantID is the unique identifier for the tenant, deriving the Harbor
 	// Helm release, namespace, and URL. Immutable — changing it would
@@ -44,6 +45,7 @@ type RegistryBackendSpec struct {
 	ReclaimPolicy string `json:"reclaimPolicy,omitempty"`
 }
 
+// RegistryBackendStatus is the observed state of a tenant's Harbor deployment.
 type RegistryBackendStatus struct {
 	// Phase is the lifecycle state of the Harbor deployment. Empty until the
 	// first reconcile.
@@ -76,6 +78,7 @@ type RegistryBackendList struct {
 	Items           []RegistryBackend `json:"items"`
 }
 
+// init registers RegistryBackend and its list type with the scheme.
 func init() {
 	SchemeBuilder.Register(&RegistryBackend{}, &RegistryBackendList{})
 }
