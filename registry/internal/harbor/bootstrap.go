@@ -35,18 +35,18 @@ func NewClient(baseURL, adminPassword string) *Client {
 		http: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
-				// In production use proper TLS; for dev/self-signed this is acceptable
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
+				TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 			},
 		},
 	}
 }
 
-// NewInsecureClient is for dev environments with self-signed certs.
+// NewInsecureClient skips certificate verification — only for a dev/self-signed
+// Harbor instance, gated behind config.HelmConfig.InsecureHarborTLS (default false).
 func NewInsecureClient(baseURL, adminPassword string) *Client {
 	c := NewClient(baseURL, adminPassword)
 	c.http.Transport = &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true},
 	}
 	return c
 }

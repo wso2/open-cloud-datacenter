@@ -59,12 +59,13 @@ spec:
         # real, publicly resolvable domain.
         - name: CERT_ISSUER
           value: "internal-ca"
-        # Harbor serves that internal-CA cert, and the operator doesn't hold
-        # the CA to verify it against, so the operator's own HTTPS calls to
-        # the Harbor API skip TLS verification. Set to "false" once CERT_ISSUER
-        # is a publicly trusted issuer.
+        # Verifies Harbor's TLS cert by default. If CERT_ISSUER is an internal
+        # CA the operator doesn't hold, set this to "true" in your own
+        # config/local overlay (see manager_local_patch.yaml.example) rather
+        # than here — this tracked default should stay safe for a real,
+        # publicly-trusted CERT_ISSUER.
         - name: HARBOR_INSECURE_TLS
-          value: "true"
+          value: "false"
         # StorageClass for Harbor's PVCs. Must support allowVolumeExpansion
         # for plan upgrades to be able to grow storage. Replace with the
         # StorageClass name available on your cluster.
