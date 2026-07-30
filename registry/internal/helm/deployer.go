@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -25,10 +26,17 @@ import (
 
 // Deployer installs/upgrades/uninstalls Harbor Helm releases.
 // The provisioner runs directly on Harvester so Helm uses the pod's in-cluster config.
+// chartCacheRoot holds the extracted Harbor chart. It lives under /tmp because
+// the container's root filesystem is read-only.
+var chartCacheRoot = "/tmp/helm-charts"
+
 type Deployer struct {
 	cfg    config.HelmConfig
 	logger *zap.Logger
 	env    *cli.EnvSettings
+
+	// chartMu serializes chart acquisition.
+	chartMu sync.Mutex
 }
 
 // NewDeployer creates a Deployer. Helm targets Harvester via the pod's in-cluster config
@@ -235,22 +243,49 @@ func (d *Deployer) actionConfig(namespace string) (*action.Configuration, error)
 	return cfg, nil
 }
 
+// chartCacheDir is the extracted chart's location, scoped by chart version so
+// a HARBOR_CHART_VERSION change never resolves to a stale chart.
+func (d *Deployer) chartCacheDir() string {
+	return filepath.Join(chartCacheRoot, "harbor-"+d.cfg.HarborChartVer)
+}
+
+// loadChart returns the Harbor chart, pulling it on first use. The chart is
+// extracted into a scratch directory and moved into place with one atomic
+// rename, so a failed pull never leaves a partial chart in the cache.
 func (d *Deployer) loadChart() (*chart.Chart, error) {
-	chartDir := filepath.Join("/tmp/helm-charts", "harbor")
+	d.chartMu.Lock()
+	defer d.chartMu.Unlock()
+
+	chartDir := d.chartCacheDir()
 	if _, err := os.Stat(chartDir); err == nil {
 		return loader.Load(chartDir)
 	}
-	if err := os.MkdirAll("/tmp/helm-charts", 0700); err != nil {
+	if err := os.MkdirAll(chartCacheRoot, 0700); err != nil {
 		return nil, err
 	}
+
+	scratch, err := os.MkdirTemp(chartCacheRoot, "pull-")
+	if err != nil {
+		return nil, fmt.Errorf("create chart scratch dir: %w", err)
+	}
+	defer os.RemoveAll(scratch)
+
 	pull := action.NewPullWithOpts(action.WithConfig(&action.Configuration{}))
 	pull.Settings = d.env
 	pull.RepoURL = d.cfg.HarborRepoURL
 	pull.Version = d.cfg.HarborChartVer
-	pull.DestDir = "/tmp/helm-charts"
+	pull.DestDir = scratch
 	pull.Untar = true
 	if _, err := pull.Run("harbor"); err != nil {
 		return nil, fmt.Errorf("pull harbor chart: %w", err)
+	}
+
+	if err := os.Rename(filepath.Join(scratch, "harbor"), chartDir); err != nil {
+		// Lost a race to populate the cache — use what landed there.
+		if _, statErr := os.Stat(chartDir); statErr == nil {
+			return loader.Load(chartDir)
+		}
+		return nil, fmt.Errorf("move harbor chart into cache: %w", err)
 	}
 	return loader.Load(chartDir)
 }

@@ -1,8 +1,16 @@
 package helm
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
+
+	"helm.sh/helm/v3/pkg/cli"
+
+	"github.com/wso2/open-cloud-datacenter/crds/registry/internal/config"
 )
 
 func TestNestedGet(t *testing.T) {
@@ -178,6 +186,104 @@ func TestReleaseName(t *testing.T) {
 	for _, tt := range tests {
 		if got := releaseName(tt.tenantID); got != tt.want {
 			t.Errorf("releaseName(%q) = %q, want %q", tt.tenantID, got, tt.want)
+		}
+	}
+}
+
+// --- loadChart: version-scoped, atomically-populated chart cache ---
+
+func TestChartCacheDir_IncludesChartVersion(t *testing.T) {
+	d1 := &Deployer{cfg: config.HelmConfig{HarborChartVer: "1.14.0"}}
+	d2 := &Deployer{cfg: config.HelmConfig{HarborChartVer: "1.15.0"}}
+	if d1.chartCacheDir() == d2.chartCacheDir() {
+		t.Fatalf("two chart versions resolved to the same cache dir %q — a version change would load a stale chart", d1.chartCacheDir())
+	}
+	if !strings.HasSuffix(d1.chartCacheDir(), "harbor-1.14.0") {
+		t.Errorf("chartCacheDir() = %q, want it to end in harbor-1.14.0", d1.chartCacheDir())
+	}
+}
+
+// writeMinimalChart lays down the smallest tree loader.Load accepts, so
+// loadChart can be exercised without pulling from a real chart repository.
+func writeMinimalChart(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", dir, err)
+	}
+	meta := "apiVersion: v2\nname: harbor\nversion: 1.14.0\n"
+	if err := os.WriteFile(filepath.Join(dir, "Chart.yaml"), []byte(meta), 0o600); err != nil {
+		t.Fatalf("write Chart.yaml: %v", err)
+	}
+}
+
+// A cached chart is served from disk. Under -race, the concurrent calls also
+// cover chartMu.
+func TestLoadChart_ConcurrentCallsUseTheCacheWithoutRacing(t *testing.T) {
+	root := t.TempDir()
+	orig := chartCacheRoot
+	chartCacheRoot = root
+	t.Cleanup(func() { chartCacheRoot = orig })
+
+	d := &Deployer{cfg: config.HelmConfig{HarborChartVer: "1.14.0"}}
+	writeMinimalChart(t, d.chartCacheDir())
+
+	const goroutines = 8
+	var wg sync.WaitGroup
+	errs := make([]error, goroutines)
+	names := make([]string, goroutines)
+	for i := range goroutines {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			c, err := d.loadChart()
+			errs[i] = err
+			if c != nil && c.Metadata != nil {
+				names[i] = c.Metadata.Name
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("goroutine %d: loadChart() error = %v", i, err)
+		}
+		if names[i] != "harbor" {
+			t.Errorf("goroutine %d: chart name = %q, want %q", i, names[i], "harbor")
+		}
+	}
+}
+
+// A failed pull must leave nothing at the cache path, so the next call
+// re-pulls instead of loading a partial chart.
+func TestLoadChart_FailedPullLeavesNoPartialCache(t *testing.T) {
+	root := t.TempDir()
+	orig := chartCacheRoot
+	chartCacheRoot = root
+	t.Cleanup(func() { chartCacheRoot = orig })
+
+	// An unreachable repo URL guarantees the pull fails.
+	d := &Deployer{
+		cfg: config.HelmConfig{
+			HarborChartVer: "1.14.0",
+			HarborRepoURL:  "http://127.0.0.1:1/does-not-exist",
+		},
+		env: cli.New(),
+	}
+
+	if _, err := d.loadChart(); err == nil {
+		t.Fatal("loadChart() error = nil, want a failure against an unreachable repo")
+	}
+	if _, err := os.Stat(d.chartCacheDir()); !os.IsNotExist(err) {
+		t.Errorf("cache dir %q exists after a failed pull — a later load would treat it as valid", d.chartCacheDir())
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("ReadDir(%q): %v", root, err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "pull-") {
+			t.Errorf("scratch dir %q was left behind after a failed pull", e.Name())
 		}
 	}
 }
