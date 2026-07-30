@@ -84,8 +84,8 @@ spec:
         - name: HELM_DATA_HOME
           value: /tmp/helm/data
         ports:
-        - containerPort: 8080
-          name: metrics
+        - containerPort: 8443
+          name: https
           protocol: TCP
         - containerPort: 8081
           name: health

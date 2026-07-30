@@ -10,6 +10,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	registryv1alpha1 "github.com/wso2/open-cloud-datacenter/crds/registry/api/v1alpha1"
@@ -49,9 +50,18 @@ func main() {
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		HealthProbeBindAddress: ":8081",
-		Metrics:                metricsserver.Options{BindAddress: ":8080"},
-		LeaderElection:         true,
-		LeaderElectionID:       "registry-provisioner.opencloud.wso2.com",
+		// Serves metrics over HTTPS with the API server validating the
+		// scraper's bearer token — the RBAC (metrics-auth-role) and
+		// NetworkPolicy (allow-metrics-traffic, port 8443) are already
+		// scaffolded for this. CertDir is left unset so controller-runtime
+		// generates and rotates a self-signed serving cert automatically.
+		Metrics: metricsserver.Options{
+			BindAddress:    ":8443",
+			SecureServing:  true,
+			FilterProvider: filters.WithAuthenticationAndAuthorization,
+		},
+		LeaderElection:   true,
+		LeaderElectionID: "registry-provisioner.opencloud.wso2.com",
 	})
 	if err != nil {
 		logger.Fatal("failed to create controller manager", zap.Error(err))

@@ -6,6 +6,7 @@ resources:
 - ../crd
 - ../rbac
 - ../manager
+- ../network-policy
 - metrics_service.yaml
 
 # Set the operator image via `kustomize edit set image controller=<repo>/<image>:<tag>`

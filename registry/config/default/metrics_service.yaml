@@ -9,11 +9,12 @@ metadata:
   namespace: system
 spec:
   ports:
-  # The operator serves Prometheus metrics in plaintext on :8080.
-  - name: metrics
-    port: 8080
+  # HTTPS with API-server-validated bearer tokens (see cmd/main.go). Named
+  # "https" to match config/prometheus/monitor.yaml's scrape port selector.
+  - name: https
+    port: 8443
     protocol: TCP
-    targetPort: 8080
+    targetPort: 8443
   selector:
     control-plane: controller-manager
     app.kubernetes.io/name: registry
