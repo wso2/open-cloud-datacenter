@@ -6,8 +6,16 @@ resources:
 - ../crd
 - ../rbac
 - ../manager
-- ../network-policy
+# [PROMETHEUS] To enable a Prometheus Operator ServiceMonitor for metrics
+# scraping, uncomment this — requires the monitoring.coreos.com CRDs to
+# already be installed on the cluster.
+#- ../prometheus
 - metrics_service.yaml
+# [NETWORK POLICY] Restrict :8443 to Pods in namespaces labeled
+# 'metrics: enabled'. Optional — the endpoint is already authenticated
+# (see cmd/main.go); this is defense-in-depth on top of that, and depends
+# on the cluster's CNI actually enforcing NetworkPolicy.
+#- ../network-policy
 
 # Set the operator image via `kustomize edit set image controller=<repo>/<image>:<tag>`
 # or `make deploy IMG=<repo>/<image>:<tag>`.
