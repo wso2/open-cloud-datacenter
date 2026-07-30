@@ -247,8 +247,7 @@ func TestCleanupUpstream_ReadsCorrectAdminSecretKey(t *testing.T) {
 			RegistryURL:     srv.URL,
 		},
 	}
-	// Matches the exact key registrybackend_controller.go's harborSecretGenerators
-	// writes — this test fails immediately if that key ever drifts again.
+	// Must match the key registrybackend_controller.go's harborSecretGenerators writes.
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "rb-acme-harbor-admin", Namespace: "registry-system"},
 		Data:       map[string][]byte{"HARBOR_ADMIN_PASSWORD": []byte("s3cr3t")},

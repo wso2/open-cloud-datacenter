@@ -73,11 +73,9 @@ func PlanFor(name string) (TenantPlan, error) {
 	return p, nil
 }
 
-// quote renders a Go-quoted string, which happens to also be a valid YAML
-// double-quoted scalar (YAML's escape set is a superset of Go's for the
-// characters Go's %q ever produces). Used on every template field derived
-// from TenantID or operator config, so a value containing a colon, newline,
-// or quote can never break the surrounding YAML structure or inject a new key.
+// quote renders a value as a YAML double-quoted scalar, so a string
+// containing a colon, newline, or quote cannot break the document structure
+// or inject a key. Applied to every string field in the template.
 func quote(s string) string {
 	return fmt.Sprintf("%q", s)
 }
