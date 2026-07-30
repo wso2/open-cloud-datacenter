@@ -8,9 +8,5 @@ resources:
 - ../manager
 - metrics_service.yaml
 
-# Override the operator image here (or run
-# `kustomize edit set image controller=<repo>/<image>:<tag>`).
-images:
-- name: controller
-  newName: ghcr.io/sandaruwijewardhana/registry-provisioner
-  newTag: latest
+# Set the operator image via `kustomize edit set image controller=<repo>/<image>:<tag>`
+# or `make deploy IMG=<repo>/<image>:<tag>`.

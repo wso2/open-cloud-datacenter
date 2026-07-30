@@ -1,7 +1,7 @@
 # Registry operator — provisions per-tenant Harbor registries via CRDs.
 # Layout follows the KeyVault operator (crds/keyvault) conventions.
 
-IMG ?= ghcr.io/sandaruwijewardhana/registry-provisioner:latest
+IMG ?= controller:latest
 CONTAINER_TOOL ?= docker
 
 # Tooling

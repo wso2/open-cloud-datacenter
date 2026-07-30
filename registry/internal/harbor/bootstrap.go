@@ -83,17 +83,9 @@ func (c *Client) Configure(ctx context.Context) error {
 	return c.put(ctx, "/api/v2.0/configurations", body)
 }
 
-// CreateHarborProject creates a Harbor project with the given name and an
-// initial storage quota (bytes; -1 means unlimited). 409 Conflict is treated
-// as success (already exists) — storage_limit only takes effect on the
-// first, successful creation; an existing project's quota is changed
-// separately via EnsureProjectQuota, which is safe to call on every
-// reconcile regardless of whether the project is new or pre-existing.
-// Harbor's real API documents 201 (created) and 409 (already exists) for
-// this endpoint — not 200 — so 200 is deliberately not in the accepted list;
-// treating an undocumented status as success would risk masking a
-// misconfigured proxy/ingress in front of Harbor silently returning 200 with
-// an unrelated body instead of actually proxying the request through.
+// CreateHarborProject creates a Harbor project with an initial storage quota
+// (bytes; -1 = unlimited). 409 (already exists) is treated as success; a
+// project's quota is changed afterward via EnsureProjectQuota.
 func (c *Client) CreateHarborProject(ctx context.Context, projectName string, storageLimitBytes int64) error {
 	body := map[string]interface{}{
 		"project_name":  projectName,
@@ -113,10 +105,8 @@ type Project struct {
 	ProjectID int64 `json:"project_id"`
 }
 
-// ErrProjectNotFound is returned by GetProject when Harbor responds 404 —
-// callers can distinguish "genuinely doesn't exist" from any other transport
-// or server error via errors.Is, rather than both looking like the same
-// generic wrapped error string.
+// ErrProjectNotFound lets callers distinguish a genuine 404 from any other
+// Harbor/transport error via errors.Is.
 var ErrProjectNotFound = errors.New("harbor project not found")
 
 // GetProject fetches a Harbor project by name.
@@ -133,18 +123,9 @@ func (c *Client) GetProject(ctx context.Context, projectName string) (*Project, 
 	return &p, nil
 }
 
-// EnsureProjectQuota sets a project's storage quota to exactly
-// storageLimitBytes (-1 for unlimited). Every Harbor project already has a
-// quota object created automatically alongside it; this looks that quota up
-// by the project's ID and updates its hard limit only if it isn't already
-// set to the desired value — Harbor's own idempotency on an unchanged PUT
-// isn't assumed, it's checked here, the same Cmp-before-write convergence
-// idiom RegistryBackendReconciler.ensureStorageSize uses for PVC sizes. This
-// is how a plan change on an existing RegistryInstance actually takes
-// effect, and it's safe to call every reconcile since the steady-state case
-// is now a read with no write. Harbor itself rejects lowering the quota
-// below the project's current usage, which surfaces here as an error for
-// the caller to report and retry.
+// EnsureProjectQuota sets a project's storage quota to storageLimitBytes
+// (-1 = unlimited), skipping the write if it's already at that value. Harbor
+// rejects lowering a quota below current usage, surfaced here as an error.
 func (c *Client) EnsureProjectQuota(ctx context.Context, projectID, storageLimitBytes int64) error {
 	var quotas []struct {
 		ID   int64 `json:"id"`
@@ -160,14 +141,11 @@ func (c *Client) EnsureProjectQuota(ctx context.Context, projectID, storageLimit
 		return fmt.Errorf("no quota found for project %d", projectID)
 	}
 	if len(quotas) > 1 {
-		// Harbor's own API contract says /quotas filters by reference_id, so
-		// this shouldn't happen — but if it ever does, guessing which one is
-		// "ours" and mutating it would risk silently repointing a different
-		// project's quota. Fail loudly instead.
+		// Ambiguous — refuse rather than guess which quota is ours.
 		return fmt.Errorf("expected exactly one quota for project %d, got %d", projectID, len(quotas))
 	}
 	if quotas[0].Hard.Storage == storageLimitBytes {
-		return nil // already converged — no write needed
+		return nil // already at the desired value
 	}
 	body := map[string]interface{}{
 		"hard": map[string]int64{"storage": storageLimitBytes},
@@ -232,10 +210,8 @@ func (c *Client) put(ctx context.Context, path string, body interface{}) error {
 	return c.do(ctx, "PUT", path, body, nil, http.StatusOK, http.StatusNoContent)
 }
 
-// StatusError is returned by do() when Harbor responds with a status code
-// outside the caller's accepted set, carrying the real StatusCode so callers
-// like GetProject can distinguish specific codes (404) via errors.As instead
-// of parsing the error string.
+// StatusError carries Harbor's real HTTP status so callers can match a
+// specific code (e.g. 404) via errors.As instead of parsing error text.
 type StatusError struct {
 	Method     string
 	Path       string
