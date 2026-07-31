@@ -135,8 +135,8 @@ data "dcapi_tenant" "lookup" {
 }
 
 data "dcapi_project" "lookup" {
-  tenant_id = dcapi_project.ds-project-s87.tenant_id
-  id        = dcapi_project.ds-project-s87.project_id
+  tenant_id  = dcapi_project.ds-project-s87.tenant_id
+  project_id = dcapi_project.ds-project-s87.project_id
 }
 
 data "dcapi_vnet" "lookup" {

@@ -18,6 +18,9 @@ func ResourceNetworkSecurityGroup() *schema.Resource {
 		ReadContext:   resourceNSGRead,
 		UpdateContext: resourceNSGUpdate,
 		DeleteContext: resourceNSGDelete,
+		Importer: &schema.ResourceImporter{
+			StateContext: schema.ImportStatePassthroughContext,
+		},
 
 		Schema: map[string]*schema.Schema{
 
@@ -199,6 +202,8 @@ func resourceNSGRead(ctx context.Context, d *schema.ResourceData, meta interface
 	}
 
 	var diags diag.Diagnostics
+	diags = appendSet(diags, d, "tenant_id", tenantID)
+	diags = appendSet(diags, d, "project_id", projectID)
 	diags = appendSet(diags, d, "sg_id", nsg.ID)
 	diags = appendSet(diags, d, "name", nsg.Name)
 	diags = appendSet(diags, d, "description", nsg.Description)

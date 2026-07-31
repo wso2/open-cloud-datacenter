@@ -9,6 +9,11 @@ terraform {
 
 provider "dcapi" {}
 
+variable "admin_cidr" {
+  type    = string
+  default = "203.0.113.5/32"
+}
+
 resource "dcapi_project" "proj-s87" {
 
   tenant_id = "tenant-s87"
@@ -61,19 +66,7 @@ resource "dcapi_network_security_group" "nsg-s87" {
       direction                  = "inbound"
       priority                   = 300
       protocol                   = "tcp"
-      source_address_prefix      = "*"
-      source_port_range          = "*"
-      destination_address_prefix = "*"
-      destination_port_range     = "22"
-      action                     = "allow"
-  }
-
-  rules {
-      name                       = "allow-ssh"
-      direction                  = "inbound"
-      priority                   = 100
-      protocol                   = "tcp"
-      source_address_prefix      = "*"
+      source_address_prefix      = var.admin_cidr
       source_port_range          = "*"
       destination_address_prefix = "*"
       destination_port_range     = "22"
@@ -85,7 +78,7 @@ resource "dcapi_network_security_group" "nsg-s87" {
       direction                  = "inbound"
       priority                   = 200
       protocol                   = "tcp"
-      source_address_prefix      = "*"
+      source_address_prefix      = var.admin_cidr
       source_port_range          = "*"
       destination_address_prefix = "*"
       destination_port_range     = "80"

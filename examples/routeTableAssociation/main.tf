@@ -71,9 +71,9 @@ resource "dcapi_route_table" "s87-with-routes" {
 
   routes {
     name             = "route-virtual-appliance"
-    destination_cidr = "192.168.1.0/24"
+    destination_cidr = "172.16.0.0/16"
     next_hop_type    = "virtual_appliance"
-    next_hop_ip      = "10.0.1.5"
+    next_hop_ip      = "10.1.1.5"
   }
 }
 

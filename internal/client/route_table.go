@@ -83,7 +83,6 @@ func (c *DCAPIClient) CreateRouteTable(ctx context.Context, tenantID, projectID,
 // GetRouteTable sends GET .../vnets/{vnetID}/route-tables/{rtID}.
 // Returns (nil, nil) on HTTP 404 — signals drift to the caller.
 // The response includes an Associations field when the route table has subnet associations.
-
 func (c *DCAPIClient) GetRouteTable(ctx context.Context, tenantID, projectID, vnetID, rtID string) (*RouteTableResponse, error) {
 	
 	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/vnets/%s/route-tables/%s", tenantID, projectID, vnetID, rtID)

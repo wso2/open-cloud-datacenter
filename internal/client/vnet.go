@@ -50,6 +50,9 @@ func (c *DCAPIClient) CreateVNet(ctx context.Context, tenantID, projectID string
 	if err := json.Unmarshal(respBytes, &wrapper); err != nil {
 		return nil, fmt.Errorf("CreateVNet: failed to parse response: %w", err)
 	}
+	if wrapper.Resource == nil {
+		return nil, fmt.Errorf("CreateVNet: response missing resource")
+	}
 
 	return wrapper.Resource, nil
 }

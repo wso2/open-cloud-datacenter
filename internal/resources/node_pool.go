@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 // ResourceNodePool returns the schema.Resource for "dcapi_node_pool".
@@ -20,6 +21,9 @@ func ResourceNodePool() *schema.Resource {
 		ReadContext:   resourceNodePoolRead,
 		UpdateContext: resourceNodePoolUpdate,
 		DeleteContext: resourceNodePoolDelete,
+		Importer: &schema.ResourceImporter{
+			StateContext: schema.ImportStatePassthroughContext,
+		},
 
 		Timeouts: &schema.ResourceTimeout{
 			Create: schema.DefaultTimeout(15 * time.Minute),
@@ -73,10 +77,11 @@ func ResourceNodePool() *schema.Resource {
 			// ── Optional + immutable ──
 
 			"disk_gb": {
-				Type:        schema.TypeInt,
-				Optional:    true,
-				ForceNew:    true,
-				Description: "Root disk size in GB. Minimum 40. Defaults to size default if omitted. Immutable.",
+				Type:         schema.TypeInt,
+				Optional:     true,
+				ForceNew:     true,
+				ValidateFunc: validation.IntAtLeast(40),
+				Description:  "Root disk size in GB. Minimum 40. Defaults to size default if omitted. Immutable.",
 			},
 			"image_name": {
 				Type:        schema.TypeString,
@@ -213,6 +218,9 @@ func resourceNodePoolRead(ctx context.Context, d *schema.ResourceData, meta inte
 	}
 
 	var diags diag.Diagnostics
+	diags = appendSet(diags, d, "tenant_id", tenantID)
+	diags = appendSet(diags, d, "project_id", projectID)
+	diags = appendSet(diags, d, "cluster_id", clusterID)
 	diags = appendSet(diags, d, "node_pool_id", pool.ID)
 	diags = appendSet(diags, d, "name", pool.Name)
 	diags = appendSet(diags, d, "role", pool.Role)

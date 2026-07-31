@@ -141,6 +141,7 @@ func ResourceProject() *schema.Resource {
 // resourceProjectCreate calls POST /v1/tenants/{tenant_id}/projects and commits state.
 // d.SetId encodes both slugs as "tenant_id/project_id" so Read/Update/Delete can reconstruct the URL.
 func resourceProjectCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	
 	c := meta.(*client.DCAPIClient)
 
 	tenantID := d.Get("tenant_id").(string)
@@ -169,6 +170,7 @@ func resourceProjectCreate(ctx context.Context, d *schema.ResourceData, meta int
 	d.SetId(fmt.Sprintf("%s/%s", tenantID, project.ID))
 
 	var diags diag.Diagnostics
+	
 	diags = appendSet(diags, d, "project_uuid", project.ProjectUUID)
 	diags = appendSet(diags, d, "tenant_uuid", project.TenantUUID)
 	diags = appendSet(diags, d, "cpu_cores", project.CPUCores)
@@ -181,6 +183,7 @@ func resourceProjectCreate(ctx context.Context, d *schema.ResourceData, meta int
 	diags = appendSet(diags, d, "created_at", project.CreatedAt)
 	diags = appendSet(diags, d, "updated_at", project.UpdatedAt)
 	diags = appendSet(diags, d, "created_by", project.CreatedBy)
+	
 	return diags
 }
 

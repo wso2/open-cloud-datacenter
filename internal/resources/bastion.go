@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"terraform-provider-dcapi/internal/client"
 )
@@ -247,7 +247,7 @@ func resourceBastionDelete(ctx context.Context, d *schema.ResourceData, meta int
 
 // waitForBastionActive polls until the bastion reaches status "ACTIVE" or the timeout expires.
 func waitForBastionActive(ctx context.Context, c *client.DCAPIClient, tenantID, projectID, bastionID string, timeout time.Duration) error {
-	conf := &resource.StateChangeConf{
+	conf := &retry.StateChangeConf{
 		Pending:    []string{"PENDING"},
 		Target:     []string{"ACTIVE"},
 		Timeout:    timeout,
@@ -272,7 +272,7 @@ func waitForBastionActive(ctx context.Context, c *client.DCAPIClient, tenantID, 
 
 // waitForBastionDeleted polls until the bastion is gone (HTTP 404) after an async DELETE.
 func waitForBastionDeleted(ctx context.Context, c *client.DCAPIClient, tenantID, projectID, bastionID string, timeout time.Duration) error {
-	conf := &resource.StateChangeConf{
+	conf := &retry.StateChangeConf{
 		Pending:    []string{"ACTIVE", "DELETING"},
 		Target:     []string{"DELETED"},
 		Timeout:    timeout,

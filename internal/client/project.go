@@ -13,7 +13,6 @@ import (
 
 // ProjectCreateRequest maps to POST /v1/tenants/{tenant_id}/projects body.
 // Fields tagged omitempty are excluded from JSON when zero-valued; the API then applies its defaults.
-
 type ProjectCreateRequest struct {
 	// ID is the user-chosen project slug, e.g. "infra". REQUIRED. Immutable.
 	ID          string `json:"id"`

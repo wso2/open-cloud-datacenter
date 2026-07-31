@@ -5,9 +5,26 @@ terraform {
       version = "~> 0.1.0"
     }
   }
+
+  # State contains the secret value in plaintext — never use the local
+  # backend for this config. Point this at a backend with encryption at
+  # rest and access controls (e.g. an S3 bucket with SSE + a restrictive
+  # bucket policy, or Terraform Cloud/Enterprise).
+  backend "s3" {
+    bucket  = "wso2-dcapi-tfstate"
+    key     = "key_vault_secret/terraform.tfstate"
+    region  = "us-east-1"
+    encrypt = true
+  }
 }
 
 provider "dcapi" {}
+
+variable "db_password" {
+  description = "Value stored in the key vault secret. Pass via TF_VAR_db_password or a secret-backed .tfvars file — never commit a value here."
+  type        = string
+  sensitive   = true
+}
 
 resource "dcapi_key_vault" "prod_secrets" {
   tenant_id  = "tenant-s87"
@@ -27,7 +44,7 @@ resource "dcapi_key_vault_secret" "db_password" {
   key_vault_id = element(split("/", dcapi_key_vault.prod_secrets.id), 2)
 
   key   = "db-password"
-  value = "super-secret-value" # sensitive — updating this bumps `version` in place
+  value = var.db_password # sensitive — updating this bumps `version` in place
 
   metadata = {
     env = "prod"

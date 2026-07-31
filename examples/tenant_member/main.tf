@@ -13,7 +13,7 @@ resource "dcapi_tenant_member" "alice" {
   tenant_id = "tenant-s87"
 
   user_sub      = "auth0|abc123"
-  role          = "member" 
+  role          = "member"
   display_alias = "Alice"
 }
 

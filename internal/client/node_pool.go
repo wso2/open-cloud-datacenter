@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -30,8 +31,8 @@ type NodePoolCreateRequest struct {
 // An empty slice/map clears the existing values; omitting (nil) leaves them unchanged.
 type NodePoolUpdateRequest struct {
 	Count  int               `json:"count"`
-	Taints []NodePoolTaint   `json:"taints"`
-	Labels map[string]string `json:"labels"`
+	Taints []NodePoolTaint   `json:"taints,omitempty"`
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // NodePoolResponse is the shape returned by Create (202) and Read (200).
@@ -70,7 +71,7 @@ func (c *DCAPIClient) CreateNodePool(ctx context.Context, tenantID, projectID, c
 // {poolName} is the string name, not a UUID.
 // Returns (nil, nil) on HTTP 404 — signals drift to the caller.
 func (c *DCAPIClient) GetNodePool(ctx context.Context, tenantID, projectID, clusterID, poolName string) (*NodePoolResponse, error) {
-	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/node-pools/%s", tenantID, projectID, clusterID, poolName)
+	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/node-pools/%s", tenantID, projectID, clusterID, url.PathEscape(poolName))
 	respBytes, err := c.doRequest(ctx, "GET", path, nil)
 	if err != nil {
 		if strings.Contains(err.Error(), "HTTP 404") {
@@ -88,7 +89,7 @@ func (c *DCAPIClient) GetNodePool(ctx context.Context, tenantID, projectID, clus
 // UpdateNodePool sends PATCH .../clusters/{clusterID}/node-pools/{poolName}.
 // count, taints, and labels are the only updatable fields; taints/labels use full-replace semantics.
 func (c *DCAPIClient) UpdateNodePool(ctx context.Context, tenantID, projectID, clusterID, poolName string, req NodePoolUpdateRequest) (*NodePoolResponse, error) {
-	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/node-pools/%s", tenantID, projectID, clusterID, poolName)
+	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/node-pools/%s", tenantID, projectID, clusterID, url.PathEscape(poolName))
 	respBytes, err := c.doRequest(ctx, "PATCH", path, req)
 	if err != nil {
 		return nil, fmt.Errorf("UpdateNodePool: %w", err)
@@ -103,7 +104,7 @@ func (c *DCAPIClient) UpdateNodePool(ctx context.Context, tenantID, projectID, c
 // DeleteNodePool sends DELETE .../clusters/{clusterID}/node-pools/{poolName}.
 // Deletion is async — poll GetNodePool until (nil, nil) to confirm removal.
 func (c *DCAPIClient) DeleteNodePool(ctx context.Context, tenantID, projectID, clusterID, poolName string) error {
-	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/node-pools/%s", tenantID, projectID, clusterID, poolName)
+	path := fmt.Sprintf("/v1/tenants/%s/projects/%s/clusters/%s/node-pools/%s", tenantID, projectID, clusterID, url.PathEscape(poolName))
 	_, err := c.doRequest(ctx, "DELETE", path, nil)
 	if err != nil {
 		return fmt.Errorf("DeleteNodePool (cluster %q, pool %q): %w", clusterID, poolName, err)

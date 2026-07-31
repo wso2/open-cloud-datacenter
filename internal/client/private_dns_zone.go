@@ -47,6 +47,9 @@ func (c *DCAPIClient) CreatePrivateDnsZone(ctx context.Context, tenantID, projec
 	if err := json.Unmarshal(respBytes, &wrapper); err != nil {
 		return nil, fmt.Errorf("CreatePrivateDnsZone: failed to parse response: %w", err)
 	}
+	if wrapper.Resource == nil {
+		return nil, fmt.Errorf("CreatePrivateDnsZone: response missing resource")
+	}
 	return wrapper.Resource, nil
 }
 

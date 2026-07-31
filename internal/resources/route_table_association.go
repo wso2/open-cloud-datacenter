@@ -20,6 +20,9 @@ func ResourceRouteTableAssociation() *schema.Resource {
 		CreateContext: resourceRouteTableAssociationCreate,
 		ReadContext:   resourceRouteTableAssociationRead,
 		DeleteContext: resourceRouteTableAssociationDelete,
+		Importer: &schema.ResourceImporter{
+			StateContext: schema.ImportStatePassthroughContext,
+		},
 
 		Schema: map[string]*schema.Schema{
 
@@ -129,6 +132,10 @@ func resourceRouteTableAssociationRead(ctx context.Context, d *schema.ResourceDa
 		if a.ID == assocID {
 			// Association still exists — refresh computed fields.
 			var diags diag.Diagnostics
+			diags = appendSet(diags, d, "tenant_id", tenantID)
+			diags = appendSet(diags, d, "project_id", projectID)
+			diags = appendSet(diags, d, "vnet_id", vnetID)
+			diags = appendSet(diags, d, "route_table_id", rtID)
 			diags = appendSet(diags, d, "association_id", a.ID)
 			diags = appendSet(diags, d, "subnet_id", a.SubnetID)
 			diags = appendSet(diags, d, "created_at", a.CreatedAt)

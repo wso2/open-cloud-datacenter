@@ -22,6 +22,9 @@ func ResourceServiceAccount() *schema.Resource {
 		CreateContext: resourceServiceAccountCreate,
 		ReadContext:   resourceServiceAccountRead,
 		DeleteContext: resourceServiceAccountDelete,
+		Importer: &schema.ResourceImporter{
+			StateContext: schema.ImportStatePassthroughContext,
+		},
 
 		Schema: map[string]*schema.Schema{
 
@@ -147,6 +150,7 @@ func resourceServiceAccountRead(ctx context.Context, d *schema.ResourceData, met
 	var diags diag.Diagnostics
 	diags = appendSet(diags, d, "sa_id", sa.ID)
 	diags = appendSet(diags, d, "tenant_id", sa.TenantID)
+	diags = appendSet(diags, d, "project_id", projectID)
 	diags = appendSet(diags, d, "name", sa.Name)
 	diags = appendSet(diags, d, "role", sa.Role)
 	diags = appendSet(diags, d, "description", sa.Description)

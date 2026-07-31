@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"terraform-provider-dcapi/internal/client"
 )
@@ -199,7 +199,7 @@ func resourcePrivateDnsZoneDelete(ctx context.Context, d *schema.ResourceData, m
 
 // waitForPrivateDnsZoneActive polls until the zone reaches status "ACTIVE" or timeout.
 func waitForPrivateDnsZoneActive(ctx context.Context, c *client.DCAPIClient, tenantID, projectID, vnetID, zoneID string, timeout time.Duration) error {
-	conf := &resource.StateChangeConf{
+	conf := &retry.StateChangeConf{
 		Pending:    []string{"PENDING"},
 		Target:     []string{"ACTIVE"},
 		Timeout:    timeout,
@@ -225,7 +225,7 @@ func waitForPrivateDnsZoneActive(ctx context.Context, c *client.DCAPIClient, ten
 
 // waitForPrivateDnsZoneDeleted polls until the zone is gone (HTTP 404) after a DELETE call.
 func waitForPrivateDnsZoneDeleted(ctx context.Context, c *client.DCAPIClient, tenantID, projectID, vnetID, zoneID string, timeout time.Duration) error {
-	conf := &resource.StateChangeConf{
+	conf := &retry.StateChangeConf{
 		Pending:    []string{"ACTIVE", "DELETING"},
 		Target:     []string{"DELETED"},
 		Timeout:    timeout,

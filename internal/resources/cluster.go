@@ -84,6 +84,7 @@ func ResourceCluster() *schema.Resource {
 						"disk_gb": {
 							Type:        schema.TypeInt,
 							Optional:    true,
+							Computed:    true,
 							ForceNew:    true,
 							Description: "Root disk size in GB. Minimum 40. Defaults to size default if omitted.",
 						},
@@ -121,6 +122,7 @@ func ResourceCluster() *schema.Resource {
 						"disk_gb": {
 							Type:        schema.TypeInt,
 							Optional:    true,
+							Computed:    true,
 							ForceNew:    true,
 							Description: "Root disk size in GB. Minimum 40.",
 						},

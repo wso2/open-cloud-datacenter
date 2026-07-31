@@ -1,14 +1,4 @@
 // VirtualMachine-related API calls for the DC-API client.
-// VMs sit directly under projects in the hierarchy — the API path is
-// /v1/tenants/{t}/projects/{p}/virtual-machines/{vm_id}. In VPC mode, vnet_id and
-// subnet_id are JSON body fields (not URL path components), unlike Subnet which nests inside VNet URLs.
-//
-// VMs support two mutually EXCLUSIVE networking modes — only one may be used per VM:
-//   Option A — Legacy bridge mode: provide network_name (e.g. "iaas/vm-network-001")
-//   Option B — VPC mode:           provide BOTH vnet_id AND subnet_id
-//
-//	Option A — Legacy bridge mode: provide network_name (e.g. "iaas/vm-network-001")
-//	Option B — VPC mode:           provide BOTH vnet_id AND subnet_id
 package client
 
 import (
@@ -21,35 +11,13 @@ import (
 // VMCreateRequest maps to POST /v1/tenants/{tenant_id}/projects/{project_id}/virtual-machines.
 // network_name and (vnet_id + subnet_id) are mutually exclusive networking modes.
 type VMCreateRequest struct {
-	// Name is the hostname label for this VM. REQUIRED. Maximum 63 characters.
+	
 	Name string `json:"name"`
-
-	// Size determines the fixed CPU/RAM bundle. REQUIRED.
-	// Valid values: "small" (2vCPU/8GB RAM), "medium" (4/16), "large" (8/32), "xlarge" (16/64).
-	// The resource layer validates this before the API call; the API would also reject invalid values.
 	Size string `json:"size"`
-
-	// DiskGB is the boot disk size in gigabytes. OPTIONAL.
-	// When 0 (zero value for int), omitempty omits it from JSON and the API uses the
-	// size-specific default disk size (minimum 10 GB for VMs).
 	DiskGB int `json:"disk_gb,omitempty"`
-
-	// ImageName is the VM image identifier in "namespace/resource-name" format. REQUIRED.
-	// Example: "rancher-infra/ubuntu-22-04". Get valid values from the Image data source.
 	ImageName string `json:"image_name"`
-
-	// NetworkName is the legacy bridge-mode network identifier (e.g. "iaas/vm-network-001").
-	// OPTION A — mutually exclusive with VNetID and SubnetID.
-	// omitempty sends this field ONLY when the user provides it. When VPC mode is used,
-	// this is empty string (the zero value) so omitempty drops it from the JSON body entirely.
 	NetworkName string `json:"network_name,omitempty"`
-
-	// VNetID is the UUID of the VNet in VPC mode. OPTION B (requires SubnetID too).
-	// Mutually exclusive with NetworkName. omitempty drops it when empty.
 	VNetID string `json:"vnet_id,omitempty"`
-
-	// SubnetID is the UUID of the Subnet in VPC mode. OPTION B (requires VNetID too).
-	// Mutually exclusive with NetworkName. omitempty drops it when empty.
 	SubnetID string `json:"subnet_id,omitempty"`
 }
 
@@ -61,7 +29,7 @@ type VMResource struct {
 	Status       string `json:"status"`
 	TenantID     string `json:"tenant_id"`
 	ProviderType string `json:"provider_type"`
-	IPAddress    string `json:"ip_address"` // empty until ACTIVE
+	IPAddress    string `json:"ip_address"` 
 	Message      string `json:"message"`
 	CreatedAt    string `json:"created_at"`
 }
@@ -105,6 +73,9 @@ func (c *DCAPIClient) CreateVM(ctx context.Context, tenantID, projectID string, 
 	var resp VMCreateResponse
 	if err := json.Unmarshal(respBytes, &resp); err != nil {
 		return nil, fmt.Errorf("CreateVM: failed to parse response: %w", err)
+	}
+	if resp.Resource == nil || resp.Resource.ID == "" {
+		return nil, fmt.Errorf("CreateVM: response missing resource.id")
 	}
 
 	return &resp, nil
