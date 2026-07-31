@@ -73,7 +73,7 @@ output "cluster_status" {
   description = "Current cluster status."
 }
 
-# Retrieve with: (umask 077; terraform output -raw kubeconfig > ~/.kube/prod.yaml)
+# Retrieve with: mkdir -p -m 700 ~/.kube && install -m 600 /dev/null ~/.kube/prod.yaml && terraform output -raw kubeconfig > ~/.kube/prod.yaml
 output "kubeconfig" {
   value       = dcapi_cluster.cluster-s87.kubeconfig
   sensitive   = true

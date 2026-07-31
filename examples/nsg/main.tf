@@ -10,8 +10,7 @@ terraform {
 provider "dcapi" {}
 
 variable "admin_cidr" {
-  type    = string
-  default = "203.0.113.5/32"
+  type = string
 }
 
 resource "dcapi_project" "proj-s87" {
