@@ -384,8 +384,9 @@ func (r *RegistryInstanceReconciler) transient(ctx context.Context, cr *registry
 	return ctrl.Result{}, cause
 }
 
-// fail is a terminal spec error: sets Failed and stops retrying — only a
-// spec edit can resolve it.
+// fail marks a spec error that retrying cannot resolve: sets Failed and stops
+// requeueing. Only for causes traceable to the spec, since editing it
+// re-triggers reconcile through the watch.
 func (r *RegistryInstanceReconciler) fail(ctx context.Context, cr *registryv1alpha1.RegistryInstance, step string, cause error) (ctrl.Result, error) {
 	msg := fmt.Sprintf("%s: %v", step, cause)
 	r.Recorder.Event(cr, corev1.EventTypeWarning, reasonError, msg)

@@ -115,7 +115,10 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		Plan:          tplan,
 	})
 	if err != nil {
-		return r.fail(ctx, &cr, "generate values", err)
+		// Rendering only fails on a template defect, which no spec edit can
+		// resolve — keep retrying so the error stays visible in logs and
+		// metrics rather than going silent after one report.
+		return r.transient(ctx, &cr, secretName, "generate values", err)
 	}
 	if err := r.Helm.Install(ctx, tenantID, harborNS, values); err != nil {
 		return r.transient(ctx, &cr, secretName, "helm install/upgrade", err)
@@ -465,7 +468,9 @@ func (r *RegistryBackendReconciler) transient(ctx context.Context, cr *registryv
 	return ctrl.Result{}, cause
 }
 
-// fail is a terminal spec error: sets Failed and returns the error.
+// fail marks a spec error that retrying cannot resolve: sets Failed and stops
+// requeueing. Only for causes traceable to the spec, since editing it
+// re-triggers reconcile through the watch.
 func (r *RegistryBackendReconciler) fail(ctx context.Context, cr *registryv1alpha1.RegistryBackend, step string, cause error) (ctrl.Result, error) {
 	msg := fmt.Sprintf("%s: %v", step, cause)
 	r.Recorder.Event(cr, corev1.EventTypeWarning, reasonError, msg)
