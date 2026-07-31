@@ -20,6 +20,9 @@ func ResourceNSGAttachment() *schema.Resource {
 		CreateContext: resourceNSGAttachmentCreate,
 		ReadContext:   resourceNSGAttachmentRead,
 		DeleteContext: resourceNSGAttachmentDelete,
+		Importer: &schema.ResourceImporter{
+			StateContext: schema.ImportStatePassthroughContext,
+		},
 
 		Schema: map[string]*schema.Schema{
 
@@ -128,6 +131,9 @@ func resourceNSGAttachmentRead(ctx context.Context, d *schema.ResourceData, meta
 	for _, a := range nsg.Attachments {
 		if a.ID == attachmentID {
 			var diags diag.Diagnostics
+			diags = appendSet(diags, d, "tenant_id", tenantID)
+			diags = appendSet(diags, d, "project_id", projectID)
+			diags = appendSet(diags, d, "sg_id", sgID)
 			diags = appendSet(diags, d, "attachment_id", a.ID)
 			diags = appendSet(diags, d, "target_type", a.TargetType)
 			diags = appendSet(diags, d, "target_id", a.TargetID)

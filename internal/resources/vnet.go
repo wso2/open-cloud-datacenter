@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"terraform-provider-dcapi/internal/client"
 )
@@ -244,7 +244,7 @@ func resourceVNetDelete(ctx context.Context, d *schema.ResourceData, meta interf
 
 // waitForVNetActive polls GET /vnets/{vnetID} until status reaches "ACTIVE" or the timeout expires.
 func waitForVNetActive(ctx context.Context, c *client.DCAPIClient, tenantID, projectID, vnetID string, timeout time.Duration) error {
-	conf := &resource.StateChangeConf{
+	conf := &retry.StateChangeConf{
 		Pending:    []string{"PENDING"},
 		Target:     []string{"ACTIVE"},
 		Timeout:    timeout,
@@ -271,7 +271,7 @@ func waitForVNetActive(ctx context.Context, c *client.DCAPIClient, tenantID, pro
 // waitForVNetDeleted polls GET /vnets/{vnetID} until the API returns HTTP 404,
 // confirming that the async deletion is complete.
 func waitForVNetDeleted(ctx context.Context, c *client.DCAPIClient, tenantID, projectID, vnetID string, timeout time.Duration) error {
-	conf := &resource.StateChangeConf{
+	conf := &retry.StateChangeConf{
 		// "ACTIVE" is included because the GET may briefly return ACTIVE before DC-API moves the VNet to DELETING.
 		Pending:    []string{"ACTIVE", "DELETING"},
 		Target:     []string{"DELETED"},

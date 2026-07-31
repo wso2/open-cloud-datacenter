@@ -28,7 +28,7 @@ func DataSourceProject() *schema.Resource {
 				Required:    true,
 				Description: "Slug of the parent tenant.",
 			},
-			"id": {
+			"project_id": {
 				Type:        schema.TypeString,
 				Required:    true,
 				Description: "Slug of the project to look up.",
@@ -113,7 +113,7 @@ func dataSourceProjectRead(ctx context.Context, d *schema.ResourceData, meta int
 	c := meta.(*client.DCAPIClient)
 
 	tenantID := d.Get("tenant_id").(string)
-	id := d.Get("id").(string)
+	id := d.Get("project_id").(string)
 
 	project, err := c.GetProjectByID(ctx, tenantID, id)
 	

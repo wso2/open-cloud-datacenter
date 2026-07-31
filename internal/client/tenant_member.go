@@ -7,6 +7,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"fmt"
 )
 
@@ -68,7 +69,7 @@ func (c *DCAPIClient) ListTenantMembers(ctx context.Context, tenantID string) ([
 // principalID is the OIDC sub string (TenantMemberResponse.PrincipalID) — NOT the
 // role_assignment UUID returned in the "id" field.
 func (c *DCAPIClient) DeleteTenantMember(ctx context.Context, tenantID, principalID string) error {
-	path := fmt.Sprintf("/v1/tenants/%s/members/%s", tenantID, principalID)
+	path := fmt.Sprintf("/v1/tenants/%s/members/%s", tenantID, url.PathEscape(principalID))
 
 	_, err := c.doRequest(ctx, "DELETE", path, nil)
 	if err != nil {

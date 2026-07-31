@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"terraform-provider-dcapi/internal/client"
 )
@@ -226,7 +226,7 @@ func resourceVNetPeeringDelete(ctx context.Context, d *schema.ResourceData, meta
 
 // waitForVNetPeeringActive polls until the peering reaches status "ACTIVE" or timeout.
 func waitForVNetPeeringActive(ctx context.Context, c *client.DCAPIClient, tenantID, projectID, vnetID, peeringID string, timeout time.Duration) error {
-	conf := &resource.StateChangeConf{
+	conf := &retry.StateChangeConf{
 		Pending:    []string{"PENDING"},
 		Target:     []string{"ACTIVE"},
 		Timeout:    timeout,
@@ -252,7 +252,7 @@ func waitForVNetPeeringActive(ctx context.Context, c *client.DCAPIClient, tenant
 
 // waitForVNetPeeringDeleted polls until the peering is gone (HTTP 404) after a DELETE call.
 func waitForVNetPeeringDeleted(ctx context.Context, c *client.DCAPIClient, tenantID, projectID, vnetID, peeringID string, timeout time.Duration) error {
-	conf := &resource.StateChangeConf{
+	conf := &retry.StateChangeConf{
 		Pending:    []string{"ACTIVE", "DELETING"},
 		Target:     []string{"DELETED"},
 		Timeout:    timeout,

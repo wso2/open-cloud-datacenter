@@ -52,6 +52,9 @@ func (c *DCAPIClient) CreateSubnet(ctx context.Context, tenantID, projectID, vne
 	if err := json.Unmarshal(respBytes, &wrapper); err != nil {
 		return nil, fmt.Errorf("CreateSubnet: failed to parse response: %w", err)
 	}
+	if wrapper.Resource == nil {
+		return nil, fmt.Errorf("CreateSubnet: response missing resource")
+	}
 
 	return wrapper.Resource, nil
 }

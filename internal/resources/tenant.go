@@ -51,19 +51,19 @@ func ResourceTenant() *schema.Resource {
 			"cpu_cores_cap": {
 				Type:        schema.TypeInt,
 				Optional:    true,
-				Default:     0,
+				Computed:    true,
 				Description: "CPU core quota ceiling. 0 = platform default (80). Updatable.",
 			},
 			"memory_gb_cap": {
 				Type:        schema.TypeInt,
 				Optional:    true,
-				Default:     0,
+				Computed:    true,
 				Description: "Memory quota ceiling in GB. 0 = platform default (256). Updatable.",
 			},
 			"storage_gb_cap": {
 				Type:        schema.TypeInt,
 				Optional:    true,
-				Default:     0,
+				Computed:    true,
 				Description: "Storage quota ceiling in GB. 0 = platform default (2000). Updatable.",
 			},
 

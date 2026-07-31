@@ -51,6 +51,9 @@ func (c *DCAPIClient) CreateVNetPeering(ctx context.Context, tenantID, projectID
 	if err := json.Unmarshal(respBytes, &wrapper); err != nil {
 		return nil, fmt.Errorf("CreateVNetPeering: failed to parse response: %w", err)
 	}
+	if wrapper.Resource == nil {
+		return nil, fmt.Errorf("CreateVNetPeering: response missing resource")
+	}
 	return wrapper.Resource, nil
 }
 

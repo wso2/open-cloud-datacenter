@@ -63,7 +63,7 @@ Refresh:           No DC-API refresh endpoint; client re-authenticates via Asgar
 Login endpoint:    GET /v1/auth/login (browser/BFF flow only — not suitable for provider use)
 ```
 
-**For Terraform**: use a service account token. It is long-lived, never expires unless the SA is deleted, and requires no OIDC flow. Create a dedicated SA with at minimum `member` role; use `owner` role only if the provider needs to manage members or service accounts.
+**For Terraform**: use a service account token. It is long-lived, never expires unless the SA is deleted, and requires no OIDC flow. Tenant operations (create/update) are admin-only and require the `is_admin` claim regardless of SA role; for project/resource-level management, create a dedicated SA with at minimum `member` role, and use `owner` role only if the provider needs to manage members or service accounts.
 
 Service account token format: `dcapi_sa_<lookup_id>_<secret>`
 Pass as: `Authorization: Bearer dcapi_sa_<lookup_id>_<secret>`
@@ -2176,13 +2176,11 @@ An NSG must exist before attaching. A subnet must exist before attaching. The at
 
 ### 12. Provider authentication
 
-Create a dedicated ServiceAccount with `member` role for the provider's own API calls. Store the token in the provider configuration block and pass it as `Authorization: Bearer <token>`. The token does not expire unless the SA is deleted.
+Create a dedicated ServiceAccount for the provider's own API calls; `member` role is sufficient for project/resource-level management. Tenant operations (create/update) are admin-only and require the `is_admin` claim regardless of SA role. Store the token in the provider configuration block and pass it as `Authorization: Bearer <token>`. The token does not expire unless the SA is deleted.
 
 ```hcl
 provider "dcapi" {
-  endpoint   = "https://dcapi.example.com"
-  token      = var.dcapi_sa_token   # dcapi_sa_<lookup_id>_<secret>
-  tenant_id  = "my-org"
-  project_id = "my-project"
+  endpoint = "https://dcapi.example.com"
+  token    = var.dcapi_sa_token   # dcapi_sa_<lookup_id>_<secret>
 }
 ```

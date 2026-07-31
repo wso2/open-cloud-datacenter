@@ -1,7 +1,7 @@
 OS   = $(shell go env GOOS)
 ARCH = $(shell go env GOARCH)
 
-BINARY      = terraform-provider-dcapi
+BINARY      = terraform-provider-dcapi_v0.1.0
 INSTALL_DIR = $(HOME)/.terraform.d/plugins/registry.terraform.io/wso2/dcapi/0.1.0/$(OS)_$(ARCH)
 
 build:

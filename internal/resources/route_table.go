@@ -18,6 +18,10 @@ func ResourceRouteTable() *schema.Resource {
 		ReadContext:   resourceRouteTableRead,
 		UpdateContext: resourceRouteTableUpdate,
 		DeleteContext: resourceRouteTableDelete,
+		CustomizeDiff: routeTableCustomizeDiff,
+		Importer: &schema.ResourceImporter{
+			StateContext: schema.ImportStatePassthroughContext,
+		},
 
 		Schema: map[string]*schema.Schema{
 
@@ -176,6 +180,9 @@ func resourceRouteTableRead(ctx context.Context, d *schema.ResourceData, meta in
 	}
 
 	var diags diag.Diagnostics
+	diags = appendSet(diags, d, "tenant_id", tenantID)
+	diags = appendSet(diags, d, "project_id", projectID)
+	diags = appendSet(diags, d, "vnet_id", vnetID)
 	diags = appendSet(diags, d, "route_table_id", rt.ID)
 	diags = appendSet(diags, d, "name", rt.Name)
 	diags = appendSet(diags, d, "description", rt.Description)
@@ -230,6 +237,27 @@ func resourceRouteTableDelete(ctx context.Context, d *schema.ResourceData, meta 
 }
 
 // expandRouteEntries converts the Terraform routes list to []client.RouteEntry.
+// routeTableCustomizeDiff enforces that next_hop_ip is set only when
+// next_hop_type is "virtual_appliance" — the API's actual constraint, which
+// isn't otherwise expressible via per-field ValidateFunc since it depends on
+// a sibling field within the same route entry.
+func routeTableCustomizeDiff(ctx context.Context, d *schema.ResourceDiff, meta interface{}) error {
+	routes := d.Get("routes").([]interface{})
+	for i, v := range routes {
+		m := v.(map[string]interface{})
+		hopType := m["next_hop_type"].(string)
+		hopIP, _ := m["next_hop_ip"].(string)
+
+		if hopType == "virtual_appliance" && hopIP == "" {
+			return fmt.Errorf("routes[%d]: next_hop_ip is required when next_hop_type is \"virtual_appliance\"", i)
+		}
+		if hopType != "virtual_appliance" && hopIP != "" {
+			return fmt.Errorf("routes[%d]: next_hop_ip must not be set when next_hop_type is %q", i, hopType)
+		}
+	}
+	return nil
+}
+
 func expandRouteEntries(raw []interface{}) []client.RouteEntry {
 	if len(raw) == 0 {
 		return nil
