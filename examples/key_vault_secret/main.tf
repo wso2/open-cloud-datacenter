@@ -7,13 +7,15 @@ terraform {
   }
 
   # State contains the secret value in plaintext — never use the local
-  # backend for this config. Point this at a backend with encryption at
-  # rest and access controls (e.g. an S3 bucket with SSE + a restrictive
-  # bucket policy, or Terraform Cloud/Enterprise).
+  # backend for this config. Encryption (below) protects data at rest but
+  # does not provide per-deployment isolation or access control on its own;
+  # each deployment MUST supply its own bucket (with a restrictive bucket
+  # policy) and a unique key, e.g. via:
+  #   terraform init \
+  #     -backend-config="bucket=<your-tfstate-bucket>" \
+  #     -backend-config="key=key_vault_secret/<deployment>/terraform.tfstate" \
+  #     -backend-config="region=<your-region>"
   backend "s3" {
-    bucket  = "wso2-dcapi-tfstate"
-    key     = "key_vault_secret/terraform.tfstate"
-    region  = "us-east-1"
     encrypt = true
   }
 }
