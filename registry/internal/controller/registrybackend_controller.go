@@ -83,22 +83,25 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		plan = "starter"
 	}
 
-	// 1. Ensure the full pinned Harbor credential set exists in an owned Secret
-	// (admin + db passwords and the chart's internal keys — pinned so that
+	// 1. Ensure the tenant's Harbor namespace (<tenantID>-management) exists.
+	// Harbor's pods live here, so the credential Secret must be created here
+	// too — a pod can only read Secrets from its own namespace.
+	harborNS := harborNamespace(tenantID)
+	if err := r.ensureNamespace(ctx, harborNS); err != nil {
+		return r.transient(ctx, &cr, "", "ensure Harbor namespace", err)
+	}
+
+	// 2. Ensure the full pinned Harbor credential set exists in an operator-owned
+	// Secret (admin + db passwords and the chart's internal keys — pinned so that
 	// re-rendered values are deterministic and upgrades never rotate secrets).
-	secrets, secretName, err := r.ensureAdminSecret(ctx, &cr)
+	secrets, secretName, err := r.ensureAdminSecret(ctx, &cr, harborNS)
 	if err != nil {
 		return r.transient(ctx, &cr, "", "ensure admin secret", err)
 	}
 
-	// 2. Ensure the tenant's Harbor namespace (<tenantID>-management) exists,
-	// then render values and converge the Helm release (install when missing,
+	// 3. Render values and converge the Helm release (install when missing,
 	// upgrade when the desired values drift from the deployed ones — e.g. a
 	// plan change; no-op otherwise).
-	harborNS := harborNamespace(tenantID)
-	if err := r.ensureNamespace(ctx, harborNS); err != nil {
-		return r.transient(ctx, &cr, secretName, "ensure Harbor namespace", err)
-	}
 	tplan, err := helm.PlanFor(plan)
 	if err != nil {
 		return r.fail(ctx, &cr, "resolve plan", err)
@@ -203,9 +206,9 @@ var harborSecretGenerators = map[string]func() (string, error){
 // yet present (e.g. one added to harborSecretGenerators after this Secret was
 // first created) is generated and added on a later reconcile; existing keys
 // are never overwritten, so live credentials are never silently rotated.
-func (r *RegistryBackendReconciler) ensureAdminSecret(ctx context.Context, cr *registryv1alpha1.RegistryBackend) (harborSecrets, string, error) {
+func (r *RegistryBackendReconciler) ensureAdminSecret(ctx context.Context, cr *registryv1alpha1.RegistryBackend, namespace string) (harborSecrets, string, error) {
 	name := cr.Name + "-harbor-admin"
-	key := client.ObjectKey{Namespace: cr.Namespace, Name: name}
+	key := client.ObjectKey{Namespace: namespace, Name: name}
 
 	var sec corev1.Secret
 	err := r.Get(ctx, key, &sec)
@@ -234,7 +237,12 @@ func (r *RegistryBackendReconciler) ensureAdminSecret(ctx context.Context, cr *r
 		}
 	case apierrors.IsNotFound(err):
 		sec = corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cr.Namespace},
+			// No owner reference: owner references cannot cross namespaces, and
+			// this Secret lives in the tenant's Harbor namespace while the CR
+			// lives in the operator's. Removal is handled by the finalizer under
+			// reclaimPolicy: Delete — under Retain it must survive, since the
+			// encryption key is required to read the retained volumes.
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 			Type:       corev1.SecretTypeOpaque,
 			Data:       map[string][]byte{},
 		}
@@ -244,9 +252,6 @@ func (r *RegistryBackendReconciler) ensureAdminSecret(ctx context.Context, cr *r
 				return harborSecrets{}, "", gerr
 			}
 			sec.Data[k] = []byte(v)
-		}
-		if cerr := controllerutil.SetControllerReference(cr, &sec, r.Scheme); cerr != nil {
-			return harborSecrets{}, "", cerr
 		}
 		if cerr := r.Create(ctx, &sec); cerr != nil {
 			if !apierrors.IsAlreadyExists(cerr) {
@@ -353,11 +358,20 @@ func (r *RegistryBackendReconciler) handleDelete(ctx context.Context, cr *regist
 	}
 
 	// Reclaim data if requested (Helm keeps PVCs via resourcePolicy: keep).
+	// The credential Secret goes with it: under Retain it must stay, because
+	// its encryption key is needed to read the retained volumes.
 	if cr.Spec.ReclaimPolicy == reclaimDelete {
 		if err := r.deletePVCs(ctx, cr); err != nil {
 			return ctrl.Result{}, fmt.Errorf("delete pvcs: %w", err)
 		}
-		log.Info("reclaimed Harbor PVCs", "tenant", cr.Spec.TenantID)
+		sec := corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+			Name:      cr.Name + "-harbor-admin",
+			Namespace: harborNamespace(cr.Spec.TenantID),
+		}}
+		if err := r.Delete(ctx, &sec); err != nil && !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("delete admin secret: %w", err)
+		}
+		log.Info("reclaimed Harbor PVCs and credentials", "tenant", cr.Spec.TenantID)
 	}
 
 	controllerutil.RemoveFinalizer(cr, backendFinalizer)

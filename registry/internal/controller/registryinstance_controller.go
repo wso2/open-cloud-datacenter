@@ -75,7 +75,7 @@ func (r *RegistryInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// 2. Read the Backend's admin password. Key name matches what the Backend
 	// controller stores it under — HARBOR_ADMIN_PASSWORD, the exact key Harbor's
 	// chart itself requires when read via existingSecretAdminPassword.
-	adminPass, err := r.readSecretKey(ctx, backend.Namespace, backend.Status.AdminSecretName, "HARBOR_ADMIN_PASSWORD")
+	adminPass, err := r.readSecretKey(ctx, harborNamespace(backend.Spec.TenantID), backend.Status.AdminSecretName, "HARBOR_ADMIN_PASSWORD")
 	if err != nil {
 		return r.transient(ctx, &cr, "read backend admin secret", err)
 	}
@@ -244,7 +244,7 @@ func (r *RegistryInstanceReconciler) cleanupUpstream(ctx context.Context, cr *re
 	if backend.Status.Phase != phaseReady || backend.Status.AdminSecretName == "" {
 		return nil // nothing reachable to clean up
 	}
-	adminPass, err := r.readSecretKey(ctx, backend.Namespace, backend.Status.AdminSecretName, "HARBOR_ADMIN_PASSWORD")
+	adminPass, err := r.readSecretKey(ctx, harborNamespace(backend.Spec.TenantID), backend.Status.AdminSecretName, "HARBOR_ADMIN_PASSWORD")
 	if err != nil {
 		return err
 	}

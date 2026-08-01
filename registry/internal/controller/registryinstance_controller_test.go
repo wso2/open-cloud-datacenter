@@ -241,15 +241,18 @@ func TestCleanupUpstream_ReadsCorrectAdminSecretKey(t *testing.T) {
 
 	backend := &registryv1alpha1.RegistryBackend{
 		ObjectMeta: metav1.ObjectMeta{Name: "rb-acme", Namespace: "registry-system"},
+		Spec:       registryv1alpha1.RegistryBackendSpec{TenantID: "acme"},
 		Status: registryv1alpha1.RegistryBackendStatus{
 			Phase:           phaseReady,
 			AdminSecretName: "rb-acme-harbor-admin",
 			RegistryURL:     srv.URL,
 		},
 	}
-	// Must match the key registrybackend_controller.go's harborSecretGenerators writes.
+	// Lives in the tenant's Harbor namespace, not the CR's — Harbor's pods can
+	// only read Secrets from their own namespace. Key must match what
+	// registrybackend_controller.go's harborSecretGenerators writes.
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "rb-acme-harbor-admin", Namespace: "registry-system"},
+		ObjectMeta: metav1.ObjectMeta{Name: "rb-acme-harbor-admin", Namespace: harborNamespace("acme")},
 		Data:       map[string][]byte{"HARBOR_ADMIN_PASSWORD": []byte("s3cr3t")},
 	}
 	instance := &registryv1alpha1.RegistryInstance{
