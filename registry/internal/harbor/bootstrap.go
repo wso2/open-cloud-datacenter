@@ -158,6 +158,54 @@ func (c *Client) EnsureProjectQuota(ctx context.Context, projectID, storageLimit
 	return nil
 }
 
+// StorageTotals is the storage committed to and consumed by every project in a
+// Harbor instance.
+type StorageTotals struct {
+	// Committed is the sum of every project's hard storage limit. Projects with
+	// an unlimited quota (-1) are excluded, since they cannot be summed.
+	Committed int64
+	// Used is the sum of every project's actual consumption.
+	Used int64
+	// Unlimited counts projects whose quota is -1.
+	Unlimited int
+}
+
+// ProjectStorageTotals sums the hard limits and usage of every project quota in
+// Harbor. Harbor reports both on the quota object, so capacity planning needs
+// no metrics pipeline.
+func (c *Client) ProjectStorageTotals(ctx context.Context) (StorageTotals, error) {
+	var totals StorageTotals
+
+	// Harbor paginates; page_size is capped at 100.
+	for page := 1; ; page++ {
+		var quotas []struct {
+			Hard struct {
+				Storage int64 `json:"storage"`
+			} `json:"hard"`
+			Used struct {
+				Storage int64 `json:"storage"`
+			} `json:"used"`
+		}
+		path := fmt.Sprintf("/api/v2.0/quotas?reference=project&page=%d&page_size=100", page)
+		if err := c.get(ctx, path, &quotas, http.StatusOK); err != nil {
+			return StorageTotals{}, fmt.Errorf("list project quotas page %d: %w", page, err)
+		}
+		for _, q := range quotas {
+			if q.Hard.Storage < 0 {
+				totals.Unlimited++
+			} else {
+				totals.Committed += q.Hard.Storage
+			}
+			if q.Used.Storage > 0 {
+				totals.Used += q.Used.Storage
+			}
+		}
+		if len(quotas) < 100 {
+			return totals, nil
+		}
+	}
+}
+
 // CreateProjectRobotAccount creates a project-scoped robot account with push/pull/delete.
 // The robot can only operate within the named Harbor project (not system-wide).
 func (c *Client) CreateProjectRobotAccount(ctx context.Context, projectName, robotName string) (*RobotAccount, error) {

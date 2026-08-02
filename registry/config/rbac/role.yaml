@@ -76,8 +76,8 @@ rules:
 - apiGroups:
   - registry.opencloud.wso2.com
   resources:
+  - registries
   - registrybackends
-  - registryinstances
   verbs:
   - create
   - delete
@@ -89,15 +89,15 @@ rules:
 - apiGroups:
   - registry.opencloud.wso2.com
   resources:
+  - registries/finalizers
   - registrybackends/finalizers
-  - registryinstances/finalizers
   verbs:
   - update
 - apiGroups:
   - registry.opencloud.wso2.com
   resources:
+  - registries/status
   - registrybackends/status
-  - registryinstances/status
   verbs:
   - get
   - patch

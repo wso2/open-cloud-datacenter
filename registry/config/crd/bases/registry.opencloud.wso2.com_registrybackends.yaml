@@ -11,8 +11,10 @@ spec:
     kind: RegistryBackend
     listKind: RegistryBackendList
     plural: registrybackends
+    shortNames:
+    - rb
     singular: registrybackend
-  scope: Namespaced
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.tenantID
@@ -21,6 +23,12 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .status.effectivePlan
+      name: Plan
+      type: string
+    - jsonPath: .status.registryCount
+      name: Registries
+      type: integer
     - jsonPath: .status.registryURL
       name: URL
       type: string
@@ -31,9 +39,13 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          RegistryBackend is the per-tenant shared Harbor deployment. One Backend per tenant;
-          all of that tenant's RegistryInstances (datacenter projects) share it.
-          dc-api creates this CR lazily on the first registry create for a tenant.
+          RegistryBackend is one tenant's Harbor deployment, shared by every Registry
+          in that tenant's namespaces.
+
+          It is created by the operator when a tenant's first Registry appears and is
+          never created or edited by tenants — it is cluster-scoped infrastructure,
+          like a PersistentVolume, and carries the settings that belong to the whole
+          deployment rather than to any one registry.
         properties:
           apiVersion:
             description: |-
@@ -56,13 +68,36 @@ spec:
             description: RegistryBackendSpec is the desired state of a tenant's Harbor
               deployment.
             properties:
+              autoscale:
+                default:
+                  enabled: true
+                description: |-
+                  Autoscale raises the deployment size when the storage committed to the
+                  tenant's registries approaches what is provisioned. Growth is permanent,
+                  since PersistentVolumeClaims cannot shrink.
+                properties:
+                  committedThresholdPercent:
+                    default: 80
+                    description: |-
+                      CommittedThresholdPercent is the share of provisioned registry storage
+                      that may be committed to registry quotas before the plan is raised.
+                    format: int32
+                    maximum: 100
+                    minimum: 50
+                    type: integer
+                  enabled:
+                    default: true
+                    description: Enabled turns automatic growth on.
+                    type: boolean
+                required:
+                - enabled
+                type: object
               plan:
                 default: starter
                 description: |-
-                  Plan selects the Harbor resource profile. Upgrades only
-                  (starter -> professional -> enterprise): a downgrade would imply
-                  shrinking PVCs, which Kubernetes cannot do. Enforced at admission by the
-                  CEL transition rule below (evaluated on UPDATE only).
+                  Plan is the floor for deployment sizing. The operator may size above it
+                  when Autoscale is enabled, never below. Upgrade-only, because sizing
+                  expands PersistentVolumeClaims and Kubernetes cannot shrink them.
                 enum:
                 - starter
                 - professional
@@ -76,18 +111,18 @@ spec:
               reclaimPolicy:
                 default: Retain
                 description: |-
-                  ReclaimPolicy controls what happens to Harbor's data (PVCs) when this
-                  Backend is deleted. Retain (default) leaves the PVCs on disk; Delete
-                  removes them. Retain is the safe default for a registry.
+                  ReclaimPolicy controls what happens to Harbor's PersistentVolumeClaims
+                  and credentials when this backend is deleted. Retain keeps them, which is
+                  the safe default for a registry holding images.
                 enum:
                 - Retain
                 - Delete
                 type: string
               tenantID:
                 description: |-
-                  TenantID is the unique identifier for the tenant, deriving the Harbor
-                  Helm release, namespace, and URL. Immutable — changing it would
-                  repoint the Backend at a new Harbor target without reclaiming the old one.
+                  TenantID is the Harvester project this Harbor serves. It derives the
+                  Harbor namespace, Helm release, and URL, so changing it would repoint the
+                  deployment without reclaiming the old one.
                 type: string
                 x-kubernetes-validations:
                 - message: tenantID is immutable
@@ -101,9 +136,16 @@ spec:
             properties:
               adminSecretName:
                 description: |-
-                  AdminSecretName is the name (in this namespace) of the Secret holding
-                  Harbor's admin + database passwords. Owned by this CR.
+                  AdminSecretName is the Secret in HarborNamespace holding Harbor's pinned
+                  credentials.
                 type: string
+              committedStorageBytes:
+                description: |-
+                  CommittedStorageBytes is the total storage committed to this tenant's
+                  registry quotas, which is what autoscaling compares against provisioned
+                  capacity.
+                format: int64
+                type: integer
               conditions:
                 description: Conditions holds standard Kubernetes status conditions.
                 items:
@@ -161,30 +203,51 @@ spec:
                   - type
                   type: object
                 type: array
+              effectivePlan:
+                description: |-
+                  EffectivePlan is the size actually deployed: the greater of spec.plan and
+                  what autoscaling has determined is needed. Sizing reads this, not
+                  spec.plan, so growth never rewrites the spec the admin authored.
+                enum:
+                - starter
+                - professional
+                - enterprise
+                type: string
+              harborNamespace:
+                description: HarborNamespace is where the Harbor deployment and its
+                  credentials live.
+                type: string
               message:
-                description: Message contains error details when Phase is Failed.
+                description: Message describes the current phase, including why it
+                  is not Ready.
                 type: string
               observedGeneration:
-                description: |-
-                  ObservedGeneration is the .metadata.generation the controller last
-                  reconciled. When it equals .metadata.generation the latest spec has
-                  been processed.
+                description: ObservedGeneration is the .metadata.generation last reconciled.
                 format: int64
                 type: integer
               phase:
-                description: |-
-                  Phase is the lifecycle state of the Harbor deployment. Empty until the
-                  first reconcile.
+                description: Phase is the lifecycle state. Empty until the first reconcile.
                 enum:
                 - Provisioning
                 - Ready
                 - Failed
                 - Terminating
                 type: string
+              registryCount:
+                description: |-
+                  RegistryCount is how many Registry objects this backend serves. Zero
+                  means it is idle and safe for an administrator to remove.
+                format: int32
+                type: integer
               registryURL:
-                description: RegistryURL is the Harbor portal URL, populated when
-                  Phase is Ready.
+                description: RegistryURL is the Harbor URL for this tenant.
                 type: string
+              usedStorageBytes:
+                description: |-
+                  UsedStorageBytes is the storage this tenant's registries actually
+                  consume, as reported by Harbor.
+                format: int64
+                type: integer
             type: object
         type: object
     served: true

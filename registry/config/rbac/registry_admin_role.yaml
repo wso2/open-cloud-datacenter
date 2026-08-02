@@ -4,19 +4,17 @@ metadata:
   labels:
     app.kubernetes.io/name: registry
     app.kubernetes.io/managed-by: kustomize
-  name: registryinstance-viewer-role
+  name: registry-admin-role
 rules:
 - apiGroups:
   - registry.opencloud.wso2.com
   resources:
-  - registryinstances
+  - registries
   verbs:
-  - get
-  - list
-  - watch
+  - '*'
 - apiGroups:
   - registry.opencloud.wso2.com
   resources:
-  - registryinstances/status
+  - registries/status
   verbs:
   - get

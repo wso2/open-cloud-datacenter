@@ -125,22 +125,25 @@ func TestPatchStatus_ExhaustsRetriesAndReturnsError(t *testing.T) {
 	}
 }
 
-// --- handleDelete: deletion blocked while dependent RegistryInstances exist ---
+// --- handleDelete: deletion blocked while dependent Registries exist ---
 
+// Registries record their backend in status, never in spec, so the guard has to
+// match on that binding. Matching on anything else would let a backend be
+// deleted out from under live registries.
 func TestHandleDelete_BlocksWhileDependentInstanceExists(t *testing.T) {
 	cr := &registryv1alpha1.RegistryBackend{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "rb-acme",
-			Namespace:         "registry-system",
 			Finalizers:        []string{backendFinalizer},
 			DeletionTimestamp: &metav1.Time{Time: time.Now()},
 		},
 		Spec: registryv1alpha1.RegistryBackendSpec{TenantID: "acme"},
 	}
-	blockingInstance := &registryv1alpha1.RegistryInstance{
-		ObjectMeta: metav1.ObjectMeta{Name: "ri-sample", Namespace: "registry-system"},
-		Spec: registryv1alpha1.RegistryInstanceSpec{
-			BackendRef: registryv1alpha1.BackendRef{Name: "rb-acme", Namespace: "registry-system"},
+	blockingInstance := &registryv1alpha1.Registry{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "acme-project-1"},
+		Status: registryv1alpha1.RegistryStatus{
+			TenantID:    "acme",
+			BackendName: "rb-acme",
 		},
 	}
 
@@ -167,7 +170,7 @@ func TestHandleDelete_BlocksWhileDependentInstanceExists(t *testing.T) {
 		t.Errorf("Status.Phase = %q, want %q while blocked", fresh.Status.Phase, phaseTerminating)
 	}
 	// The finalizer must still be present — the object was never allowed to
-	// actually finish deleting while a dependent RegistryInstance exists.
+	// actually finish deleting while a dependent Registry exists.
 	found := false
 	for _, f := range fresh.Finalizers {
 		if f == backendFinalizer {

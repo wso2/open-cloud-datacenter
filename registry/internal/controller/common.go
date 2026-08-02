@@ -1,8 +1,9 @@
 // Package controller holds the two reconcilers for the registry operator:
-// RegistryBackend (one Harbor per tenant) and RegistryInstance (one Harbor
-// project + robot account per registry). The Custom Resource is the single
-// source of truth, and all work happens inside the reconcile loop, with slow
-// waits handled via RequeueAfter.
+// Registry (a project inside a tenant's Harbor, and the only resource tenants
+// create) and RegistryBackend (one Harbor deployment per tenant, provisioned by
+// the operator when a tenant's first Registry appears). The Custom Resource is
+// the single source of truth, and all work happens inside the reconcile loop,
+// with slow waits handled via RequeueAfter.
 package controller
 
 import (
@@ -11,6 +12,12 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	registryv1alpha1 "github.com/wso2/open-cloud-datacenter/crds/registry/api/v1alpha1"
+	"github.com/wso2/open-cloud-datacenter/crds/registry/internal/config"
+	"github.com/wso2/open-cloud-datacenter/crds/registry/internal/harbor"
 )
 
 const (
@@ -22,6 +29,16 @@ const (
 	conditionReady = "Ready"
 
 	reclaimDelete = "Delete"
+	reclaimRetain = "Retain"
+
+	// tenantLabel records which tenant a RegistryBackend serves, so backends can
+	// be found by tenant without parsing their name.
+	tenantLabel = "registry.opencloud.wso2.com/tenant-id"
+
+	// defaultCommittedThresholdPercent is the share of provisioned registry
+	// storage that may be committed to registry quotas before the Harbor
+	// deployment is grown.
+	defaultCommittedThresholdPercent = 80
 
 	// eventReasonReady etc. are CamelCase to satisfy the condition-reason
 	// and Event-reason conventions.
@@ -30,7 +47,36 @@ const (
 	reasonTransient    = "Transient"
 	reasonError        = "Error"
 	reasonBlocked      = "Blocked"
+	reasonResized      = "Resized"
 )
+
+// newHarborClient returns a Harbor client honouring the configured TLS mode.
+func newHarborClient(cfg config.HelmConfig, url, adminPass string) *harbor.Client {
+	if cfg.InsecureHarborTLS {
+		return harbor.NewInsecureClient(url, adminPass)
+	}
+	return harbor.NewClient(url, adminPass)
+}
+
+// backendReadinessChanged limits backend-driven wake-ups to the transitions a
+// Registry cares about: whether Harbor became usable, and where it lives.
+func backendReadinessChanged() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(event.CreateEvent) bool { return true },
+		DeleteFunc: func(event.DeleteEvent) bool { return true },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldB, ok1 := e.ObjectOld.(*registryv1alpha1.RegistryBackend)
+			newB, ok2 := e.ObjectNew.(*registryv1alpha1.RegistryBackend)
+			if !ok1 || !ok2 {
+				return true
+			}
+			return oldB.Status.Phase != newB.Status.Phase ||
+				oldB.Status.RegistryURL != newB.Status.RegistryURL ||
+				oldB.Status.AdminSecretName != newB.Status.AdminSecretName ||
+				oldB.Status.HarborNamespace != newB.Status.HarborNamespace
+		},
+	}
+}
 
 // setReady sets/updates the Ready condition. It delegates to
 // meta.SetStatusCondition, which only bumps LastTransitionTime when the status

@@ -1,0 +1,21 @@
+# A Registry is the only resource a tenant creates. Apply it in any namespace
+# belonging to the tenant's Harvester project: the operator reads that project
+# from the namespace, provisions Harbor if the tenant has none yet, and reuses it
+# for every later Registry in the same tenant.
+#
+# Push credentials land in the Secret named by .status.credentialsSecretName,
+# in this same namespace.
+apiVersion: registry.opencloud.wso2.com/v1alpha1
+kind: Registry
+metadata:
+  name: web
+  namespace: sample-tenant-project-1
+spec:
+  # Storage quota for this registry (starter=5Gi, professional=20Gi,
+  # enterprise=100Gi). Raise or lower it at any time; Harbor refuses a decrease
+  # below what is already stored until images are removed.
+  plan: starter
+
+  # Retain keeps the Harbor project and its images when this Registry is
+  # deleted; Delete removes them.
+  reclaimPolicy: Retain

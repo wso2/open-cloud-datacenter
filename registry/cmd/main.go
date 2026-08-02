@@ -78,13 +78,13 @@ func main() {
 		logger.Fatal("failed to setup RegistryBackend controller", zap.Error(err))
 	}
 
-	if err := (&controller.RegistryInstanceReconciler{
+	if err := (&controller.RegistryReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("registryinstance"),
+		Recorder: mgr.GetEventRecorderFor("registry"),
 		HelmCfg:  cfg.Helm,
 	}).SetupWithManager(mgr); err != nil {
-		logger.Fatal("failed to setup RegistryInstance controller", zap.Error(err))
+		logger.Fatal("failed to setup Registry controller", zap.Error(err))
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

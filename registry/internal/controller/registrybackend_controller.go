@@ -38,9 +38,9 @@ type RegistryBackendReconciler struct {
 	HelmCfg  config.HelmConfig
 }
 
-// +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registrybackends;registryinstances,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registrybackends/status;registryinstances/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registrybackends/finalizers;registryinstances/finalizers,verbs=update
+// +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registrybackends;registries,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registrybackends/status;registries/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registrybackends/finalizers;registries/finalizers,verbs=update
 //
 // The operator emits Events and reads namespaces:
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
@@ -78,16 +78,20 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	tenantID := cr.Spec.TenantID
-	plan := cr.Spec.Plan
+
+	// Size from the effective plan, which is the greater of the administrator's
+	// floor and what autoscaling has already grown to. Growth is recorded in
+	// status rather than written back into the spec.
+	plan := largerPlan(cr.Spec.Plan, cr.Status.EffectivePlan)
 	if plan == "" {
-		plan = "starter"
+		plan = planOrder[0]
 	}
 
 	// 1. Ensure the tenant's Harbor namespace (<tenantID>-management) exists.
 	// Harbor's pods live here, so the credential Secret must be created here
 	// too — a pod can only read Secrets from its own namespace.
 	harborNS := harborNamespace(tenantID)
-	if err := r.ensureNamespace(ctx, harborNS); err != nil {
+	if err := r.ensureNamespace(ctx, harborNS, tenantID); err != nil {
 		return r.transient(ctx, &cr, "", "ensure Harbor namespace", err)
 	}
 
@@ -147,18 +151,55 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			fmt.Sprintf("configuring Harbor: %v", err), 15*time.Second)
 	}
 
-	// 5. Ready.
+	// 5. Measure what the tenant's registries have committed, and decide whether
+	// the deployment needs to be larger. Harbor reports both the quota it has
+	// promised and what is consumed, so no metrics pipeline is involved.
+	totals, terr := cli.ProjectStorageTotals(ctx)
+	if terr != nil {
+		// Capacity planning is not worth failing a healthy Harbor over; report
+		// Ready and retry the measurement on the next pass.
+		log.Info("could not read Harbor storage totals; skipping this pass", "error", terr)
+	}
+	nextPlan := plan
+	if terr == nil {
+		if p, perr := computeEffectivePlan(&cr, totals); perr != nil {
+			return r.fail(ctx, &cr, "compute effective plan", perr)
+		} else {
+			nextPlan = p
+		}
+	}
+	registryCount, cerr := r.countRegistries(ctx, &cr)
+	if cerr != nil {
+		return r.transient(ctx, &cr, secretName, "count registries", cerr)
+	}
+
+	// 6. Ready.
 	if err := r.patchStatus(ctx, req.NamespacedName, func(s *registryv1alpha1.RegistryBackendStatus) {
 		s.Phase = phaseReady
 		s.ObservedGeneration = cr.Generation
 		s.RegistryURL = registryURL
 		s.AdminSecretName = secretName
+		s.HarborNamespace = harborNS
+		s.EffectivePlan = nextPlan
+		s.RegistryCount = registryCount
+		if terr == nil {
+			s.CommittedStorageBytes = totals.Committed
+			s.UsedStorageBytes = totals.Used
+		}
 		s.Message = "Harbor is running"
 		setReady(&s.Conditions, cr.Generation, metav1.ConditionTrue, reasonReady, "Harbor is running")
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
 	r.Recorder.Event(&cr, corev1.EventTypeNormal, reasonReady, "Harbor ready at "+registryURL)
+
+	if nextPlan != plan {
+		// Requeue immediately: the next pass renders and expands at the larger
+		// plan, keeping growth in one place rather than duplicating it here.
+		r.Recorder.Eventf(&cr, corev1.EventTypeNormal, reasonResized,
+			"growing Harbor from %s to %s; registries have committed %d bytes", plan, nextPlan, totals.Committed)
+		return ctrl.Result{Requeue: true}, nil
+	}
 
 	// Steady-state: re-check every minute to catch drift (Helm re-install is a
 	// no-op, Ping confirms Harbor is still up).
@@ -323,26 +364,49 @@ func (r *RegistryBackendReconciler) ensureStorageSize(ctx context.Context, cr *r
 	return nil
 }
 
-// handleDelete runs the Backend finalizer: refuse while RegistryInstances still
-// reference this Backend, then uninstall Harbor and (optionally) its PVCs.
+// dependentRegistries returns the Registries this backend serves, matching on
+// the binding each Registry records in its status. Registries do not reference a
+// backend in their spec, so the recorded binding is the only link — matching on
+// anything else would silently stop protecting them.
+func (r *RegistryBackendReconciler) dependentRegistries(ctx context.Context, cr *registryv1alpha1.RegistryBackend) ([]string, error) {
+	var list registryv1alpha1.RegistryList
+	if err := r.List(ctx, &list); err != nil {
+		return nil, fmt.Errorf("list Registries: %w", err)
+	}
+	var names []string
+	for i := range list.Items {
+		reg := &list.Items[i]
+		if reg.Status.BackendName == cr.Name ||
+			(reg.Status.BackendName == "" && reg.Status.TenantID == cr.Spec.TenantID) {
+			names = append(names, reg.Namespace+"/"+reg.Name)
+		}
+	}
+	return names, nil
+}
+
+// countRegistries reports how many Registries this backend serves.
+func (r *RegistryBackendReconciler) countRegistries(ctx context.Context, cr *registryv1alpha1.RegistryBackend) (int32, error) {
+	names, err := r.dependentRegistries(ctx, cr)
+	if err != nil {
+		return 0, err
+	}
+	return int32(len(names)), nil
+}
+
+// handleDelete runs the Backend finalizer: refuse while Registries still depend
+// on this Harbor, then uninstall it and (optionally) its PVCs.
 func (r *RegistryBackendReconciler) handleDelete(ctx context.Context, cr *registryv1alpha1.RegistryBackend, log logr.Logger) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(cr, backendFinalizer) {
 		return ctrl.Result{}, nil
 	}
 
 	// Dependent guard.
-	var instances registryv1alpha1.RegistryInstanceList
-	if err := r.List(ctx, &instances); err != nil {
-		return ctrl.Result{}, fmt.Errorf("list RegistryInstances: %w", err)
-	}
-	var blockers []string
-	for _, in := range instances.Items {
-		if in.Spec.BackendRef.Name == cr.Name && in.Spec.BackendRef.Namespace == cr.Namespace {
-			blockers = append(blockers, in.Namespace+"/"+in.Name)
-		}
+	blockers, err := r.dependentRegistries(ctx, cr)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 	if len(blockers) > 0 {
-		msg := fmt.Sprintf("blocked by %d RegistryInstance(s): %v — delete them first", len(blockers), blockers)
+		msg := fmt.Sprintf("blocked by %d Registry(s): %v — delete them first", len(blockers), blockers)
 		r.Recorder.Event(cr, corev1.EventTypeWarning, reasonBlocked, msg)
 		_ = r.patchStatus(ctx, client.ObjectKeyFromObject(cr), func(s *registryv1alpha1.RegistryBackendStatus) {
 			s.Phase = phaseTerminating
@@ -405,15 +469,21 @@ func harborNamespace(tenantID string) string {
 	return tenantID + "-management"
 }
 
-// ensureNamespace creates the namespace if it does not already exist.
-func (r *RegistryBackendReconciler) ensureNamespace(ctx context.Context, name string) error {
+// ensureNamespace creates the Harbor namespace if it does not already exist,
+// placing it in the tenant's Harvester project so the deployment sits inside the
+// same boundary as the namespaces it serves.
+func (r *RegistryBackendReconciler) ensureNamespace(ctx context.Context, name, tenantID string) error {
 	var ns corev1.Namespace
 	if err := r.Get(ctx, client.ObjectKey{Name: name}, &ns); err == nil {
 		return nil
 	} else if !apierrors.IsNotFound(err) {
 		return err
 	}
-	ns = corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	ns = corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:        name,
+		Labels:      map[string]string{tenantLabel: tenantID},
+		Annotations: map[string]string{tenantProjectKey: tenantID},
+	}}
 	if err := r.Create(ctx, &ns); err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}
@@ -422,10 +492,7 @@ func (r *RegistryBackendReconciler) ensureNamespace(ctx context.Context, name st
 
 // harborClient returns a Harbor client honouring the configured TLS mode.
 func (r *RegistryBackendReconciler) harborClient(url, adminPass string) *harbor.Client {
-	if r.HelmCfg.InsecureHarborTLS {
-		return harbor.NewInsecureClient(url, adminPass)
-	}
-	return harbor.NewClient(url, adminPass)
+	return newHarborClient(r.HelmCfg, url, adminPass)
 }
 
 // --- status helpers ---

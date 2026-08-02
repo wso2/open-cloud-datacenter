@@ -401,3 +401,70 @@ func TestDo_SetsBasicAuthAndHeaders(t *testing.T) {
 		t.Fatalf("Configure() error = %v", err)
 	}
 }
+
+func TestProjectStorageTotals(t *testing.T) {
+	t.Run("sums hard and used across projects", func(t *testing.T) {
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query().Get("reference"); got != "project" {
+				t.Errorf("reference = %q, want project", got)
+			}
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"hard": map[string]interface{}{"storage": 5}, "used": map[string]interface{}{"storage": 2}},
+				{"hard": map[string]interface{}{"storage": 20}, "used": map[string]interface{}{"storage": 7}},
+			})
+		})
+		got, err := cli.ProjectStorageTotals(context.Background())
+		if err != nil {
+			t.Fatalf("ProjectStorageTotals() error = %v", err)
+		}
+		if got.Committed != 25 {
+			t.Errorf("Committed = %d, want 25", got.Committed)
+		}
+		if got.Used != 9 {
+			t.Errorf("Used = %d, want 9", got.Used)
+		}
+		if got.Unlimited != 0 {
+			t.Errorf("Unlimited = %d, want 0", got.Unlimited)
+		}
+	})
+
+	// An unlimited quota commits an unbounded amount, so it must be counted
+	// separately rather than folded into the sum as -1.
+	t.Run("unlimited quotas are counted, not summed", func(t *testing.T) {
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"hard": map[string]interface{}{"storage": 5}, "used": map[string]interface{}{"storage": 1}},
+				{"hard": map[string]interface{}{"storage": -1}, "used": map[string]interface{}{"storage": 3}},
+			})
+		})
+		got, err := cli.ProjectStorageTotals(context.Background())
+		if err != nil {
+			t.Fatalf("ProjectStorageTotals() error = %v", err)
+		}
+		if got.Committed != 5 {
+			t.Errorf("Committed = %d, want 5 (the -1 must not be added)", got.Committed)
+		}
+		if got.Unlimited != 1 {
+			t.Errorf("Unlimited = %d, want 1", got.Unlimited)
+		}
+		if got.Used != 4 {
+			t.Errorf("Used = %d, want 4", got.Used)
+		}
+	})
+
+	t.Run("no projects yields zero totals", func(t *testing.T) {
+		cli, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{})
+		})
+		got, err := cli.ProjectStorageTotals(context.Background())
+		if err != nil {
+			t.Fatalf("ProjectStorageTotals() error = %v", err)
+		}
+		if got.Committed != 0 || got.Used != 0 {
+			t.Errorf("got %+v, want zero totals", got)
+		}
+	})
+}

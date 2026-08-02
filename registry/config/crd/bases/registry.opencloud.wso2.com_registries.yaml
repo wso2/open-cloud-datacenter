@@ -4,25 +4,24 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: registryinstances.registry.opencloud.wso2.com
+  name: registries.registry.opencloud.wso2.com
 spec:
   group: registry.opencloud.wso2.com
   names:
-    kind: RegistryInstance
-    listKind: RegistryInstanceList
-    plural: registryinstances
-    singular: registryinstance
+    kind: Registry
+    listKind: RegistryList
+    plural: registries
+    shortNames:
+    - reg
+    singular: registry
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.tenantID
-      name: Tenant
-      type: string
-    - jsonPath: .spec.projectID
-      name: Project
-      type: string
     - jsonPath: .status.phase
       name: Phase
+      type: string
+    - jsonPath: .status.harborProject
+      name: Project
       type: string
     - jsonPath: .status.registryURL
       name: URL
@@ -33,6 +32,13 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
+        description: |-
+          Registry requests a container registry for the namespace it is created in.
+
+          The tenant is derived from the namespace's Harvester project, never declared
+          in the spec — so a Registry cannot reference another tenant's Harbor. The
+          first Registry in a tenant causes a Harbor deployment to be provisioned;
+          later ones reuse it and only add a Harbor project.
         properties:
           apiVersion:
             description: |-
@@ -52,63 +58,39 @@ spec:
           metadata:
             type: object
           spec:
-            description: RegistryInstanceSpec is the desired state of one Harbor project.
+            description: RegistrySpec is the desired state of one registry.
             properties:
-              backendRef:
-                description: |-
-                  BackendRef references the per-tenant RegistryBackend CR (name: rb-<tenantID>,
-                  namespace: dc-tenant-<tenantID>). dc-api sets this; the controller reads it
-                  to locate the running Harbor instance across namespaces.
-                properties:
-                  name:
-                    type: string
-                  namespace:
-                    type: string
-                required:
-                - name
-                - namespace
-                type: object
               plan:
                 default: starter
-                description: Plan selects the Harbor resource profile.
+                description: |-
+                  Plan sets this registry's storage quota inside Harbor
+                  (starter=5Gi, professional=20Gi, enterprise=100Gi). It can be raised or
+                  lowered; Harbor rejects a decrease below current usage until images are
+                  removed. It does not size the underlying Harbor deployment.
                 enum:
                 - starter
                 - professional
                 - enterprise
                 type: string
-              projectID:
-                description: ProjectID is the datacenter project requesting a Harbor
-                  project inside the shared Harbor.
-                type: string
               reclaimPolicy:
                 default: Retain
                 description: |-
-                  ReclaimPolicy controls what happens to the Harbor project (and its
-                  images) when this instance is deleted. Retain (default) leaves the
-                  project intact; Delete removes it upstream.
+                  ReclaimPolicy controls what happens to the Harbor project and its images
+                  when this Registry is deleted. Retain keeps them; Delete removes them.
                 enum:
                 - Retain
                 - Delete
                 type: string
-              registryName:
-                description: |-
-                  RegistryName is the user-provided registry name. Used as the Harbor project name
-                  and to derive the credentials Secret name (registry-credentials-<cr-name>).
-                  Unique within the (tenantID, projectID) pair.
-                type: string
-              tenantID:
-                description: TenantID is the unique identifier for the tenant (e.g.
-                  "acme").
-                type: string
-            required:
-            - backendRef
-            - projectID
-            - tenantID
             type: object
           status:
-            description: RegistryInstanceStatus is the observed state of one Harbor
-              project.
+            description: RegistryStatus is the observed state of one registry.
             properties:
+              backendName:
+                description: |-
+                  BackendName records which RegistryBackend serves this registry, set once
+                  the binding succeeds. The backend uses it to refuse deletion while
+                  registries still depend on it.
+                type: string
               conditions:
                 description: Conditions holds standard Kubernetes status conditions.
                 items:
@@ -168,22 +150,24 @@ spec:
                 type: array
               credentialsSecretName:
                 description: |-
-                  CredentialsSecretName is the name (in this namespace) of the Secret
-                  holding the robot username + token for this registry. Owned by this CR.
+                  CredentialsSecretName is the Secret in this namespace holding the robot
+                  username and token for this registry.
+                type: string
+              harborProject:
+                description: |-
+                  HarborProject is the project created in Harbor, derived as
+                  <namespace>-<name> so registries can never collide.
                 type: string
               message:
-                description: Message contains error details when Phase is Failed.
+                description: Message describes the current phase, including why it
+                  is not Ready.
                 type: string
               observedGeneration:
-                description: |-
-                  ObservedGeneration is the .metadata.generation the controller last
-                  reconciled.
+                description: ObservedGeneration is the .metadata.generation last reconciled.
                 format: int64
                 type: integer
               phase:
-                description: |-
-                  Phase is the lifecycle state of this registry instance. Empty until the
-                  first reconcile.
+                description: Phase is the lifecycle state. Empty until the first reconcile.
                 enum:
                 - Provisioning
                 - Ready
@@ -191,8 +175,11 @@ spec:
                 - Terminating
                 type: string
               registryURL:
-                description: RegistryURL is the Harbor portal URL, populated when
-                  Phase is Ready.
+                description: RegistryURL is the Harbor URL to log in and push to.
+                type: string
+              tenantID:
+                description: TenantID is the Harvester project this registry resolved
+                  to.
                 type: string
             type: object
         type: object

@@ -1,4 +1,4 @@
 resources:
+- bases/registry.opencloud.wso2.com_registries.yaml
 - bases/registry.opencloud.wso2.com_registrybackends.yaml
-- bases/registry.opencloud.wso2.com_registryinstances.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
