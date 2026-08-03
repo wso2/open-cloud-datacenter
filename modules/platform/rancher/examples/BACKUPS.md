@@ -8,7 +8,7 @@ This runbook covers setting up the `rancher-backup` operator with S3 storage, en
 - When restoring into a **new** Rancher setup, that setup must be the same Rancher version as the one the backup was taken from. Also check the Kubernetes version: the `apiVersion` supported by the cluster and by the backup file can differ across Kubernetes versions.
 - Known Fleet issue: after a restore via the backup-restore operator, secrets used for `clientSecretName` and `helmSecretName` are not included in Fleet gitrepos — see Rancher's docs for the workaround.
 
-## Constraints 
+## Constraints
 
 **Scope**
 - The operator only ever backs up/restores resources on the **local** cluster (wherever it's installed). Downstream clusters are never contacted or backed up directly — only their representation as objects on the local cluster (e.g. `clusters.provisioning.cattle.io` records) is captured.
