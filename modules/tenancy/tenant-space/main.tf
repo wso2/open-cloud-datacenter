@@ -253,6 +253,36 @@ module "vyos_tenant" {
 }
 
 
+# ── Sanitized, collision-safe name for a rancher2_project_role_template_binding key ──
+# Rancher/Kubernetes object names are capped at 63 chars (RFC 1123), but a plain
+# substr() truncation can collapse two distinct long keys down to the same
+# 63-char prefix, causing a name collision. `name` is ForceNew on this resource,
+# so changing it always destroys+recreates the binding — keys short enough to
+# fit as-is are left completely untouched (the vast majority; existing tenant
+# spaces are unaffected). Only keys that would actually be truncated get a
+# hash-of-the-full-key suffix appended, guaranteeing uniqueness for just those.
+locals {
+  _rtb_name_max_len = 63
+  _rtb_hash_len     = 8
+
+  _rtb_sanitize = { for k in setunion(
+    keys({
+      for idx, b in var.group_role_bindings :
+      "${var.project_name}--${coalesce(b.group_principal_id, b.group_id, b.user_principal_id, b.user_id)}--${idx}" => b
+    }),
+    keys(local.shared_image_bindings),
+    ) : k => replace(replace(lower(k), "/[^a-z0-9-]/", "-"), "/-{2,}/", "-")
+  }
+
+  rtb_names = {
+    for k, sanitized in local._rtb_sanitize : k => (
+      length(sanitized) <= local._rtb_name_max_len
+      ? trim(sanitized, "-")
+      : "${trim(substr(sanitized, 0, local._rtb_name_max_len - local._rtb_hash_len - 1), "-")}-${substr(sha1(k), 0, local._rtb_hash_len)}"
+    )
+  }
+}
+
 # ── One binding per (principal, role) pair. ───────────────────────────────────
 # Key is derived from the principal value + role so that switching principal
 # type (e.g. group_principal_id → user_principal_id) produces a different key,
@@ -264,7 +294,7 @@ resource "rancher2_project_role_template_binding" "this" {
     "${var.project_name}--${coalesce(b.group_principal_id, b.group_id, b.user_principal_id, b.user_id)}--${idx}" => b
   }
 
-  name               = trim(substr(replace(replace(lower(each.key), "/[^a-z0-9-]/", "-"), "/-{2,}/", "-"), 0, 63), "-")
+  name               = local.rtb_names[each.key]
   project_id         = rancher2_project.this.id
   role_template_id   = each.value.role_template_id
   group_principal_id = each.value.group_principal_id
@@ -315,7 +345,7 @@ data "rancher2_project" "shared_images" {
 resource "rancher2_project_role_template_binding" "shared_image_access" {
   for_each = local.shared_image_bindings
 
-  name               = trim(substr(replace(replace(lower(each.key), "/[^a-z0-9-]/", "-"), "/-{2,}/", "-"), 0, 63), "-")
+  name               = local.rtb_names[each.key]
   project_id         = data.rancher2_project.shared_images[0].id
   role_template_id   = "read-only"
   group_principal_id = each.value.group_principal_id
