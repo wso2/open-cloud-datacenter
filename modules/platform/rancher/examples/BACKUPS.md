@@ -199,7 +199,8 @@ The storage location is an operator-level setting, so it's configured at install
 1. Top-left ☰ → **Cluster Management**.
 2. On the Clusters page, find the **local** cluster (runs the Rancher server) and click **Explore**.
 3. **Apps** → **Charts**.
-4. Click **Rancher Backups** → **Install**.
+4. Click **Rancher Backups** → **Install**.<img width="1725" height="536" alt="image-2" src="https://github.com/user-attachments/assets/5cea10d7-4c0d-45dc-bf8d-424355577892" />
+
 5. Configure the default storage location (S3 bucket/credentials as set up in steps 1–3).
 6. Click **Install**.
 
