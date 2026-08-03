@@ -264,7 +264,7 @@ resource "rancher2_project_role_template_binding" "this" {
     "${var.project_name}--${coalesce(b.group_principal_id, b.group_id, b.user_principal_id, b.user_id)}--${idx}" => b
   }
 
-  name               = substr(replace(replace(lower(each.key), "/[^a-z0-9-]/", "-"), "/-{2,}/", "-"), 0, 63)
+  name               = trim(substr(replace(replace(lower(each.key), "/[^a-z0-9-]/", "-"), "/-{2,}/", "-"), 0, 63), "-")
   project_id         = rancher2_project.this.id
   role_template_id   = each.value.role_template_id
   group_principal_id = each.value.group_principal_id
@@ -315,7 +315,7 @@ data "rancher2_project" "shared_images" {
 resource "rancher2_project_role_template_binding" "shared_image_access" {
   for_each = local.shared_image_bindings
 
-  name               = each.key
+  name               = trim(substr(replace(replace(lower(each.key), "/[^a-z0-9-]/", "-"), "/-{2,}/", "-"), 0, 63), "-")
   project_id         = data.rancher2_project.shared_images[0].id
   role_template_id   = "read-only"
   group_principal_id = each.value.group_principal_id

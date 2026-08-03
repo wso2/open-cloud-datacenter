@@ -108,15 +108,8 @@ resource "harvester_virtualmachine" "this" {
     }
   }
 
-  # cloudinitdisk is automatically created when cloudinit is created.
-  dynamic "disk" {
-    for_each = local.has_cloudinit ? [1] : []
-    content {
-      name = "cloudinitdisk"
-      type = "disk"
-      bus  = "virtio"
-    }
-  }
+  # No explicit "disk" block for cloudinitdisk — known perpetual-diff
+  # provider issue, see https://github.com/harvester/harvester/issues/10728
 }
 
 # Optional scheduled backup — created only when backup_schedule is set.
