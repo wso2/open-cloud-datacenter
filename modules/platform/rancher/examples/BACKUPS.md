@@ -215,7 +215,7 @@ resource "rancher2_app_v2" "rancher_backup_crd" {
   namespace     = "cattle-resources-system"
   repo_name     = "rancher-charts"
   chart_name    = "rancher-backup-crd"
-  chart_version = "<RANCHER_BACKUP_CHART_VERSION>" # e.g. "109.0.1+up10.0.3"
+  chart_version = "<RANCHER_BACKUP_CHART_VERSION>" # e.g. "109.0.1+up10.0.8"
 }
 
 resource "rancher2_app_v2" "rancher_backup" {
@@ -225,7 +225,7 @@ resource "rancher2_app_v2" "rancher_backup" {
   namespace     = "cattle-resources-system"
   repo_name     = "rancher-charts"
   chart_name    = "rancher-backup"
-  chart_version = "<RANCHER_BACKUP_CHART_VERSION>" # e.g. "109.0.1+up10.0.3"
+  chart_version = "<RANCHER_BACKUP_CHART_VERSION>" # e.g. "109.0.1+up10.0.8"
 
   values = <<-EOF
     s3:
