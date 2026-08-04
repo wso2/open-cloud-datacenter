@@ -13,18 +13,23 @@ import (
 // to record the project owning it. Its value is "<cluster-id>:<project-id>".
 const tenantProjectKey = "field.cattle.io/projectId"
 
-// tenantForNamespace returns the tenant that owns a namespace, read from the
-// project Rancher assigned it to.
+// tenantForNamespace returns the tenant that owns a namespace and the full
+// Rancher project reference it was read from, both derived from the project
+// Rancher assigned it to.
 //
 // The tenant is never taken from a Registry's spec. A namespace's project
 // membership is controlled by Rancher, so deriving from it means a Registry
 // cannot name a tenant it does not belong to — there is no field to falsify.
 // Namespaces outside any project have no tenant, and the caller waits rather
 // than guessing one.
-func (r *RegistryReconciler) tenantForNamespace(ctx context.Context, name string) (string, error) {
+//
+// The raw projectRef is returned alongside the tenant because Rancher's own
+// namespace-admission webhook requires the full "<cluster-id>:<project-id>"
+// form on any namespace the operator creates — see RegistryBackendSpec.ProjectRef.
+func (r *RegistryReconciler) tenantForNamespace(ctx context.Context, name string) (tenant, projectRef string, err error) {
 	var ns corev1.Namespace
 	if err := r.Get(ctx, client.ObjectKey{Name: name}, &ns); err != nil {
-		return "", fmt.Errorf("get namespace %s: %w", name, err)
+		return "", "", fmt.Errorf("get namespace %s: %w", name, err)
 	}
 
 	raw := ns.Annotations[tenantProjectKey]
@@ -32,14 +37,14 @@ func (r *RegistryReconciler) tenantForNamespace(ctx context.Context, name string
 		raw = ns.Labels[tenantProjectKey]
 	}
 	if raw == "" {
-		return "", fmt.Errorf("namespace %s is not assigned to a Harvester project (no %s)", name, tenantProjectKey)
+		return "", "", fmt.Errorf("namespace %s is not assigned to a Harvester project (no %s)", name, tenantProjectKey)
 	}
 
-	tenant, err := tenantIDFromProject(raw)
+	tenant, err = tenantIDFromProject(raw)
 	if err != nil {
-		return "", fmt.Errorf("namespace %s: %w", name, err)
+		return "", "", fmt.Errorf("namespace %s: %w", name, err)
 	}
-	return tenant, nil
+	return tenant, strings.ToLower(strings.TrimSpace(raw)), nil
 }
 
 // tenantIDFromProject extracts the project ID from a "<cluster-id>:<project-id>"

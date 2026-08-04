@@ -42,6 +42,37 @@ func newBackendReconciler(t *testing.T, fc client.WithWatch) *RegistryBackendRec
 	}
 }
 
+// --- ensureNamespace: the exact bug hit live on the real cluster ---
+
+// Rancher's namespace-admission webhook requires the annotation's value to be
+// the FULL "<cluster-id>:<project-id>" form; a bare tenant ID (what
+// ensureNamespace used to be given before ProjectRef existed) gets rejected
+// and the namespace is never created. Proves the fix: the created namespace's
+// annotation must equal projectRef, not tenantID.
+func TestEnsureNamespace_AnnotationUsesFullProjectRefNotBareTenantID(t *testing.T) {
+	fc := fake.NewClientBuilder().WithScheme(newTestScheme(t)).Build()
+	r := newBackendReconciler(t, fc)
+
+	const tenantID = "p-rnmw7"
+	const projectRef = "c-dh75f:p-rnmw7"
+
+	if err := r.ensureNamespace(context.Background(), "p-rnmw7-management", tenantID, projectRef); err != nil {
+		t.Fatalf("ensureNamespace() error = %v", err)
+	}
+
+	var ns corev1.Namespace
+	if err := fc.Get(context.Background(), client.ObjectKey{Name: "p-rnmw7-management"}, &ns); err != nil {
+		t.Fatalf("get created namespace: %v", err)
+	}
+	if got := ns.Annotations[tenantProjectKey]; got != projectRef {
+		t.Errorf("namespace annotation %s = %q, want %q (the full project reference, not the bare tenant ID %q)",
+			tenantProjectKey, got, projectRef, tenantID)
+	}
+	if got := ns.Labels[tenantLabel]; got != tenantID {
+		t.Errorf("namespace label %s = %q, want %q", tenantLabel, got, tenantID)
+	}
+}
+
 // --- patchStatus: optimistic-concurrency retry loop ---
 
 func TestPatchStatus_RetriesOnceOnConflictThenSucceeds(t *testing.T) {

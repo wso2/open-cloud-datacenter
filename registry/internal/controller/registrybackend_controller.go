@@ -91,7 +91,15 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Harbor's pods live here, so the credential Secret must be created here
 	// too — a pod can only read Secrets from its own namespace.
 	harborNS := harborNamespace(tenantID)
-	if err := r.ensureNamespace(ctx, harborNS, tenantID); err != nil {
+	if cr.Spec.ProjectRef == "" {
+		// Predates the ProjectRef field: writing the bare tenantID here would
+		// reproduce the bug this field fixes (Rancher's namespace-admission
+		// webhook requires the full "<cluster-id>:<project-id>" form).
+		err := fmt.Errorf("spec.projectRef is empty (this RegistryBackend predates the field) — " +
+			"backfill it with the full \"<cluster-id>:<project-id>\" value before Harbor's namespace can be created")
+		return r.transient(ctx, &cr, "", "ensure Harbor namespace", err)
+	}
+	if err := r.ensureNamespace(ctx, harborNS, tenantID, cr.Spec.ProjectRef); err != nil {
 		return r.transient(ctx, &cr, "", "ensure Harbor namespace", err)
 	}
 
@@ -472,7 +480,12 @@ func harborNamespace(tenantID string) string {
 // ensureNamespace creates the Harbor namespace if it does not already exist,
 // placing it in the tenant's Harvester project so the deployment sits inside the
 // same boundary as the namespaces it serves.
-func (r *RegistryBackendReconciler) ensureNamespace(ctx context.Context, name, tenantID string) error {
+//
+// projectRef must be the full "<cluster-id>:<project-id>" value, not the bare
+// tenantID — Rancher's namespace-admission webhook rejects the annotation
+// otherwise. tenantID is still used for tenantLabel, which the webhook has no
+// opinion on.
+func (r *RegistryBackendReconciler) ensureNamespace(ctx context.Context, name, tenantID, projectRef string) error {
 	var ns corev1.Namespace
 	if err := r.Get(ctx, client.ObjectKey{Name: name}, &ns); err == nil {
 		return nil
@@ -482,7 +495,7 @@ func (r *RegistryBackendReconciler) ensureNamespace(ctx context.Context, name, t
 	ns = corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name:        name,
 		Labels:      map[string]string{tenantLabel: tenantID},
-		Annotations: map[string]string{tenantProjectKey: tenantID},
+		Annotations: map[string]string{tenantProjectKey: projectRef},
 	}}
 	if err := r.Create(ctx, &ns); err != nil && !apierrors.IsAlreadyExists(err) {
 		return err

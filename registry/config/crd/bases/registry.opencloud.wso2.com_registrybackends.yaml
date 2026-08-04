@@ -108,6 +108,18 @@ spec:
                     never downgraded
                   rule: self == oldSelf || (oldSelf == 'starter' && self != 'starter')
                     || (oldSelf == 'professional' && self == 'enterprise')
+              projectRef:
+                description: |-
+                  ProjectRef is the full Rancher project reference ("<cluster-id>:<project-id>")
+                  this deployment's tenant was derived from. TenantID alone (project-id
+                  only) is not enough: Rancher's namespace-admission webhook requires the
+                  full form on every namespace the operator creates.
+                  Empty on a backend created before this field existed; not self-healed —
+                  backfill it directly if that ever applies.
+                type: string
+                x-kubernetes-validations:
+                - message: projectRef is immutable once set
+                  rule: oldSelf == '' || self == oldSelf
               reclaimPolicy:
                 default: Retain
                 description: |-

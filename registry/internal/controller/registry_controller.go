@@ -149,7 +149,7 @@ func (r *RegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 // the tenant has none yet, and reports whether it is ready to accept projects.
 // Returns (nil, result, err) when the caller should stop this pass.
 func (r *RegistryReconciler) bindBackend(ctx context.Context, cr *registryv1alpha1.Registry) (*registryv1alpha1.RegistryBackend, ctrl.Result, error) {
-	tenant, err := r.tenantForNamespace(ctx, cr.Namespace)
+	tenant, projectRef, err := r.tenantForNamespace(ctx, cr.Namespace)
 	if err != nil {
 		// Nothing identifies the tenant, so there is no Harbor this Registry
 		// may use. Waiting is the only safe answer — guessing would hand it
@@ -167,7 +167,7 @@ func (r *RegistryReconciler) bindBackend(ctx context.Context, cr *registryv1alph
 		// First Registry in this tenant: provision the Harbor deployment. The
 		// name is derived from the tenant, so concurrent first Registries all
 		// attempt the same object and the API server settles the race.
-		desired := defaultBackendForTenant(name, tenant)
+		desired := defaultBackendForTenant(name, tenant, projectRef)
 		if cerr := r.Create(ctx, desired); cerr != nil {
 			if !apierrors.IsAlreadyExists(cerr) {
 				return nil, ctrl.Result{}, fmt.Errorf("create RegistryBackend %s: %w", name, cerr)
@@ -203,7 +203,7 @@ func (r *RegistryReconciler) bindBackend(ctx context.Context, cr *registryv1alph
 // first Registry. It starts at the smallest plan and grows as the tenant's
 // registries commit storage, and retains data so that removing the last
 // Registry cannot destroy images.
-func defaultBackendForTenant(name, tenant string) *registryv1alpha1.RegistryBackend {
+func defaultBackendForTenant(name, tenant, projectRef string) *registryv1alpha1.RegistryBackend {
 	return &registryv1alpha1.RegistryBackend{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
@@ -211,6 +211,7 @@ func defaultBackendForTenant(name, tenant string) *registryv1alpha1.RegistryBack
 		},
 		Spec: registryv1alpha1.RegistryBackendSpec{
 			TenantID:      tenant,
+			ProjectRef:    projectRef,
 			Plan:          planOrder[0],
 			ReclaimPolicy: reclaimRetain,
 			Autoscale: registryv1alpha1.AutoscaleSpec{

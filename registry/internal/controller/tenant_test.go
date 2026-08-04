@@ -39,6 +39,11 @@ func TestTenantIDFromProject(t *testing.T) {
 // The tenant comes from the namespace, so it is worth proving both that a
 // project-assigned namespace resolves and that an unassigned one refuses rather
 // than falling back to a default.
+//
+// Also proves the exact bug hit live: tenantForNamespace must return the FULL
+// "<cluster-id>:<project-id>" alongside the derived tenant, not just the bare
+// tenant ID — ensureNamespace needs the full form to pass Rancher's
+// namespace-admission webhook, and the bare ID silently fails it.
 func TestTenantForNamespace(t *testing.T) {
 	assigned := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name:        "acme-project-1",
@@ -57,21 +62,25 @@ func TestTenantForNamespace(t *testing.T) {
 	r := newRegistryReconciler(t, fc)
 
 	for _, ns := range []string{"acme-project-1", "acme-project-2"} {
-		got, err := r.tenantForNamespace(context.Background(), ns)
+		tenant, projectRef, err := r.tenantForNamespace(context.Background(), ns)
 		if err != nil {
 			t.Fatalf("tenantForNamespace(%q) error = %v", ns, err)
 		}
-		if got != "p-acme" {
-			t.Errorf("tenantForNamespace(%q) = %q, want p-acme", ns, got)
+		if tenant != "p-acme" {
+			t.Errorf("tenantForNamespace(%q) tenant = %q, want p-acme", ns, tenant)
+		}
+		if projectRef != "c-m-abc:p-acme" {
+			t.Errorf("tenantForNamespace(%q) projectRef = %q, want the full \"c-m-abc:p-acme\" — "+
+				"a bare tenant ID here fails Rancher's namespace-admission webhook", ns, projectRef)
 		}
 	}
 
-	if _, err := r.tenantForNamespace(context.Background(), "no-project"); err == nil {
+	if _, _, err := r.tenantForNamespace(context.Background(), "no-project"); err == nil {
 		t.Error("tenantForNamespace() on a namespace with no project returned nil error; " +
 			"an unassigned namespace must not resolve to any tenant")
 	}
 
-	if _, err := r.tenantForNamespace(context.Background(), "does-not-exist"); err == nil {
+	if _, _, err := r.tenantForNamespace(context.Background(), "does-not-exist"); err == nil {
 		t.Error("tenantForNamespace() on a missing namespace returned nil error")
 	}
 }
