@@ -35,15 +35,6 @@ type RegistryBackendSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="tenantID is immutable"
 	TenantID string `json:"tenantID"`
 
-	// ProjectRef is the full Rancher project reference ("<cluster-id>:<project-id>")
-	// this deployment's tenant was derived from. TenantID alone (project-id
-	// only) is not enough: Rancher's namespace-admission webhook requires the
-	// full form on every namespace the operator creates.
-	// Empty on a backend created before this field existed; not self-healed —
-	// backfill it directly if that ever applies.
-	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="projectRef is immutable once set"
-	ProjectRef string `json:"projectRef,omitempty"`
-
 	// Plan is the floor for deployment sizing. The operator may size above it
 	// when Autoscale is enabled, never below. Upgrade-only, because sizing
 	// expands PersistentVolumeClaims and Kubernetes cannot shrink them.

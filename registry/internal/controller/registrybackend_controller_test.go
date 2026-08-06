@@ -42,35 +42,72 @@ func newBackendReconciler(t *testing.T, fc client.WithWatch) *RegistryBackendRec
 	}
 }
 
-// --- ensureNamespace: the exact bug hit live on the real cluster ---
+// --- resolveHarborNamespace: label-based lookup, never a create ---
 
-// Rancher's namespace-admission webhook requires the annotation's value to be
-// the FULL "<cluster-id>:<project-id>" form; a bare tenant ID (what
-// ensureNamespace used to be given before ProjectRef existed) gets rejected
-// and the namespace is never created. Proves the fix: the created namespace's
-// annotation must equal projectRef, not tenantID.
-func TestEnsureNamespace_AnnotationUsesFullProjectRefNotBareTenantID(t *testing.T) {
-	fc := fake.NewClientBuilder().WithScheme(newTestScheme(t)).Build()
-	r := newBackendReconciler(t, fc)
-
+// The operator must never create a namespace itself — placing one inside a
+// Harvester project is Rancher's own admission-webhook-gated authorization
+// boundary, not Kubernetes RBAC's (see problem5-namespace-ownership). This
+// proves the replacement: exactly one namespace labeled harborManagementLabel
+// for the tenant resolves; zero or more than one both error clearly instead of
+// guessing.
+func TestResolveHarborNamespace(t *testing.T) {
 	const tenantID = "p-rnmw7"
-	const projectRef = "c-dh75f:p-rnmw7"
 
-	if err := r.ensureNamespace(context.Background(), "p-rnmw7-management", tenantID, projectRef); err != nil {
-		t.Fatalf("ensureNamespace() error = %v", err)
-	}
+	labeled := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:        "tenant-sandaru",
+		Labels:      map[string]string{harborManagementLabel: "true"},
+		Annotations: map[string]string{tenantProjectKey: "c-dh75f:p-rnmw7"},
+	}}
+	unlabeledSameTenant := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:        "tenant-sandaru-project-1",
+		Annotations: map[string]string{tenantProjectKey: "c-dh75f:p-rnmw7"},
+	}}
+	labeledOtherTenant := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:        "other-tenant-common",
+		Labels:      map[string]string{harborManagementLabel: "true"},
+		Annotations: map[string]string{tenantProjectKey: "c-dh75f:p-other"},
+	}}
 
-	var ns corev1.Namespace
-	if err := fc.Get(context.Background(), client.ObjectKey{Name: "p-rnmw7-management"}, &ns); err != nil {
-		t.Fatalf("get created namespace: %v", err)
-	}
-	if got := ns.Annotations[tenantProjectKey]; got != projectRef {
-		t.Errorf("namespace annotation %s = %q, want %q (the full project reference, not the bare tenant ID %q)",
-			tenantProjectKey, got, projectRef, tenantID)
-	}
-	if got := ns.Labels[tenantLabel]; got != tenantID {
-		t.Errorf("namespace label %s = %q, want %q", tenantLabel, got, tenantID)
-	}
+	t.Run("resolves the one labeled namespace for this tenant", func(t *testing.T) {
+		fc := fake.NewClientBuilder().WithScheme(newTestScheme(t)).
+			WithObjects(labeled, unlabeledSameTenant, labeledOtherTenant).Build()
+		r := newBackendReconciler(t, fc)
+
+		got, err := r.resolveHarborNamespace(context.Background(), tenantID)
+		if err != nil {
+			t.Fatalf("resolveHarborNamespace() error = %v", err)
+		}
+		if got != "tenant-sandaru" {
+			t.Errorf("resolveHarborNamespace() = %q, want %q", got, "tenant-sandaru")
+		}
+	})
+
+	t.Run("errors clearly when no namespace is labeled for this tenant", func(t *testing.T) {
+		fc := fake.NewClientBuilder().WithScheme(newTestScheme(t)).
+			WithObjects(unlabeledSameTenant, labeledOtherTenant).Build()
+		r := newBackendReconciler(t, fc)
+
+		if _, err := r.resolveHarborNamespace(context.Background(), tenantID); err == nil {
+			t.Error("resolveHarborNamespace() returned nil error with no labeled namespace for the tenant; " +
+				"it must never fall back to creating one")
+		}
+	})
+
+	t.Run("errors on ambiguity when two namespaces are labeled for the same tenant", func(t *testing.T) {
+		second := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name:        "tenant-sandaru-second",
+			Labels:      map[string]string{harborManagementLabel: "true"},
+			Annotations: map[string]string{tenantProjectKey: "c-dh75f:p-rnmw7"},
+		}}
+		fc := fake.NewClientBuilder().WithScheme(newTestScheme(t)).
+			WithObjects(labeled, second).Build()
+		r := newBackendReconciler(t, fc)
+
+		if _, err := r.resolveHarborNamespace(context.Background(), tenantID); err == nil {
+			t.Error("resolveHarborNamespace() returned nil error with two labeled namespaces for one tenant; " +
+				"ambiguity must be reported, not silently resolved")
+		}
+	})
 }
 
 // --- patchStatus: optimistic-concurrency retry loop ---
@@ -283,7 +320,7 @@ func TestDeletePVCs_OnlyDeletesMatchingLabeledPVCs(t *testing.T) {
 		Build()
 
 	r := newBackendReconciler(t, fc)
-	if err := r.deletePVCs(context.Background(), cr); err != nil {
+	if err := r.deletePVCs(context.Background(), cr, ns); err != nil {
 		t.Fatalf("deletePVCs() error = %v", err)
 	}
 

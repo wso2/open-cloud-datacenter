@@ -3,6 +3,13 @@
 # from the namespace, provisions Harbor if the tenant has none yet, and reuses it
 # for every later Registry in the same tenant.
 #
+# The operator never creates the namespace Harbor deploys into — placing one
+# inside a Harvester project is Rancher's own authorization boundary, not
+# Kubernetes RBAC's. Before applying this, an administrator must have already
+# labeled exactly one namespace in this tenant with
+# registry.opencloud.wso2.com/harbor-management=true; otherwise this Registry
+# reports a clear error and waits.
+#
 # Push credentials land in the Secret named by .status.credentialsSecretName,
 # in this same namespace.
 apiVersion: registry.opencloud.wso2.com/v1alpha1

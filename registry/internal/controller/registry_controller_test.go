@@ -254,7 +254,7 @@ func readyBackend(name, tenant string) *registryv1alpha1.RegistryBackend {
 		Status: registryv1alpha1.RegistryBackendStatus{
 			Phase:           phaseReady,
 			EffectivePlan:   "starter",
-			HarborNamespace: harborNamespace(tenant),
+			HarborNamespace: tenant + "-management",
 			AdminSecretName: name + "-harbor-admin",
 			RegistryURL:     "https://registry." + tenant + ".example.com",
 		},

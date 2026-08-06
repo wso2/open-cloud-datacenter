@@ -42,9 +42,10 @@ type RegistryBackendReconciler struct {
 // +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registrybackends/status;registries/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registrybackends/finalizers;registries/finalizers,verbs=update
 //
-// The operator emits Events and reads namespaces:
+// The operator emits Events and only ever reads namespaces — it never creates
+// one; see resolveHarborNamespace.
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
-// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 //
 // Harbor's chart objects are created by Helm using this pod's ServiceAccount,
 // so the ClusterRole must grant the resource types the Harbor chart manages:
@@ -87,20 +88,19 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		plan = planOrder[0]
 	}
 
-	// 1. Ensure the tenant's Harbor namespace (<tenantID>-management) exists.
-	// Harbor's pods live here, so the credential Secret must be created here
-	// too — a pod can only read Secrets from its own namespace.
-	harborNS := harborNamespace(tenantID)
-	if cr.Spec.ProjectRef == "" {
-		// Predates the ProjectRef field: writing the bare tenantID here would
-		// reproduce the bug this field fixes (Rancher's namespace-admission
-		// webhook requires the full "<cluster-id>:<project-id>" form).
-		err := fmt.Errorf("spec.projectRef is empty (this RegistryBackend predates the field) — " +
-			"backfill it with the full \"<cluster-id>:<project-id>\" value before Harbor's namespace can be created")
-		return r.transient(ctx, &cr, "", "ensure Harbor namespace", err)
-	}
-	if err := r.ensureNamespace(ctx, harborNS, tenantID, cr.Spec.ProjectRef); err != nil {
-		return r.transient(ctx, &cr, "", "ensure Harbor namespace", err)
+	// 1. Resolve the tenant's Harbor namespace. This never creates one:
+	// placing a namespace inside a Harvester project is Rancher's own
+	// admission-webhook-gated authorization boundary, not Kubernetes RBAC's,
+	// and this operator's ServiceAccount cannot be granted that across every
+	// current and future project without either far over-broad privilege or a
+	// second credential into Rancher's separate management cluster. An
+	// administrator marks one pre-existing namespace per tenant with
+	// harborManagementLabel when the Harvester project is set up; this just
+	// looks it up. Harbor's pods live here, so the credential Secret must be
+	// created here too — a pod can only read Secrets from its own namespace.
+	harborNS, err := r.resolveHarborNamespace(ctx, tenantID)
+	if err != nil {
+		return r.transient(ctx, &cr, "", "resolve Harbor namespace", err)
 	}
 
 	// 2. Ensure the full pinned Harbor credential set exists in an operator-owned
@@ -424,8 +424,25 @@ func (r *RegistryBackendReconciler) handleDelete(ctx context.Context, cr *regist
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
-	// Uninstall Harbor from the tenant's Harbor namespace.
-	if err := r.Helm.Uninstall(ctx, cr.Spec.TenantID, harborNamespace(cr.Spec.TenantID)); err != nil {
+	// Uninstall Harbor from the tenant's Harbor namespace. Prefer the namespace
+	// already recorded in status (where Harbor actually got deployed) over
+	// re-resolving by label — the label could have been moved or removed since,
+	// but cleanup must still find what it originally installed.
+	harborNS := cr.Status.HarborNamespace
+	if harborNS == "" {
+		var nsErr error
+		harborNS, nsErr = r.resolveHarborNamespace(ctx, cr.Spec.TenantID)
+		if nsErr != nil {
+			// Never recorded a namespace and none resolves now — nothing was
+			// ever installed, so there is nothing to clean up.
+			controllerutil.RemoveFinalizer(cr, backendFinalizer)
+			if err := r.Update(ctx, cr); err != nil {
+				return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+			}
+			return ctrl.Result{}, nil
+		}
+	}
+	if err := r.Helm.Uninstall(ctx, cr.Spec.TenantID, harborNS); err != nil {
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, fmt.Errorf("helm uninstall: %w", err)
 	}
 
@@ -433,12 +450,12 @@ func (r *RegistryBackendReconciler) handleDelete(ctx context.Context, cr *regist
 	// The credential Secret goes with it: under Retain it must stay, because
 	// its encryption key is needed to read the retained volumes.
 	if cr.Spec.ReclaimPolicy == reclaimDelete {
-		if err := r.deletePVCs(ctx, cr); err != nil {
+		if err := r.deletePVCs(ctx, cr, harborNS); err != nil {
 			return ctrl.Result{}, fmt.Errorf("delete pvcs: %w", err)
 		}
 		sec := corev1.Secret{ObjectMeta: metav1.ObjectMeta{
 			Name:      cr.Name + "-harbor-admin",
-			Namespace: harborNamespace(cr.Spec.TenantID),
+			Namespace: harborNS,
 		}}
 		if err := r.Delete(ctx, &sec); err != nil && !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, fmt.Errorf("delete admin secret: %w", err)
@@ -455,10 +472,10 @@ func (r *RegistryBackendReconciler) handleDelete(ctx context.Context, cr *regist
 
 // deletePVCs removes the Harbor release's PVCs (best-effort, by the Helm
 // instance label).
-func (r *RegistryBackendReconciler) deletePVCs(ctx context.Context, cr *registryv1alpha1.RegistryBackend) error {
+func (r *RegistryBackendReconciler) deletePVCs(ctx context.Context, cr *registryv1alpha1.RegistryBackend, namespace string) error {
 	var pvcs corev1.PersistentVolumeClaimList
 	if err := r.List(ctx, &pvcs,
-		client.InNamespace(harborNamespace(cr.Spec.TenantID)),
+		client.InNamespace(namespace),
 		client.MatchingLabels{"app.kubernetes.io/instance": "harbor-" + cr.Spec.TenantID},
 	); err != nil {
 		return err
@@ -471,36 +488,52 @@ func (r *RegistryBackendReconciler) deletePVCs(ctx context.Context, cr *registry
 	return nil
 }
 
-// harborNamespace is the namespace a tenant's Harbor is deployed into:
-// "<tenantID>-management".
-func harborNamespace(tenantID string) string {
-	return tenantID + "-management"
-}
+// harborManagementLabel marks the one namespace, per tenant, an administrator
+// has designated to host that tenant's Harbor deployment. Set once, by hand,
+// when the Harvester project is provisioned — never by this operator.
+const harborManagementLabel = "registry.opencloud.wso2.com/harbor-management"
 
-// ensureNamespace creates the Harbor namespace if it does not already exist,
-// placing it in the tenant's Harvester project so the deployment sits inside the
-// same boundary as the namespaces it serves.
-//
-// projectRef must be the full "<cluster-id>:<project-id>" value, not the bare
-// tenantID — Rancher's namespace-admission webhook rejects the annotation
-// otherwise. tenantID is still used for tenantLabel, which the webhook has no
-// opinion on.
-func (r *RegistryBackendReconciler) ensureNamespace(ctx context.Context, name, tenantID, projectRef string) error {
-	var ns corev1.Namespace
-	if err := r.Get(ctx, client.ObjectKey{Name: name}, &ns); err == nil {
-		return nil
-	} else if !apierrors.IsNotFound(err) {
-		return err
+// resolveHarborNamespace finds the tenant's pre-designated Harbor namespace.
+// It never creates one: placing a namespace inside a Harvester project is
+// gated by Rancher's own namespace-admission webhook, a separate
+// authorization boundary from Kubernetes RBAC that this operator's
+// ServiceAccount cannot be granted across every current and future project
+// without either far over-broad privilege or a second credential into
+// Rancher's management cluster. Requiring exactly one pre-existing, labeled
+// namespace costs one deliberate admin step per new tenant — no smaller than
+// the Harvester-project-creation step that already has to happen by hand
+// regardless.
+func (r *RegistryBackendReconciler) resolveHarborNamespace(ctx context.Context, tenantID string) (string, error) {
+	var list corev1.NamespaceList
+	if err := r.List(ctx, &list, client.MatchingLabels{harborManagementLabel: "true"}); err != nil {
+		return "", fmt.Errorf("list namespaces labeled %s: %w", harborManagementLabel, err)
 	}
-	ns = corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name:        name,
-		Labels:      map[string]string{tenantLabel: tenantID},
-		Annotations: map[string]string{tenantProjectKey: projectRef},
-	}}
-	if err := r.Create(ctx, &ns); err != nil && !apierrors.IsAlreadyExists(err) {
-		return err
+
+	var matches []string
+	for _, ns := range list.Items {
+		raw := ns.Annotations[tenantProjectKey]
+		if raw == "" {
+			raw = ns.Labels[tenantProjectKey]
+		}
+		if raw == "" {
+			continue
+		}
+		id, err := tenantIDFromProject(raw)
+		if err == nil && id == tenantID {
+			matches = append(matches, ns.Name)
+		}
 	}
-	return nil
+
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no namespace for tenant %s is labeled %s=true; "+
+			"an administrator must mark one namespace to host Harbor", tenantID, harborManagementLabel)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("tenant %s has %d namespaces labeled %s=true (%v); exactly one is required",
+			tenantID, len(matches), harborManagementLabel, matches)
+	}
 }
 
 // harborClient returns a Harbor client honouring the configured TLS mode.
