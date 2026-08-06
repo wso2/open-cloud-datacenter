@@ -171,7 +171,14 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	nextPlan := plan
 	if terr == nil {
 		if p, perr := computeEffectivePlan(&cr, totals); perr != nil {
-			return r.fail(ctx, &cr, "compute effective plan", perr)
+			// Not a spec error: cr.Spec.Plan is CRD-enum-validated and the loop
+			// in computeEffectivePlan only ever advances through planOrder, so
+			// this can only fire if planOrder (autoscale.go) and the plans map
+			// (values_generator.go) have drifted apart in a code change — a bug
+			// in this operator's own binary, identical across every tenant, not
+			// something a spec edit on this object could ever fix. fail() would
+			// go quiet after one report; keep this loud and retried instead.
+			return r.transient(ctx, &cr, secretName, "compute effective plan", perr)
 		} else {
 			nextPlan = p
 		}
