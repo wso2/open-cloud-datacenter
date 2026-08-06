@@ -200,6 +200,7 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if terr == nil {
 			s.CommittedStorageBytes = totals.Committed
 			s.UsedStorageBytes = totals.Used
+			s.UnlimitedProjectCount = int32(totals.Unlimited)
 		}
 		s.Message = "Harbor is running"
 		setReady(&s.Conditions, cr.Generation, metav1.ConditionTrue, reasonReady, "Harbor is running")

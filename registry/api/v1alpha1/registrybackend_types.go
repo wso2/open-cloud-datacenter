@@ -95,8 +95,17 @@ type RegistryBackendStatus struct {
 	CommittedStorageBytes int64 `json:"committedStorageBytes,omitempty"`
 
 	// UsedStorageBytes is the storage this tenant's registries actually
-	// consume, as reported by Harbor.
+	// consume, as reported by Harbor. Normally recorded for visibility only;
+	// it becomes the growth trigger only when it exceeds
+	// CommittedStorageBytes, which can only happen when
+	// UnlimitedProjectCount is greater than zero (see computeEffectivePlan).
 	UsedStorageBytes int64 `json:"usedStorageBytes,omitempty"`
+
+	// UnlimitedProjectCount is how many of this tenant's Harbor projects
+	// currently have no storage quota ceiling (set directly through Harbor,
+	// never through a Registry). Nonzero means sizing for this tenant is
+	// currently driven by UsedStorageBytes rather than CommittedStorageBytes.
+	UnlimitedProjectCount int32 `json:"unlimitedProjectCount,omitempty"`
 
 	// RegistryCount is how many Registry objects this backend serves. Zero
 	// means it is idle and safe for an administrator to remove.

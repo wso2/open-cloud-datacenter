@@ -38,9 +38,19 @@ func largerPlan(a, b string) string {
 // A deployment grows when the storage its registries have been promised
 // approaches what is provisioned for them: quotas are commitments Harbor will
 // honour, so capacity has to exist before those registries fill up rather than
-// after. Usage is recorded for visibility but does not drive growth, since a
-// registry that is merely full does not need a larger deployment — its own
-// quota already bounds it.
+// after. This is why the trigger is normally committed (quota) storage, not
+// used storage — a registry that is merely full does not need a larger
+// deployment, since its own quota already bounds it.
+//
+// Used is folded in as a floor on the trigger, not the primary signal: a
+// quota-bounded project's usage can never exceed its own hard limit (Harbor
+// enforces that at push time), so committed leads by definition whenever
+// every project is bounded. Used can only overtake committed when at least
+// one project has no ceiling (excluded from committed entirely, since -1
+// can't be summed) and its real consumption has outgrown every other
+// project's combined commitment — at which point used is the only signal
+// left, and falling back to it means one unlimited project no longer freezes
+// growth for every other, still-bounded registry sharing this backend.
 //
 // The result never falls below spec.plan, and never below the plan already
 // deployed, because expanding a PersistentVolumeClaim cannot be undone.
@@ -60,10 +70,9 @@ func computeEffectivePlan(cr *registryv1alpha1.RegistryBackend, totals harbor.St
 		threshold = 80
 	}
 
-	// An unlimited quota commits an unbounded amount, so there is nothing to
-	// compare against. Hold the current size and let an administrator decide.
-	if totals.Unlimited > 0 {
-		return current, nil
+	trigger := totals.Committed
+	if totals.Used > trigger {
+		trigger = totals.Used
 	}
 
 	for {
@@ -71,7 +80,7 @@ func computeEffectivePlan(cr *registryv1alpha1.RegistryBackend, totals harbor.St
 		if err != nil {
 			return "", err
 		}
-		if totals.Committed*100 <= capacityBytes*threshold {
+		if trigger*100 <= capacityBytes*threshold {
 			return current, nil
 		}
 		next := nextPlan(current)

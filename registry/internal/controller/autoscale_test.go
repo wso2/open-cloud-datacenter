@@ -92,11 +92,18 @@ func TestComputeEffectivePlan(t *testing.T) {
 			want:    "enterprise",
 		},
 		{
-			name:    "an unlimited quota cannot be summed, so size holds",
+			name:    "an unlimited project with negligible usage does not force growth on its own",
 			floor:   "starter",
 			enabled: true,
-			totals:  harbor.StorageTotals{Committed: 1 * gib, Unlimited: 1},
+			totals:  harbor.StorageTotals{Committed: 1 * gib, Used: 1 * gib, Unlimited: 1},
 			want:    "starter",
+		},
+		{
+			name:    "used below committed in the normal case does not affect the result",
+			floor:   "starter",
+			enabled: true,
+			totals:  harbor.StorageTotals{Committed: 17 * gib, Used: 2 * gib}, // committed still 85% of 20Gi
+			want:    "professional",
 		},
 	}
 
@@ -110,6 +117,27 @@ func TestComputeEffectivePlan(t *testing.T) {
 				t.Errorf("computeEffectivePlan() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// One project going unlimited must not freeze growth for every other,
+// still-bounded registry sharing this backend. Committed alone would report
+// almost nothing (the unlimited project is excluded from the sum entirely),
+// but its real, unbounded usage is exactly the case Used exists to catch.
+func TestComputeEffectivePlan_UnlimitedProjectUsageStillGrowsPlan(t *testing.T) {
+	cr := backendFor("starter", "", true)
+
+	got, err := computeEffectivePlan(cr, harbor.StorageTotals{
+		Committed: 1 * gib, // every bounded project combined barely registers
+		Used:      100 * gib,
+		Unlimited: 1,
+	})
+	if err != nil {
+		t.Fatalf("computeEffectivePlan() error = %v", err)
+	}
+	if got != "enterprise" {
+		t.Errorf("computeEffectivePlan() = %q, want enterprise — "+
+			"an unlimited project's real usage must still drive growth, not freeze it", got)
 	}
 }
 
