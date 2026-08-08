@@ -209,7 +209,11 @@ locals {
     SQLCMDPASSWORD="$(grep -m1 '^SQLCMDPASSWORD=' /etc/db-backup/backup.env | cut -d= -f2-)"
     [ -n "${SQLCMDPASSWORD:-}" ]
 
+    apt-get update
+    apt-get install -y curl gnupg ca-certificates
+
     curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+    chmod 0644 /usr/share/keyrings/microsoft-prod.gpg
 
     curl -fsSL https://packages.microsoft.com/config/ubuntu/22.04/mssql-server-${var.mssql_version_year}.list | \
       sed 's/deb \[/deb [signed-by=\/usr\/share\/keyrings\/microsoft-prod.gpg /' | \
