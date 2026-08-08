@@ -205,8 +205,9 @@ locals {
     set -euo pipefail
     export DEBIAN_FRONTEND=noninteractive
 
-    # Load SQLCMDPASSWORD safely from backup.env (no shell evaluation of the value)
-    while IFS="=" read -r k v; do [ -n "$k" ] && export "$k=$v"; done < /etc/db-backup/backup.env
+    # Read SQLCMDPASSWORD from backup.env without evaluating the value
+    SQLCMDPASSWORD="$(grep -m1 '^SQLCMDPASSWORD=' /etc/db-backup/backup.env | cut -d= -f2-)"
+    [ -n "${SQLCMDPASSWORD:-}" ]
 
     curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
 
