@@ -160,11 +160,14 @@ variable "mssql_sa_password" {
   sensitive = true
 
   # SQL Server's own password policy, enforced here instead of failing partway
-  # through cloud-init: at least 8 characters, from at least 3 of uppercase,
-  # lowercase, digit, symbol.
+  # through cloud-init: 8-128 characters, from at least 3 of uppercase,
+  # lowercase, digit, symbol, no whitespace (it's written to a systemd
+  # EnvironmentFile as an unquoted KEY=value).
   validation {
     condition = (
       length(var.mssql_sa_password) >= 8 &&
+      length(var.mssql_sa_password) <= 128 &&
+      !can(regex("\\s", var.mssql_sa_password)) &&
       (
         (can(regex("[A-Z]", var.mssql_sa_password)) ? 1 : 0) +
         (can(regex("[a-z]", var.mssql_sa_password)) ? 1 : 0) +
@@ -172,7 +175,7 @@ variable "mssql_sa_password" {
         (can(regex("[^A-Za-z0-9]", var.mssql_sa_password)) ? 1 : 0)
       ) >= 3
     )
-    error_message = "mssql_sa_password must be at least 8 characters long and contain characters from at least 3 of these 4 sets: uppercase letters, lowercase letters, numbers, and symbols — SQL Server's default password policy. mssql-conf will otherwise reject it mid-install, after mssql-server is already unpacked."
+    error_message = "mssql_sa_password must be 8-128 characters long, contain characters from at least 3 of these 4 sets: uppercase letters, lowercase letters, numbers, and symbols, and contain no whitespace — SQL Server's default password policy. mssql-conf will otherwise reject it mid-install, after mssql-server is already unpacked."
   }
 }
 ```
