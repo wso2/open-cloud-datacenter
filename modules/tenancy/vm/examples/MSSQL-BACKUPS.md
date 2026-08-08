@@ -159,15 +159,15 @@ variable "mssql_edition" {
   type    = string
   default = "Developer"
 
-  # Evaluation/Developer are free but non-production only; Express is free and
+  # Developer is free but non-production only; Express is free and
   # production-capable but resource-capped; Standard/Enterprise need a paid
   # license (the edition name if already licensed, or a product key).
   validation {
     condition = (
-      contains(["Evaluation", "Developer", "Express", "Standard", "Enterprise"], var.mssql_edition) ||
+      contains(["Developer", "Express", "Standard", "Enterprise"], var.mssql_edition) ||
       can(regex("^[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}$", var.mssql_edition))
     )
-    error_message = "mssql_edition must be one of Evaluation, Developer, Express, Standard, Enterprise, or a valid 25-character product key."
+    error_message = "mssql_edition must be one of Developer, Express, Standard, Enterprise, or a valid 25-character product key."
   }
 }
 
