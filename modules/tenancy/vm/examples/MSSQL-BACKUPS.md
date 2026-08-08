@@ -28,11 +28,12 @@ the logins alone, into any SQL Server VM of the same or a newer version.
 > backups are portable across hosts and restore into the same-or-newer engine,
 > which a raw data-file copy is not.
 >
-> **Prerequisite:** a VM provisioned per the [`vm` module README](../README.md)
-> running **SQL Server** (with `mssql-tools18` on the box, i.e.
-> `/opt/mssql-tools18/bin/sqlcmd`), the `sa` password, your own Rancher-scoped
-> Harvester kubeconfig, and AWS credentials able to create an S3 bucket and an IAM
-> user.
+> **Prerequisite:** a VM provisioned per the [`vm` module README](../README.md) on
+> **Ubuntu 22.04** (required by the SQL Server apt repo used in §2), your own
+> Rancher-scoped Harvester kubeconfig, and AWS credentials able to create an S3
+> bucket and an IAM user. This guide's cloud-init installs SQL Server itself —
+> you don't need it pre-installed, just a chosen `sa` password meeting SQL
+> Server's password policy (§2).
 
 ---
 
@@ -114,11 +115,17 @@ Generate an access key pair for the user.
 
 ## 2. Add the Terraform (cloud-init backup install + timer)
 
-The backup is configured entirely through the VM's **cloud-init**, passed to the
-`vm` module's `user_data`. There is no separate backup server. The timer service
-runs as root and authenticates to SQL Server with the `sa` password, which is
-delivered to `sqlcmd` as `SQLCMDPASSWORD` via the unit's root-only
-`EnvironmentFile` — so it never appears in a command line or process list.
+SQL Server and the backup are both configured entirely through the VM's
+**cloud-init**, passed to the `vm` module's `user_data`. There is no separate
+backup server, and no manual `mssql-conf setup` step — cloud-init runs it
+unattended with the `sa` password from Terraform. The timer service runs as
+root and authenticates to SQL Server with that same `sa` password, delivered to
+`sqlcmd` as `SQLCMDPASSWORD` via the unit's root-only `EnvironmentFile` — so it
+never appears in a command line or process list.
+
+> **Note.** Set `mssql_version_year` to `2022` or `2025` to install that version
+> of SQL Server. Older versions (2019, 2017) aren't supported — they need a
+> different install method and don't run on Ubuntu 22.04 at all.
 
 **`variables.tf`** — add:
 
@@ -137,9 +144,36 @@ variable "db_s3_secret_key" {
   type      = string
   sensitive = true
 }
+
+variable "mssql_version_year" {
+  type    = string
+  default = "2022"
+
+  validation {
+    condition     = contains(["2022", "2025"], var.mssql_version_year)
+    error_message = "mssql_version_year must be \"2022\" or \"2025\"."
+  }
+}
+
 variable "mssql_sa_password" {
   type      = string
   sensitive = true
+
+  # SQL Server's own password policy, enforced here instead of failing partway
+  # through cloud-init: at least 8 characters, from at least 3 of uppercase,
+  # lowercase, digit, symbol.
+  validation {
+    condition = (
+      length(var.mssql_sa_password) >= 8 &&
+      (
+        (can(regex("[A-Z]", var.mssql_sa_password)) ? 1 : 0) +
+        (can(regex("[a-z]", var.mssql_sa_password)) ? 1 : 0) +
+        (can(regex("[0-9]", var.mssql_sa_password)) ? 1 : 0) +
+        (can(regex("[^A-Za-z0-9]", var.mssql_sa_password)) ? 1 : 0)
+      ) >= 3
+    )
+    error_message = "mssql_sa_password must be at least 8 characters long and contain characters from at least 3 of these 4 sets: uppercase letters, lowercase letters, numbers, and symbols — SQL Server's default password policy. mssql-conf will otherwise reject it mid-install, after mssql-server is already unpacked."
+  }
 }
 ```
 
@@ -160,6 +194,40 @@ locals {
     AWS_SECRET_ACCESS_KEY=${var.db_s3_secret_key}
     SQLCMDPASSWORD=${var.mssql_sa_password}
   ENV
+
+  # Installs SQL Server (var.mssql_version_year) + mssql-tools18 unattended,
+  # using the sa password from backup.env — no interactive `mssql-conf setup`.
+  # Only 2022/2025 work with this repo setup on Ubuntu 22.04 (see that
+  # variable's validation block). Base64-embedded in write_files below for the
+  # same WAF reason as the other scripts (see "Why base64" further down).
+  mssql_install = <<-SH
+    #!/usr/bin/env bash
+    set -euxo pipefail
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Load SQLCMDPASSWORD safely from backup.env (no shell evaluation of the value)
+    while IFS="=" read -r k v; do [ -n "$k" ] && export "$k=$v"; done < /etc/db-backup/backup.env
+
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+
+    curl -fsSL https://packages.microsoft.com/config/ubuntu/22.04/mssql-server-${var.mssql_version_year}.list | \
+      sed 's/deb \[/deb [signed-by=\/usr\/share\/keyrings\/microsoft-prod.gpg /' | \
+      tee /etc/apt/sources.list.d/mssql-server-${var.mssql_version_year}.list
+
+    curl -fsSL https://packages.microsoft.com/config/ubuntu/22.04/prod.list | \
+      sed 's/deb \[/deb [signed-by=\/usr\/share\/keyrings\/microsoft-prod.gpg /' | \
+      tee /etc/apt/sources.list.d/msprod.list
+
+    apt-get update
+    apt-get install -y mssql-server
+
+    # REPLACE: MSSQL_PID (Developer for test/dev) if this VM ever becomes production
+    MSSQL_SA_PASSWORD="$SQLCMDPASSWORD" MSSQL_PID="Developer" /opt/mssql/bin/mssql-conf -n setup accept-eula
+
+    ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
+
+    systemctl enable --now mssql-server.service
+  SH
 
   # Native compressed, checksummed backup of each user database (database_id > 4
   # skips the system DBs), verified, uploaded to a timestamped S3 prefix, then
@@ -246,6 +314,10 @@ module "my_db_vm" {
         permissions: '0600'
         encoding: b64
         content: ${base64encode(local.db_backup_env)}
+      - path: /opt/install-mssql.sh
+        permissions: '0755'
+        encoding: b64
+        content: ${base64encode(local.mssql_install)}
       - path: /opt/db-backup.sh
         permissions: '0755'
         encoding: b64
@@ -277,8 +349,15 @@ module "my_db_vm" {
           Persistent=true
           [Install]
           WantedBy=timers.target
+      # Optional: puts sqlcmd/bcp on PATH for every login shell, so you don't
+      # need the full /opt/mssql-tools18/bin/sqlcmd path when you SSH in.
+      - path: /etc/profile.d/mssql-tools18.sh
+        permissions: '0644'
+        content: |
+          export PATH="$PATH:/opt/mssql-tools18/bin"
     runcmd:
       - systemctl enable --now qemu-guest-agent.service
+      - bash /opt/install-mssql.sh
       - bash /opt/db-backup-setup.sh
   YAML
 
@@ -296,7 +375,8 @@ module "my_db_vm" {
 ```
 
 **`terraform.tfvars`** — add `db_s3_bucket = "my-team-db-bkps"`,
-`db_s3_region = "<your-region>"`, and optionally `db_s3_prefix`.
+`db_s3_region = "<your-region>"`, and optionally `db_s3_prefix` and
+`mssql_version_year` (defaults to `"2022"`; set `"2025"` for the newer release).
 **`secret.tfvars`** — add `db_s3_access_key` / `db_s3_secret_key` /
 `mssql_sa_password`.
 
