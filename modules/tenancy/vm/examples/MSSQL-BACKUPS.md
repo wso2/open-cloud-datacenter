@@ -217,8 +217,7 @@ locals {
   # Installs SQL Server (var.mssql_version_year) + mssql-tools18 unattended,
   # using the sa password from backup.env — no interactive `mssql-conf setup`.
   # Only 2022/2025 work with this repo setup on Ubuntu 22.04 (see that
-  # variable's validation block). Base64-embedded in write_files below for the
-  # same WAF reason as the other scripts (see "Why base64" further down).
+  # variable's validation block).
   mssql_install = <<-SH
     #!/usr/bin/env bash
     set -euo pipefail
@@ -404,11 +403,6 @@ and `mssql_edition` (defaults to `"Developer"` — free but non-production; set
 `"Standard"`/`"Enterprise"` if already licensed, or a paid product key).
 **`secret.tfvars`** — add `db_s3_access_key` / `db_s3_secret_key` /
 `mssql_sa_password`.
-
-> **Why base64.** Cloud-init is delivered through the Rancher proxy, which sits
-> behind a WAF that blocks raw shell payloads (`curl | bash`, `apt`, `sqlcmd`) in
-> `runcmd`. Base64-embedding every script in `write_files` (`encoding: b64`) hides
-> it from the WAF; keep `runcmd` to `bash /opt/...`.
 
 ### Configure what to back up and when
 
