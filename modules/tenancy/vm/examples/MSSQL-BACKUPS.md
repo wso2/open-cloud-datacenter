@@ -202,7 +202,7 @@ locals {
   # same WAF reason as the other scripts (see "Why base64" further down).
   mssql_install = <<-SH
     #!/usr/bin/env bash
-    set -euxo pipefail
+    set -euo pipefail
     export DEBIAN_FRONTEND=noninteractive
 
     # Load SQLCMDPASSWORD safely from backup.env (no shell evaluation of the value)
