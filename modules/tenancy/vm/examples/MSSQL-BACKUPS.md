@@ -159,15 +159,15 @@ variable "mssql_edition" {
   type    = string
   default = "Developer"
 
-  # Evaluation/Developer/Express are free but not licensed for production; Web/
-  # Standard/Enterprise need a paid product key (25-character, 5x5 groups) here
-  # instead of an edition name.
+  # Evaluation/Developer are free but non-production only; Express is free and
+  # production-capable but resource-capped; Standard/Enterprise need a paid
+  # license (the edition name if already licensed, or a product key).
   validation {
     condition = (
-      contains(["Evaluation", "Developer", "Express", "Web", "Standard", "Enterprise"], var.mssql_edition) ||
+      contains(["Evaluation", "Developer", "Express", "Standard", "Enterprise"], var.mssql_edition) ||
       can(regex("^[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}$", var.mssql_edition))
     )
-    error_message = "mssql_edition must be one of Evaluation, Developer, Express, Web, Standard, Enterprise, or a valid 25-character product key."
+    error_message = "mssql_edition must be one of Evaluation, Developer, Express, Standard, Enterprise, or a valid 25-character product key."
   }
 }
 
@@ -400,8 +400,8 @@ module "my_db_vm" {
 **`terraform.tfvars`** — add `db_s3_bucket = "my-team-db-bkps"`,
 `db_s3_region = "<your-region>"`, and optionally `db_s3_prefix`,
 `mssql_version_year` (defaults to `"2022"`; set `"2025"` for the newer release),
-and `mssql_edition` (defaults to `"Developer"` — free but non-production; set a
-paid product key for `"Standard"`/`"Enterprise"`).
+and `mssql_edition` (defaults to `"Developer"` — free but non-production; set
+`"Standard"`/`"Enterprise"` if already licensed, or a paid product key).
 **`secret.tfvars`** — add `db_s3_access_key` / `db_s3_secret_key` /
 `mssql_sa_password`.
 
