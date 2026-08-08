@@ -134,7 +134,7 @@ variable "db_s3_bucket" { type = string }
 variable "db_s3_region" { type = string }
 variable "db_s3_prefix" {
   type    = string
-  default = "my-db" # per-VM prefix in the bucket; keep one prefix per server
+  default = "my-db"                 # per-VM prefix in the bucket; keep one prefix per server
 }
 variable "db_s3_access_key" {
   type      = string
@@ -147,7 +147,7 @@ variable "db_s3_secret_key" {
 
 variable "mssql_version_year" {
   type    = string
-  default = "2022"
+  default = "2022"                  # MSSQL version year required 2022 or 2025
 
   validation {
     condition     = contains(["2022", "2025"], var.mssql_version_year)
@@ -157,7 +157,7 @@ variable "mssql_version_year" {
 
 variable "mssql_edition" {
   type    = string
-  default = "Developer"
+  default = "Developer"             # MSSQL edition required for your use case
 
   # Developer is free but non-production only; Express is free and
   # production-capable but resource-capped; Standard/Enterprise need a paid
