@@ -155,6 +155,22 @@ variable "mssql_version_year" {
   }
 }
 
+variable "mssql_edition" {
+  type    = string
+  default = "Developer"
+
+  # Evaluation/Developer/Express are free but not licensed for production; Web/
+  # Standard/Enterprise need a paid product key (25-character, 5x5 groups) here
+  # instead of an edition name.
+  validation {
+    condition = (
+      contains(["Evaluation", "Developer", "Express", "Web", "Standard", "Enterprise"], var.mssql_edition) ||
+      can(regex("^[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}$", var.mssql_edition))
+    )
+    error_message = "mssql_edition must be one of Evaluation, Developer, Express, Web, Standard, Enterprise, or a valid 25-character product key."
+  }
+}
+
 variable "mssql_sa_password" {
   type      = string
   sensitive = true
@@ -210,7 +226,7 @@ locals {
 
     # Read SQLCMDPASSWORD from backup.env without evaluating the value
     SQLCMDPASSWORD="$(grep -m1 '^SQLCMDPASSWORD=' /etc/db-backup/backup.env | cut -d= -f2-)"
-    [ -n "${SQLCMDPASSWORD:-}" ]
+    [ -n "$SQLCMDPASSWORD" ]
 
     apt-get update
     apt-get install -y curl gnupg ca-certificates
@@ -229,8 +245,7 @@ locals {
     apt-get update
     apt-get install -y mssql-server
 
-    # REPLACE: MSSQL_PID (Developer for test/dev) if this VM ever becomes production
-    MSSQL_SA_PASSWORD="$SQLCMDPASSWORD" MSSQL_PID="Developer" /opt/mssql/bin/mssql-conf -n setup accept-eula
+    MSSQL_SA_PASSWORD="$SQLCMDPASSWORD" MSSQL_PID="${var.mssql_edition}" /opt/mssql/bin/mssql-conf -n setup accept-eula
 
     ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
 
@@ -383,8 +398,10 @@ module "my_db_vm" {
 ```
 
 **`terraform.tfvars`** — add `db_s3_bucket = "my-team-db-bkps"`,
-`db_s3_region = "<your-region>"`, and optionally `db_s3_prefix` and
-`mssql_version_year` (defaults to `"2022"`; set `"2025"` for the newer release).
+`db_s3_region = "<your-region>"`, and optionally `db_s3_prefix`,
+`mssql_version_year` (defaults to `"2022"`; set `"2025"` for the newer release),
+and `mssql_edition` (defaults to `"Developer"` — free but non-production; set a
+paid product key for `"Standard"`/`"Enterprise"`).
 **`secret.tfvars`** — add `db_s3_access_key` / `db_s3_secret_key` /
 `mssql_sa_password`.
 
