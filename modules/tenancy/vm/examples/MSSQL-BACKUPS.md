@@ -1,8 +1,8 @@
 # MS-SQL Backups Guide — native BACKUP to S3
 
-This guide walks you through backing up a **Microsoft SQL Server** database
-running on a standalone Harvester VM with the engine's native `BACKUP DATABASE`,
-using your own S3 bucket, and restoring it into a fresh VM — in the same
+This guide walks you through spinning up a **Microsoft SQL Server** VM on
+Harvester, backing up its databases with the engine's native `BACKUP DATABASE`
+to your own S3 bucket, and restoring them into a fresh VM — in the same
 datacenter or a different one. Everything here is self-service — no platform-admin
 action is required beyond the one-time tenant space you were already given.
 
@@ -40,7 +40,7 @@ the logins alone, into any SQL Server VM of the same or a newer version.
 ## Table of Contents
 
 - [1. Create the bucket and IAM user](#1-create-the-bucket-and-iam-user)
-- [2. Add the Terraform (cloud-init backup install + timer)](#2-add-the-terraform-cloud-init-backup-install--timer)
+- [2. Add the Terraform (cloud-init SQL Server install + backup timer)](#2-add-the-terraform-cloud-init-sql-server-install--backup-timer)
 - [3. Apply](#3-apply)
 - [4. Verify](#4-verify)
 - [5. Restore](#5-restore)
@@ -113,7 +113,7 @@ bucket-level actions have **no** `/*`, object-level actions do:
 
 Generate an access key pair for the user.
 
-## 2. Add the Terraform (cloud-init backup install + timer)
+## 2. Add the Terraform (cloud-init SQL Server install + backup timer)
 
 SQL Server and the backup are both configured entirely through the VM's
 **cloud-init**, passed to the `vm` module's `user_data`. There is no separate
