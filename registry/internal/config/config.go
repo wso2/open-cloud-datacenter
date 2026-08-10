@@ -36,7 +36,7 @@ func Load() (*Config, error) {
 	return &Config{
 		Helm: HelmConfig{
 			HarborRepoURL:     envStr("HARBOR_HELM_REPO", "https://helm.goharbor.io"),
-			HarborChartVer:    envStr("HARBOR_CHART_VERSION", "1.14.0"),
+			HarborChartVer:    envStr("HARBOR_CHART_VERSION", "1.19.2"),
 			StorageClass:      envStr("STORAGE_CLASS", "longhorn"),
 			IngressClass:      envStr("INGRESS_CLASS", "nginx"),
 			CertIssuer:        envStr("CERT_ISSUER", "letsencrypt-prod"),
