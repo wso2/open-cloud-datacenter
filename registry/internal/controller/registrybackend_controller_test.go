@@ -222,13 +222,22 @@ func TestHandleDelete_NoFinalizerIsNoOp(t *testing.T) {
 
 const testNS = "acme-project-1"
 
-// harborPVC builds a claim as Helm labels it for this namespace's release.
-func harborPVC(name string) *corev1.PersistentVolumeClaim {
+// harborPVC builds a claim carrying the labels Harbor's chart really applies.
+// Copied from a live release rather than assumed: the chart uses the LEGACY
+// Helm convention (app/release/component/heritage), NOT
+// app.kubernetes.io/instance. Getting this wrong makes the selector match
+// nothing while every test still passes.
+func harborPVC(name, component string) *corev1.PersistentVolumeClaim {
 	return &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: testNS,
-			Labels:    map[string]string{helmInstanceLabel: helm.ReleaseName(testNS)},
+			Labels: map[string]string{
+				"app":       "harbor",
+				"release":   helm.ReleaseName(testNS),
+				"component": component,
+				"heritage":  "Helm",
+			},
 		},
 	}
 }
@@ -240,14 +249,14 @@ func backendIn(namespace string) *registryv1alpha1.RegistryBackend {
 }
 
 func TestDeletePVCs_OnlyDeletesThisReleasesPVCs(t *testing.T) {
-	matching := harborPVC("data-harbor-acme-project-1-database-0")
+	matching := harborPVC("database-data-harbor-acme-project-1-database-0", "database")
 	// A claim from an unrelated workload sharing the namespace: selecting on
 	// namespace alone would destroy user data here.
 	userWorkload := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "postgres-data",
 			Namespace: testNS,
-			Labels:    map[string]string{helmInstanceLabel: "my-app"},
+			Labels:    map[string]string{"app": "my-app", "release": "my-app"},
 		},
 	}
 	unlabeled := &corev1.PersistentVolumeClaim{
@@ -316,7 +325,7 @@ func TestEnsureStorageSize_IgnoresPVCsOutsideTheHarborRelease(t *testing.T) {
 func TestEnsureStorageSize_HandlesNilRequestsMapWithoutPanicking(t *testing.T) {
 	// No Spec.Resources.Requests set at all — Requests is a nil map, the
 	// exact shape that panics on a plain map-index assignment.
-	pvc := harborPVC("data-harbor-acme-project-1-registry")
+	pvc := harborPVC("harbor-acme-project-1-registry", "registry")
 
 	fc := fake.NewClientBuilder().
 		WithScheme(newTestScheme(t)).

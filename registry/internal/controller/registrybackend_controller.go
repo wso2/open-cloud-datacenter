@@ -139,8 +139,14 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	registryURL := fmt.Sprintf("https://registry.%s.%s", harborNS, r.HelmCfg.BaseDomain)
 	cli := r.harborClient(registryURL, secrets.AdminPass)
 	if err := cli.Ping(ctx); err != nil {
+		// Carry the real cause into the message. This is an expected wait, so it
+		// is not logged as an error — which makes status.message the ONLY place
+		// the reason ever surfaces. Dropping err here turns "DNS failed", "no
+		// route to the ingress", and "Harbor answered 503" into one
+		// indistinguishable string.
 		return r.provisioning(ctx, &cr, secretName, registryURL,
-			"waiting for Harbor to accept API requests", 15*time.Second)
+			fmt.Sprintf("waiting for Harbor to accept API requests at %s: %v", registryURL, err),
+			15*time.Second)
 	}
 
 	// 4. Apply Harbor system configuration (idempotent).
@@ -337,7 +343,7 @@ func (r *RegistryBackendReconciler) ensureStorageSize(ctx context.Context, cr *r
 	var pvcs corev1.PersistentVolumeClaimList
 	if err := r.List(ctx, &pvcs,
 		client.InNamespace(cr.Namespace),
-		client.MatchingLabels{helmInstanceLabel: helm.ReleaseName(cr.Namespace)},
+		harborReleaseSelector(cr.Namespace),
 	); err != nil {
 		return fmt.Errorf("list PVCs: %w", err)
 	}
@@ -461,7 +467,7 @@ func (r *RegistryBackendReconciler) deletePVCs(ctx context.Context, cr *registry
 	var pvcs corev1.PersistentVolumeClaimList
 	if err := r.List(ctx, &pvcs,
 		client.InNamespace(cr.Namespace),
-		client.MatchingLabels{helmInstanceLabel: helm.ReleaseName(cr.Namespace)},
+		harborReleaseSelector(cr.Namespace),
 	); err != nil {
 		return err
 	}
@@ -473,10 +479,26 @@ func (r *RegistryBackendReconciler) deletePVCs(ctx context.Context, cr *registry
 	return nil
 }
 
-// helmInstanceLabel is the standard label Helm stamps on every object in a
-// release. It separates Harbor's objects from the user's own in a shared
-// namespace, so both PVC paths select on it rather than on namespace.
-const helmInstanceLabel = "app.kubernetes.io/instance"
+// Harbor's chart labels its objects with the LEGACY Helm convention —
+// `release`/`app`/`component`/`heritage` — not `app.kubernetes.io/instance`.
+// Selecting on the modern key matches nothing, silently turning both PVC paths
+// into no-ops: storage would never grow, and reclaimPolicy: Delete would leave
+// every volume behind.
+const (
+	helmReleaseLabel = "release"
+	harborAppLabel   = "app"
+	harborAppValue   = "harbor"
+)
+
+// harborReleaseSelector matches exactly the objects this namespace's Harbor
+// release owns. Harbor shares the namespace with the user's own workloads, so
+// every PVC lookup must go through this and never through namespace alone.
+func harborReleaseSelector(namespace string) client.MatchingLabels {
+	return client.MatchingLabels{
+		harborAppLabel:   harborAppValue,
+		helmReleaseLabel: helm.ReleaseName(namespace),
+	}
+}
 
 // harborClient returns a Harbor client honouring the configured TLS mode.
 func (r *RegistryBackendReconciler) harborClient(url, adminPass string) *harbor.Client {
