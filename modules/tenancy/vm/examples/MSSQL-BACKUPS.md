@@ -1,8 +1,8 @@
 # MS-SQL Backups Guide — native BACKUP to S3
 
-This guide walks you through backing up a **Microsoft SQL Server** database
-running on a standalone Harvester VM with the engine's native `BACKUP DATABASE`,
-using your own S3 bucket, and restoring it into a fresh VM — in the same
+This guide walks you through spinning up a **Microsoft SQL Server** VM on
+Harvester, backing up its databases with the engine's native `BACKUP DATABASE`
+to your own S3 bucket, and restoring them into a fresh VM — in the same
 datacenter or a different one. Everything here is self-service — no platform-admin
 action is required beyond the one-time tenant space you were already given.
 
@@ -28,18 +28,19 @@ the logins alone, into any SQL Server VM of the same or a newer version.
 > backups are portable across hosts and restore into the same-or-newer engine,
 > which a raw data-file copy is not.
 >
-> **Prerequisite:** a VM provisioned per the [`vm` module README](../README.md)
-> running **SQL Server** (with `mssql-tools18` on the box, i.e.
-> `/opt/mssql-tools18/bin/sqlcmd`), the `sa` password, your own Rancher-scoped
-> Harvester kubeconfig, and AWS credentials able to create an S3 bucket and an IAM
-> user.
+> **Prerequisite:** a VM provisioned per the [`vm` module README](../README.md) on
+> **Ubuntu 22.04** (required by the SQL Server apt repo used in §2), your own
+> Rancher-scoped Harvester kubeconfig, and AWS credentials able to create an S3
+> bucket and an IAM user. This guide's cloud-init installs SQL Server itself —
+> you don't need it pre-installed, just a chosen `sa` password meeting SQL
+> Server's password policy (§2).
 
 ---
 
 ## Table of Contents
 
 - [1. Create the bucket and IAM user](#1-create-the-bucket-and-iam-user)
-- [2. Add the Terraform (cloud-init backup install + timer)](#2-add-the-terraform-cloud-init-backup-install--timer)
+- [2. Add the Terraform (cloud-init SQL Server install + backup timer)](#2-add-the-terraform-cloud-init-sql-server-install--backup-timer)
 - [3. Apply](#3-apply)
 - [4. Verify](#4-verify)
 - [5. Restore](#5-restore)
@@ -112,13 +113,19 @@ bucket-level actions have **no** `/*`, object-level actions do:
 
 Generate an access key pair for the user.
 
-## 2. Add the Terraform (cloud-init backup install + timer)
+## 2. Add the Terraform (cloud-init SQL Server install + backup timer)
 
-The backup is configured entirely through the VM's **cloud-init**, passed to the
-`vm` module's `user_data`. There is no separate backup server. The timer service
-runs as root and authenticates to SQL Server with the `sa` password, which is
-delivered to `sqlcmd` as `SQLCMDPASSWORD` via the unit's root-only
-`EnvironmentFile` — so it never appears in a command line or process list.
+SQL Server and the backup are both configured entirely through the VM's
+**cloud-init**, passed to the `vm` module's `user_data`. There is no separate
+backup server, and no manual `mssql-conf setup` step — cloud-init runs it
+unattended with the `sa` password from Terraform. The timer service runs as
+root and authenticates to SQL Server with that same `sa` password, delivered to
+`sqlcmd` as `SQLCMDPASSWORD` via the unit's root-only `EnvironmentFile` — so it
+never appears in a command line or process list.
+
+> **Note.** Set `mssql_version_year` to `2022` or `2025` to install that version
+> of SQL Server. Older versions (2019, 2017) aren't supported — they need a
+> different install method and don't run on Ubuntu 22.04 at all.
 
 **`variables.tf`** — add:
 
@@ -127,7 +134,7 @@ variable "db_s3_bucket" { type = string }
 variable "db_s3_region" { type = string }
 variable "db_s3_prefix" {
   type    = string
-  default = "my-db" # per-VM prefix in the bucket; keep one prefix per server
+  default = "my-db"                 # per-VM prefix in the bucket; keep one prefix per server
 }
 variable "db_s3_access_key" {
   type      = string
@@ -137,9 +144,55 @@ variable "db_s3_secret_key" {
   type      = string
   sensitive = true
 }
+
+variable "mssql_version_year" {
+  type    = string
+  default = "2022"                  # MSSQL version year required 2022 or 2025
+
+  validation {
+    condition     = contains(["2022", "2025"], var.mssql_version_year)
+    error_message = "mssql_version_year must be \"2022\" or \"2025\"."
+  }
+}
+
+variable "mssql_edition" {
+  type    = string
+  default = "Developer"             # MSSQL edition required for your use case
+
+  # Developer is free but non-production only; Express is free and
+  # production-capable but resource-capped; Standard/Enterprise need a paid
+  # license (the edition name if already licensed, or a product key).
+  validation {
+    condition = (
+      contains(["Developer", "Express", "Standard", "Enterprise"], var.mssql_edition) ||
+      can(regex("^[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}$", var.mssql_edition))
+    )
+    error_message = "mssql_edition must be one of Developer, Express, Standard, Enterprise, or a valid 25-character product key."
+  }
+}
+
 variable "mssql_sa_password" {
   type      = string
   sensitive = true
+
+  # SQL Server's own password policy, enforced here instead of failing partway
+  # through cloud-init: 8-128 characters, from at least 3 of uppercase,
+  # lowercase, digit, symbol, no whitespace (it's written to a systemd
+  # EnvironmentFile as an unquoted KEY=value).
+  validation {
+    condition = (
+      length(var.mssql_sa_password) >= 8 &&
+      length(var.mssql_sa_password) <= 128 &&
+      !can(regex("\\s", var.mssql_sa_password)) &&
+      (
+        (can(regex("[A-Z]", var.mssql_sa_password)) ? 1 : 0) +
+        (can(regex("[a-z]", var.mssql_sa_password)) ? 1 : 0) +
+        (can(regex("[0-9]", var.mssql_sa_password)) ? 1 : 0) +
+        (can(regex("[^A-Za-z0-9]", var.mssql_sa_password)) ? 1 : 0)
+      ) >= 3
+    )
+    error_message = "mssql_sa_password must be 8-128 characters long, contain characters from at least 3 of these 4 sets: uppercase letters, lowercase letters, numbers, and symbols, and contain no whitespace — SQL Server's default password policy. mssql-conf will otherwise reject it mid-install, after mssql-server is already unpacked."
+  }
 }
 ```
 
@@ -160,6 +213,43 @@ locals {
     AWS_SECRET_ACCESS_KEY=${var.db_s3_secret_key}
     SQLCMDPASSWORD=${var.mssql_sa_password}
   ENV
+
+  # Installs SQL Server (var.mssql_version_year) + mssql-tools18 unattended,
+  # using the sa password from backup.env — no interactive `mssql-conf setup`.
+  # Only 2022/2025 work with this repo setup on Ubuntu 22.04 (see that
+  # variable's validation block).
+  mssql_install = <<-SH
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Read SQLCMDPASSWORD from backup.env without evaluating the value
+    SQLCMDPASSWORD="$(grep -m1 '^SQLCMDPASSWORD=' /etc/db-backup/backup.env | cut -d= -f2-)"
+    [ -n "$SQLCMDPASSWORD" ]
+
+    apt-get update
+    apt-get install -y curl gnupg ca-certificates
+
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+    chmod 0644 /usr/share/keyrings/microsoft-prod.gpg
+
+    curl -fsSL https://packages.microsoft.com/config/ubuntu/22.04/mssql-server-${var.mssql_version_year}.list | \
+      sed 's/deb \[/deb [signed-by=\/usr\/share\/keyrings\/microsoft-prod.gpg /' | \
+      tee /etc/apt/sources.list.d/mssql-server-${var.mssql_version_year}.list
+
+    curl -fsSL https://packages.microsoft.com/config/ubuntu/22.04/prod.list | \
+      sed 's/deb \[/deb [signed-by=\/usr\/share\/keyrings\/microsoft-prod.gpg /' | \
+      tee /etc/apt/sources.list.d/msprod.list
+
+    apt-get update
+    apt-get install -y mssql-server
+
+    MSSQL_SA_PASSWORD="$SQLCMDPASSWORD" MSSQL_PID="${var.mssql_edition}" /opt/mssql/bin/mssql-conf -n setup accept-eula
+
+    ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
+
+    systemctl enable --now mssql-server.service
+  SH
 
   # Native compressed, checksummed backup of each user database (database_id > 4
   # skips the system DBs), verified, uploaded to a timestamped S3 prefix, then
@@ -246,6 +336,10 @@ module "my_db_vm" {
         permissions: '0600'
         encoding: b64
         content: ${base64encode(local.db_backup_env)}
+      - path: /opt/install-mssql.sh
+        permissions: '0755'
+        encoding: b64
+        content: ${base64encode(local.mssql_install)}
       - path: /opt/db-backup.sh
         permissions: '0755'
         encoding: b64
@@ -277,8 +371,15 @@ module "my_db_vm" {
           Persistent=true
           [Install]
           WantedBy=timers.target
+      # Optional: puts sqlcmd/bcp on PATH for every login shell, so you don't
+      # need the full /opt/mssql-tools18/bin/sqlcmd path when you SSH in.
+      - path: /etc/profile.d/mssql-tools18.sh
+        permissions: '0644'
+        content: |
+          export PATH="$PATH:/opt/mssql-tools18/bin"
     runcmd:
       - systemctl enable --now qemu-guest-agent.service
+      - bash /opt/install-mssql.sh
       - bash /opt/db-backup-setup.sh
   YAML
 
@@ -296,14 +397,12 @@ module "my_db_vm" {
 ```
 
 **`terraform.tfvars`** — add `db_s3_bucket = "my-team-db-bkps"`,
-`db_s3_region = "<your-region>"`, and optionally `db_s3_prefix`.
+`db_s3_region = "<your-region>"`, and optionally `db_s3_prefix`,
+`mssql_version_year` (defaults to `"2022"`; set `"2025"` for the newer release),
+and `mssql_edition` (defaults to `"Developer"` — free but non-production; set
+`"Standard"`/`"Enterprise"` if already licensed, or a paid product key).
 **`secret.tfvars`** — add `db_s3_access_key` / `db_s3_secret_key` /
 `mssql_sa_password`.
-
-> **Why base64.** Cloud-init is delivered through the Rancher proxy, which sits
-> behind a WAF that blocks raw shell payloads (`curl | bash`, `apt`, `sqlcmd`) in
-> `runcmd`. Base64-embedding every script in `write_files` (`encoding: b64`) hides
-> it from the WAF; keep `runcmd` to `bash /opt/...`.
 
 ### Configure what to back up and when
 
@@ -425,7 +524,7 @@ restore `logins.sql` first (as in §5.1).
 
 ### 5.3 In a different datacenter (cross-DC DR)
 
-The restore VM half is identical — only *where* you create it differs:
+The restore VM half is identical — only _where_ you create it differs:
 
 1. Have the DC team provision a tenant space (namespace + network + RBAC) in the
    DR datacenter, one time.
@@ -472,11 +571,11 @@ application/pipeline at the standby.
 The timer frequency = your **RPO**; the S3 lifecycle `Expiration` (§1) = how far
 back you can recover.
 
-| Tier | Timer (`OnCalendar`, UTC) | Retention (S3 `Expiration` days) |
-|------|---------------------------|----------------------------------|
-| Daily | `*-*-* 01:00:00` | `30` |
-| 12-hourly | `*-*-* 01,13:00:00` | `14` |
-| Hourly | `*-*-* *:00:00` | `3` |
+| Tier      | Timer (`OnCalendar`, UTC) | Retention (S3 `Expiration` days) |
+| --------- | ------------------------- | -------------------------------- |
+| Daily     | `*-*-* 01:00:00`          | `30`                             |
+| 12-hourly | `*-*-* 01,13:00:00`       | `14`                             |
+| Hourly    | `*-*-* *:00:00`           | `3`                              |
 
 - `OnCalendar` is **UTC**. Add `RandomizedDelaySec` and stagger VMs so a fleet
   doesn't push to S3 at once.
@@ -496,8 +595,8 @@ back you can recover.
 - **One bucket + IAM user per team**, least privilege; never write to another
   team's or the platform's bucket.
 - **Don't use `sa` in production.** This example uses `sa` for brevity. Backing up
-  databases needs only a `db_backupoperator`/backup-scoped login; only the *login
-  export* (reading `sys.sql_logins.password_hash`) needs instance-admin. Split
+  databases needs only a `db_backupoperator`/backup-scoped login; only the _login
+  export_ (reading `sys.sql_logins.password_hash`) needs instance-admin. Split
   these: a least-privilege backup login for the timer, and a separate, tightly
   controlled admin step (or a different credential) for exporting logins.
 - Store the IAM keys and the `sa` password in a secrets manager. Never commit
