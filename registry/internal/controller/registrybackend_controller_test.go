@@ -42,80 +42,11 @@ func newBackendReconciler(t *testing.T, fc client.WithWatch) *RegistryBackendRec
 	}
 }
 
-// --- resolveHarborNamespace: label-based lookup, never a create ---
-
-// The operator must never create a namespace itself — placing one inside a
-// Harvester project is Rancher's own admission-webhook-gated authorization
-// boundary, not Kubernetes RBAC's (see problem5-namespace-ownership). This
-// proves the replacement: exactly one namespace labeled harborManagementLabel
-// for the tenant resolves; zero or more than one both error clearly instead of
-// guessing.
-func TestResolveHarborNamespace(t *testing.T) {
-	const tenantID = "p-rnmw7"
-
-	labeled := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name:        "tenant-sandaru",
-		Labels:      map[string]string{harborManagementLabel: "true"},
-		Annotations: map[string]string{tenantProjectKey: "c-dh75f:p-rnmw7"},
-	}}
-	unlabeledSameTenant := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name:        "tenant-sandaru-project-1",
-		Annotations: map[string]string{tenantProjectKey: "c-dh75f:p-rnmw7"},
-	}}
-	labeledOtherTenant := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name:        "other-tenant-common",
-		Labels:      map[string]string{harborManagementLabel: "true"},
-		Annotations: map[string]string{tenantProjectKey: "c-dh75f:p-other"},
-	}}
-
-	t.Run("resolves the one labeled namespace for this tenant", func(t *testing.T) {
-		fc := fake.NewClientBuilder().WithScheme(newTestScheme(t)).
-			WithObjects(labeled, unlabeledSameTenant, labeledOtherTenant).Build()
-		r := newBackendReconciler(t, fc)
-
-		got, err := r.resolveHarborNamespace(context.Background(), tenantID)
-		if err != nil {
-			t.Fatalf("resolveHarborNamespace() error = %v", err)
-		}
-		if got != "tenant-sandaru" {
-			t.Errorf("resolveHarborNamespace() = %q, want %q", got, "tenant-sandaru")
-		}
-	})
-
-	t.Run("errors clearly when no namespace is labeled for this tenant", func(t *testing.T) {
-		fc := fake.NewClientBuilder().WithScheme(newTestScheme(t)).
-			WithObjects(unlabeledSameTenant, labeledOtherTenant).Build()
-		r := newBackendReconciler(t, fc)
-
-		if _, err := r.resolveHarborNamespace(context.Background(), tenantID); err == nil {
-			t.Error("resolveHarborNamespace() returned nil error with no labeled namespace for the tenant; " +
-				"it must never fall back to creating one")
-		}
-	})
-
-	t.Run("errors on ambiguity when two namespaces are labeled for the same tenant", func(t *testing.T) {
-		second := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-			Name:        "tenant-sandaru-second",
-			Labels:      map[string]string{harborManagementLabel: "true"},
-			Annotations: map[string]string{tenantProjectKey: "c-dh75f:p-rnmw7"},
-		}}
-		fc := fake.NewClientBuilder().WithScheme(newTestScheme(t)).
-			WithObjects(labeled, second).Build()
-		r := newBackendReconciler(t, fc)
-
-		if _, err := r.resolveHarborNamespace(context.Background(), tenantID); err == nil {
-			t.Error("resolveHarborNamespace() returned nil error with two labeled namespaces for one tenant; " +
-				"ambiguity must be reported, not silently resolved")
-		}
-	})
-}
-
 // --- patchStatus: optimistic-concurrency retry loop ---
 
 func TestPatchStatus_RetriesOnceOnConflictThenSucceeds(t *testing.T) {
 	cr := &registryv1alpha1.RegistryBackend{
-		ObjectMeta: metav1.ObjectMeta{Name: "rb-acme", Namespace: "registry-system"},
-		Spec:       registryv1alpha1.RegistryBackendSpec{TenantID: "acme"},
+		ObjectMeta: metav1.ObjectMeta{Name: backendName, Namespace: "acme-project-1"},
 	}
 
 	updateCalls := 0
@@ -160,7 +91,7 @@ func TestPatchStatus_RetriesOnceOnConflictThenSucceeds(t *testing.T) {
 
 func TestPatchStatus_ExhaustsRetriesAndReturnsError(t *testing.T) {
 	cr := &registryv1alpha1.RegistryBackend{
-		ObjectMeta: metav1.ObjectMeta{Name: "rb-acme", Namespace: "registry-system"},
+		ObjectMeta: metav1.ObjectMeta{Name: backendName, Namespace: "acme-project-1"},
 	}
 
 	updateCalls := 0
@@ -195,30 +126,32 @@ func TestPatchStatus_ExhaustsRetriesAndReturnsError(t *testing.T) {
 
 // --- handleDelete: deletion blocked while dependent Registries exist ---
 
-// Registries record their backend in status, never in spec, so the guard has to
-// match on that binding. Matching on anything else would let a backend be
-// deleted out from under live registries.
+// A Registry in the backend's namespace is a dependent by that fact alone, so
+// the guard protects it from the instant it is created, before it has ever
+// reconciled or written any status.
 func TestHandleDelete_BlocksWhileDependentInstanceExists(t *testing.T) {
 	cr := &registryv1alpha1.RegistryBackend{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:              "rb-acme",
+			Name:              backendName,
+			Namespace:         "acme-project-1",
 			Finalizers:        []string{backendFinalizer},
 			DeletionTimestamp: &metav1.Time{Time: time.Now()},
 		},
-		Spec: registryv1alpha1.RegistryBackendSpec{TenantID: "acme"},
 	}
+	// Deliberately status-free: never reconciled, still a blocker.
 	blockingInstance := &registryv1alpha1.Registry{
 		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "acme-project-1"},
-		Status: registryv1alpha1.RegistryStatus{
-			TenantID:    "acme",
-			BackendName: "rb-acme",
-		},
+	}
+	// A Registry in a different namespace is served by a different Harbor and
+	// must not block this one.
+	unrelated := &registryv1alpha1.Registry{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "other-project"},
 	}
 
 	fc := fake.NewClientBuilder().
 		WithScheme(newTestScheme(t)).
 		WithStatusSubresource(&registryv1alpha1.RegistryBackend{}).
-		WithObjects(cr, blockingInstance).
+		WithObjects(cr, blockingInstance, unrelated).
 		Build()
 
 	r := newBackendReconciler(t, fc)
@@ -264,8 +197,8 @@ func TestHandleDelete_NoFinalizerIsNoOp(t *testing.T) {
 	// the real API server can never actually hand back to Reconcile.
 	cr := &registryv1alpha1.RegistryBackend{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:              "rb-acme",
-			Namespace:         "registry-system",
+			Name:              backendName,
+			Namespace:         "acme-project-1",
 			DeletionTimestamp: &metav1.Time{Time: time.Now()},
 			// no finalizers
 		},
@@ -285,48 +218,55 @@ func TestHandleDelete_NoFinalizerIsNoOp(t *testing.T) {
 	}
 }
 
-// --- deletePVCs: only PVCs matching this tenant's Helm-instance label are touched ---
+// --- PVC selection: Harbor shares its namespace with the user's workloads ---
 
-func TestDeletePVCs_OnlyDeletesMatchingLabeledPVCs(t *testing.T) {
-	cr := &registryv1alpha1.RegistryBackend{
-		Spec: registryv1alpha1.RegistryBackendSpec{TenantID: "acme"},
-	}
-	ns := "acme-management"
+const testNS = "acme-project-1"
 
-	matching := &corev1.PersistentVolumeClaim{
+// harborPVC builds a claim as Helm labels it for this namespace's release.
+func harborPVC(name string) *corev1.PersistentVolumeClaim {
+	return &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "data-harbor-acme-database-0",
-			Namespace: ns,
-			Labels:    map[string]string{"app.kubernetes.io/instance": "harbor-acme"},
+			Name:      name,
+			Namespace: testNS,
+			Labels:    map[string]string{helmInstanceLabel: helm.ReleaseName(testNS)},
 		},
 	}
-	otherTenant := &corev1.PersistentVolumeClaim{
+}
+
+func backendIn(namespace string) *registryv1alpha1.RegistryBackend {
+	return &registryv1alpha1.RegistryBackend{
+		ObjectMeta: metav1.ObjectMeta{Name: backendName, Namespace: namespace},
+	}
+}
+
+func TestDeletePVCs_OnlyDeletesThisReleasesPVCs(t *testing.T) {
+	matching := harborPVC("data-harbor-acme-project-1-database-0")
+	// A claim from an unrelated workload sharing the namespace: selecting on
+	// namespace alone would destroy user data here.
+	userWorkload := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "data-harbor-beta-database-0",
-			Namespace: ns,
-			Labels:    map[string]string{"app.kubernetes.io/instance": "harbor-beta"},
+			Name:      "postgres-data",
+			Namespace: testNS,
+			Labels:    map[string]string{helmInstanceLabel: "my-app"},
 		},
 	}
 	unlabeled := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "some-unrelated-pvc",
-			Namespace: ns,
-		},
+		ObjectMeta: metav1.ObjectMeta{Name: "some-unrelated-pvc", Namespace: testNS},
 	}
 
 	fc := fake.NewClientBuilder().
 		WithScheme(newTestScheme(t)).
-		WithObjects(matching, otherTenant, unlabeled).
+		WithObjects(matching, userWorkload, unlabeled).
 		Build()
 
 	r := newBackendReconciler(t, fc)
-	if err := r.deletePVCs(context.Background(), cr, ns); err != nil {
+	if err := r.deletePVCs(context.Background(), backendIn(testNS)); err != nil {
 		t.Fatalf("deletePVCs() error = %v", err)
 	}
 
 	assertExists := func(name string, wantExists bool) {
 		var pvc corev1.PersistentVolumeClaim
-		err := fc.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: name}, &pvc)
+		err := fc.Get(context.Background(), client.ObjectKey{Namespace: testNS, Name: name}, &pvc)
 		exists := err == nil
 		if !wantExists && !apierrors.IsNotFound(err) && err != nil {
 			t.Fatalf("unexpected error checking %q: %v", name, err)
@@ -336,23 +276,47 @@ func TestDeletePVCs_OnlyDeletesMatchingLabeledPVCs(t *testing.T) {
 		}
 	}
 	assertExists(matching.Name, false)
-	assertExists(otherTenant.Name, true)
+	assertExists(userWorkload.Name, true)
 	assertExists(unlabeled.Name, true)
+}
+
+// Harbor's PVCs are matched by a name suffix, which is only unambiguous within
+// its own release. A user claim in the same namespace that happens to end in
+// "-registry" must not be resized.
+func TestEnsureStorageSize_IgnoresPVCsOutsideTheHarborRelease(t *testing.T) {
+	foreign := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-app-registry", Namespace: testNS},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+			},
+		},
+	}
+
+	fc := fake.NewClientBuilder().WithScheme(newTestScheme(t)).WithObjects(foreign).Build()
+
+	r := newBackendReconciler(t, fc)
+	plan := helm.SizePlan{RegistryStorage: "50Gi", DBStorage: "5Gi"}
+	if err := r.ensureStorageSize(context.Background(), backendIn(testNS), plan); err != nil {
+		t.Fatalf("ensureStorageSize() error = %v, want nil", err)
+	}
+
+	var got corev1.PersistentVolumeClaim
+	if err := fc.Get(context.Background(), client.ObjectKeyFromObject(foreign), &got); err != nil {
+		t.Fatalf("Get() after ensureStorageSize error = %v", err)
+	}
+	want := resource.MustParse("1Gi")
+	if gotQty := got.Spec.Resources.Requests[corev1.ResourceStorage]; gotQty.Cmp(want) != 0 {
+		t.Errorf("unrelated PVC was resized to %s, want it left at %s", gotQty.String(), want.String())
+	}
 }
 
 // --- ensureStorageSize: growing a PVC with no existing Requests map ---
 
 func TestEnsureStorageSize_HandlesNilRequestsMapWithoutPanicking(t *testing.T) {
-	cr := &registryv1alpha1.RegistryBackend{
-		Spec: registryv1alpha1.RegistryBackendSpec{TenantID: "acme"},
-	}
-	ns := "acme-management"
-
 	// No Spec.Resources.Requests set at all — Requests is a nil map, the
 	// exact shape that panics on a plain map-index assignment.
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "data-harbor-acme-registry", Namespace: ns},
-	}
+	pvc := harborPVC("data-harbor-acme-project-1-registry")
 
 	fc := fake.NewClientBuilder().
 		WithScheme(newTestScheme(t)).
@@ -360,17 +324,75 @@ func TestEnsureStorageSize_HandlesNilRequestsMapWithoutPanicking(t *testing.T) {
 		Build()
 
 	r := newBackendReconciler(t, fc)
-	plan := helm.TenantPlan{RegistryStorage: "50Gi", DBStorage: "5Gi"}
-	if err := r.ensureStorageSize(context.Background(), cr, ns, plan); err != nil {
+	plan := helm.SizePlan{RegistryStorage: "50Gi", DBStorage: "5Gi"}
+	if err := r.ensureStorageSize(context.Background(), backendIn(testNS), plan); err != nil {
 		t.Fatalf("ensureStorageSize() error = %v, want nil", err)
 	}
 
 	var got corev1.PersistentVolumeClaim
-	if err := fc.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: pvc.Name}, &got); err != nil {
+	if err := fc.Get(context.Background(), client.ObjectKeyFromObject(pvc), &got); err != nil {
 		t.Fatalf("Get() after ensureStorageSize error = %v", err)
 	}
 	want := resource.MustParse("50Gi")
 	if gotQty := got.Spec.Resources.Requests[corev1.ResourceStorage]; gotQty.Cmp(want) != 0 {
 		t.Errorf("PVC storage request = %s, want %s", gotQty.String(), want.String())
+	}
+}
+
+// --- ensureAdminSecret: never regenerates over an existing Secret ---
+
+// The recovery story for reclaimPolicy: Retain rests on this. The Secret carries
+// no owner reference, so it outlives the backend; on re-create, ensureAdminSecret
+// must return the stored values, not fresh ones. Regenerating would leave the
+// reattached Postgres volume holding the OLD password in its data files, and
+// Harbor's core could never authenticate to its own database again.
+func TestEnsureAdminSecret_ReusesStoredValuesInsteadOfRegenerating(t *testing.T) {
+	cr := backendIn(testNS)
+	fc := fake.NewClientBuilder().WithScheme(newTestScheme(t)).WithObjects(cr).Build()
+	r := newBackendReconciler(t, fc)
+
+	first, name, err := r.ensureAdminSecret(context.Background(), cr)
+	if err != nil {
+		t.Fatalf("ensureAdminSecret() first call error = %v", err)
+	}
+	if first.AdminPass == "" || first.DBPass == "" || first.EncryptionKey == "" {
+		t.Fatal("first call left a credential empty")
+	}
+
+	// Second call stands in for the reconcile after a Retain delete + re-create:
+	// same namespace, same fixed backend name, so the same Secret is found.
+	second, secondName, err := r.ensureAdminSecret(context.Background(), cr)
+	if err != nil {
+		t.Fatalf("ensureAdminSecret() second call error = %v", err)
+	}
+	if secondName != name {
+		t.Errorf("secret name changed between calls: %q then %q", name, secondName)
+	}
+	if second != first {
+		t.Errorf("credentials were regenerated over an existing Secret:\n first  = %+v\n second = %+v", first, second)
+	}
+}
+
+// A key added to harborSecretGenerators after the Secret was first created must
+// be filled in, without disturbing any key already there — self-heal must never
+// become silent rotation of a live credential.
+func TestEnsureAdminSecret_FillsMissingKeyWithoutRotatingExistingOnes(t *testing.T) {
+	cr := backendIn(testNS)
+	partial := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: cr.Name + "-harbor-admin", Namespace: testNS},
+		Data:       map[string][]byte{"HARBOR_ADMIN_PASSWORD": []byte("Aa1-preexisting-admin-pass")},
+	}
+	fc := fake.NewClientBuilder().WithScheme(newTestScheme(t)).WithObjects(cr, partial).Build()
+	r := newBackendReconciler(t, fc)
+
+	got, _, err := r.ensureAdminSecret(context.Background(), cr)
+	if err != nil {
+		t.Fatalf("ensureAdminSecret() error = %v", err)
+	}
+	if got.AdminPass != "Aa1-preexisting-admin-pass" {
+		t.Errorf("existing admin password was rotated: got %q", got.AdminPass)
+	}
+	if got.DBPass == "" || got.EncryptionKey == "" || got.CoreSecret == "" {
+		t.Errorf("missing keys were not generated: %+v", got)
 	}
 }

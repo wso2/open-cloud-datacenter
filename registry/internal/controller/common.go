@@ -1,9 +1,9 @@
 // Package controller holds the two reconcilers for the registry operator:
-// Registry (a project inside a tenant's Harbor, and the only resource tenants
-// create) and RegistryBackend (one Harbor deployment per tenant, provisioned by
-// the operator when a tenant's first Registry appears). The Custom Resource is
-// the single source of truth, and all work happens inside the reconcile loop,
-// with slow waits handled via RequeueAfter.
+// Registry (a project inside its namespace's Harbor, and the only resource
+// users create) and RegistryBackend (one Harbor deployment per namespace,
+// provisioned by the operator when a namespace's first Registry appears). The
+// Custom Resource is the single source of truth, and all work happens inside
+// the reconcile loop, with slow waits handled via RequeueAfter.
 package controller
 
 import (
@@ -31,9 +31,12 @@ const (
 	reclaimDelete = "Delete"
 	reclaimRetain = "Retain"
 
-	// tenantLabel records which tenant a RegistryBackend serves, so backends can
-	// be found by tenant without parsing their name.
-	tenantLabel = "registry.opencloud.wso2.com/tenant-id"
+	// backendName is the fixed name of the RegistryBackend in every namespace
+	// that has one: given a namespace, this name is the whole address of its
+	// Harbor. A constant name is also what keeps the singleton safe without
+	// locking — concurrent first Registries create the identical object, so one
+	// wins and the other adopts it.
+	backendName = "harbor"
 
 	// defaultCommittedThresholdPercent is the share of provisioned registry
 	// storage that may be committed to registry quotas before the Harbor
@@ -59,7 +62,7 @@ func newHarborClient(cfg config.HelmConfig, url, adminPass string) *harbor.Clien
 }
 
 // backendReadinessChanged limits backend-driven wake-ups to the transitions a
-// Registry cares about: whether Harbor became usable, and where it lives.
+// Registry cares about: whether Harbor became usable, and where to reach it.
 func backendReadinessChanged() predicate.Predicate {
 	return predicate.Funcs{
 		CreateFunc: func(event.CreateEvent) bool { return true },
@@ -72,8 +75,7 @@ func backendReadinessChanged() predicate.Predicate {
 			}
 			return oldB.Status.Phase != newB.Status.Phase ||
 				oldB.Status.RegistryURL != newB.Status.RegistryURL ||
-				oldB.Status.AdminSecretName != newB.Status.AdminSecretName ||
-				oldB.Status.HarborNamespace != newB.Status.HarborNamespace
+				oldB.Status.AdminSecretName != newB.Status.AdminSecretName
 		},
 	}
 }

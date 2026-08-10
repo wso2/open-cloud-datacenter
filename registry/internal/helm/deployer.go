@@ -66,15 +66,15 @@ func (d *Deployer) ensureRepo() error {
 	return nil
 }
 
-// Install deploys a new Harbor instance for a tenant into their management namespace
-// on the Harvester cluster.
-func (d *Deployer) Install(ctx context.Context, tenantID, namespace string, values []byte) error {
+// Install deploys Harbor into a namespace on the Harvester cluster. One release
+// per namespace, so the namespace alone names it.
+func (d *Deployer) Install(ctx context.Context, namespace string, values []byte) error {
 	cfg, err := d.actionConfig(namespace)
 	if err != nil {
 		return err
 	}
 
-	valuesPath, cleanup, err := writeTempValues(tenantID, values)
+	valuesPath, cleanup, err := writeTempValues(namespace, values)
 	defer cleanup()
 	if err != nil {
 		return err
@@ -90,7 +90,7 @@ func (d *Deployer) Install(ctx context.Context, tenantID, namespace string, valu
 		return err
 	}
 
-	rel := releaseName(tenantID)
+	rel := ReleaseName(namespace)
 
 	// Level-triggered convergence: desired state is the freshly rendered
 	// values; observed state is the deployed release's values. Missing →
@@ -112,7 +112,6 @@ func (d *Deployer) Install(ctx context.Context, tenantID, namespace string, valu
 		install.Atomic = false
 
 		d.logger.Info("installing harbor on harvester",
-			zap.String("tenant", tenantID),
 			zap.String("namespace", namespace),
 			zap.String("target_cluster", "harvester"),
 		)
@@ -139,7 +138,6 @@ func (d *Deployer) Install(ctx context.Context, tenantID, namespace string, valu
 	}
 
 	d.logger.Info("values drift detected, upgrading harbor release",
-		zap.String("tenant", tenantID),
 		zap.String("namespace", namespace),
 	)
 	up := action.NewUpgrade(cfg)
@@ -199,9 +197,9 @@ func nestedSet(m map[string]interface{}, path []string, v interface{}) {
 	cur[path[len(path)-1]] = v
 }
 
-// Uninstall removes the Harbor Helm release from the tenant's management namespace on Harvester.
+// Uninstall removes the Harbor Helm release from a namespace on Harvester.
 // PVCs are NOT deleted (resourcePolicy: keep) — data survives until explicit hard delete.
-func (d *Deployer) Uninstall(ctx context.Context, tenantID, namespace string) error {
+func (d *Deployer) Uninstall(ctx context.Context, namespace string) error {
 	cfg, err := d.actionConfig(namespace)
 	if err != nil {
 		return err
@@ -213,7 +211,7 @@ func (d *Deployer) Uninstall(ctx context.Context, tenantID, namespace string) er
 	type result struct{ err error }
 	ch := make(chan result, 1)
 	go func() {
-		_, err := uninstall.Run(releaseName(tenantID))
+		_, err := uninstall.Run(ReleaseName(namespace))
 		ch <- result{err}
 	}()
 	select {
@@ -224,7 +222,7 @@ func (d *Deployer) Uninstall(ctx context.Context, tenantID, namespace string) er
 			return fmt.Errorf("helm uninstall: %w", r.err)
 		}
 	}
-	d.logger.Info("harbor uninstalled", zap.String("tenant", tenantID))
+	d.logger.Info("harbor uninstalled", zap.String("namespace", namespace))
 	return nil
 }
 
@@ -295,8 +293,8 @@ func (d *Deployer) loadChart() (*chart.Chart, error) {
 
 // writeTempValues writes values to a temporary file and returns its path
 // along with a cleanup func that deletes it.
-func writeTempValues(tenantID string, values []byte) (path string, cleanup func(), err error) {
-	f, err := os.CreateTemp("/tmp/helm-values", fmt.Sprintf("harbor-%s-*.yaml", tenantID))
+func writeTempValues(namespace string, values []byte) (path string, cleanup func(), err error) {
+	f, err := os.CreateTemp("/tmp/helm-values", fmt.Sprintf("harbor-%s-*.yaml", namespace))
 	if err != nil {
 		return "", func() {}, err
 	}
@@ -328,7 +326,9 @@ func yamlToMap(data []byte, out map[string]interface{}) error {
 	return yaml.Unmarshal(data, out)
 }
 
-// releaseName returns the Helm release name for a tenant.
-func releaseName(tenantID string) string {
-	return fmt.Sprintf("harbor-%s", tenantID)
+// ReleaseName returns the Helm release name for a namespace's Harbor. Exported
+// because the reconciler selects Harbor's objects by the release label Helm
+// derives from it, and that selector must not drift from the name used here.
+func ReleaseName(namespace string) string {
+	return fmt.Sprintf("harbor-%s", namespace)
 }

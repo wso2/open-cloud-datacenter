@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -24,15 +23,6 @@ func newRegistryReconciler(t *testing.T, fc client.WithWatch) *RegistryReconcile
 		Scheme:   newTestScheme(t),
 		Recorder: record.NewFakeRecorder(64),
 	}
-}
-
-// namespaceInProject builds a namespace carrying the project assignment Rancher
-// would have given it.
-func namespaceInProject(name, projectID string) *corev1.Namespace {
-	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name:        name,
-		Annotations: map[string]string{tenantProjectKey: "c-m-test:" + projectID},
-	}}
 }
 
 func registryIn(namespace, name string) *registryv1alpha1.Registry {
@@ -59,11 +49,11 @@ func listBackends(t *testing.T, fc client.WithWatch) []registryv1alpha1.Registry
 	return l.Items
 }
 
-// The tenant's first Registry has to bring Harbor into being, since nobody
+// A namespace's first Registry has to bring Harbor into being, since nobody
 // creates a backend by hand.
 func TestBindBackend_FirstRegistryProvisionsHarbor(t *testing.T) {
 	reg := registryIn("acme-project-1", "web")
-	fc := newFakeClient(t, namespaceInProject("acme-project-1", "p-acme"), reg)
+	fc := newFakeClient(t, reg)
 	r := newRegistryReconciler(t, fc)
 
 	backend, res, err := r.bindBackend(context.Background(), reg)
@@ -82,11 +72,11 @@ func TestBindBackend_FirstRegistryProvisionsHarbor(t *testing.T) {
 		t.Fatalf("got %d backends, want exactly 1", len(backends))
 	}
 	got := backends[0]
-	if got.Name != "rb-p-acme" {
-		t.Errorf("backend name = %q, want rb-p-acme", got.Name)
+	if got.Name != backendName {
+		t.Errorf("backend name = %q, want %q", got.Name, backendName)
 	}
-	if got.Spec.TenantID != "p-acme" {
-		t.Errorf("backend tenantID = %q, want p-acme", got.Spec.TenantID)
+	if got.Namespace != "acme-project-1" {
+		t.Errorf("backend namespace = %q, want the Registry's own namespace", got.Namespace)
 	}
 	if got.Spec.Plan != "starter" {
 		t.Errorf("backend plan = %q, want the smallest plan", got.Spec.Plan)
@@ -97,17 +87,15 @@ func TestBindBackend_FirstRegistryProvisionsHarbor(t *testing.T) {
 	if !got.Spec.Autoscale.Enabled {
 		t.Error("autoscale should be enabled on an operator-created backend")
 	}
-	if got.Labels[tenantLabel] != "p-acme" {
-		t.Errorf("backend tenant label = %q, want p-acme", got.Labels[tenantLabel])
-	}
 }
 
-// A second namespace in the same tenant must reuse the Harbor already running,
-// not provision another one.
-func TestBindBackend_SecondRegistryReusesSameHarbor(t *testing.T) {
-	existing := readyBackend("rb-p-acme", "p-acme")
-	reg := registryIn("acme-project-2", "api")
-	fc := newFakeClient(t, namespaceInProject("acme-project-2", "p-acme"), existing, reg)
+// The requirement this design exists for: a second Registry in a namespace that
+// already has Harbor must only add a project to it, never provision a second
+// deployment.
+func TestBindBackend_SecondRegistryInSameNamespaceReusesHarbor(t *testing.T) {
+	existing := readyBackend("acme-project-1")
+	reg := registryIn("acme-project-1", "api")
+	fc := newFakeClient(t, existing, registryIn("acme-project-1", "web"), reg)
 	r := newRegistryReconciler(t, fc)
 
 	backend, _, err := r.bindBackend(context.Background(), reg)
@@ -117,22 +105,49 @@ func TestBindBackend_SecondRegistryReusesSameHarbor(t *testing.T) {
 	if backend == nil {
 		t.Fatal("bindBackend() returned nil for a Ready backend")
 	}
-	if backend.Name != "rb-p-acme" {
-		t.Errorf("bound to %q, want the tenant's existing rb-p-acme", backend.Name)
+	if backend.Namespace != "acme-project-1" || backend.Name != backendName {
+		t.Errorf("bound to %s/%s, want the namespace's existing Harbor", backend.Namespace, backend.Name)
 	}
 	if n := len(listBackends(t, fc)); n != 1 {
 		t.Errorf("got %d backends, want 1 — a second Registry must not provision another Harbor", n)
 	}
 }
 
-// Isolation: the tenant is read from the namespace, so a Registry in one tenant
-// can never resolve to another tenant's Harbor.
-func TestBindBackend_CannotReachAnotherTenantsHarbor(t *testing.T) {
-	tenantA := readyBackend("rb-p-a", "p-a")
-	tenantB := readyBackend("rb-p-b", "p-b")
-	reg := registryIn("b-project-1", "web")
+// The other half of the same rule: a different namespace is a different Harbor,
+// even when one is already running next door.
+func TestBindBackend_DifferentNamespaceGetsItsOwnHarbor(t *testing.T) {
+	fc := newFakeClient(t, readyBackend("acme-project-1"), registryIn("acme-project-2", "web"))
+	r := newRegistryReconciler(t, fc)
 
-	fc := newFakeClient(t, namespaceInProject("b-project-1", "p-b"), tenantA, tenantB, reg)
+	reg := registryIn("acme-project-2", "web")
+	if _, _, err := r.bindBackend(context.Background(), reg); err != nil {
+		t.Fatalf("bindBackend() error = %v", err)
+	}
+
+	backends := listBackends(t, fc)
+	if len(backends) != 2 {
+		t.Fatalf("got %d backends, want 2 — each namespace gets its own Harbor", len(backends))
+	}
+	seen := map[string]bool{}
+	for _, b := range backends {
+		if b.Name != backendName {
+			t.Errorf("backend %s/%s does not use the fixed name %q", b.Namespace, b.Name, backendName)
+		}
+		if seen[b.Namespace] {
+			t.Errorf("namespace %s has more than one backend", b.Namespace)
+		}
+		seen[b.Namespace] = true
+	}
+}
+
+// Isolation: the backend is addressed by the Registry's own namespace, so a
+// Registry can never resolve to another namespace's Harbor.
+func TestBindBackend_CannotReachAnotherNamespacesHarbor(t *testing.T) {
+	a := readyBackend("ns-a")
+	b := readyBackend("ns-b")
+	reg := registryIn("ns-b", "web")
+
+	fc := newFakeClient(t, a, b, reg)
 	r := newRegistryReconciler(t, fc)
 
 	backend, _, err := r.bindBackend(context.Background(), reg)
@@ -142,42 +157,17 @@ func TestBindBackend_CannotReachAnotherTenantsHarbor(t *testing.T) {
 	if backend == nil {
 		t.Fatal("bindBackend() returned nil")
 	}
-	if backend.Spec.TenantID != "p-b" {
-		t.Errorf("Registry in tenant p-b bound to tenant %q — cross-tenant binding", backend.Spec.TenantID)
+	if backend.Namespace != "ns-b" {
+		t.Errorf("Registry in ns-b bound to Harbor in %q — cross-namespace binding", backend.Namespace)
 	}
 }
 
-// A namespace outside any project has no tenant. Waiting is the only safe
-// answer; defaulting would hand it someone else's registry.
-func TestBindBackend_NamespaceWithoutProjectWaits(t *testing.T) {
-	reg := registryIn("orphan-ns", "web")
-	fc := newFakeClient(t, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "orphan-ns"}}, reg)
-	r := newRegistryReconciler(t, fc)
-
-	backend, res, err := r.bindBackend(context.Background(), reg)
-	if err != nil {
-		t.Fatalf("bindBackend() error = %v, want nil (a wait, not a failure)", err)
-	}
-	if backend != nil {
-		t.Error("bindBackend() bound a Registry whose namespace belongs to no project")
-	}
-	if res.RequeueAfter == 0 {
-		t.Error("bindBackend() did not requeue to wait for project assignment")
-	}
-	if n := len(listBackends(t, fc)); n != 0 {
-		t.Errorf("created %d backends for an unassigned namespace, want 0", n)
-	}
-}
-
-// Two namespaces in one tenant racing their first Registry must still end up
-// with a single Harbor; the derived name lets the API server settle it.
+// Two Registries in one namespace racing their first reconcile must still end
+// up with a single Harbor; the fixed name lets the API server settle it.
 func TestBindBackend_ConcurrentFirstRegistriesCreateOneHarbor(t *testing.T) {
 	regA := registryIn("acme-project-1", "web")
-	regB := registryIn("acme-project-2", "api")
-	fc := newFakeClient(t,
-		namespaceInProject("acme-project-1", "p-acme"),
-		namespaceInProject("acme-project-2", "p-acme"),
-		regA, regB)
+	regB := registryIn("acme-project-1", "api")
+	fc := newFakeClient(t, regA, regB)
 	r := newRegistryReconciler(t, fc)
 
 	if _, _, err := r.bindBackend(context.Background(), regA); err != nil {
@@ -194,39 +184,33 @@ func TestBindBackend_ConcurrentFirstRegistriesCreateOneHarbor(t *testing.T) {
 }
 
 // Harbor treats a create of an existing project as success, so two Registries
-// resolving to one project name would silently share images. Deriving the name
-// from the namespace makes that impossible.
-func TestHarborProjectName_UniquePerNamespaceAndRegistry(t *testing.T) {
-	same := harborProjectName(registryIn("acme-project-1", "web"))
-	if same != "acme-project-1-web" {
-		t.Errorf("harborProjectName() = %q, want acme-project-1-web", same)
+// resolving to one project name would silently share images. Each Harbor serves
+// one namespace, where Kubernetes already forbids duplicate names.
+func TestHarborProjectName_UniqueWithinANamespace(t *testing.T) {
+	if got := harborProjectName(registryIn("acme-project-1", "web")); got != "web" {
+		t.Errorf("harborProjectName() = %q, want web", got)
 	}
 
+	// Only same-namespace registries share a Harbor, so only they can collide.
 	seen := map[string]string{}
-	for _, c := range []struct{ ns, name string }{
-		{"acme-project-1", "web"},
-		{"acme-project-1", "api"}, // several registries in one namespace
-		{"acme-project-2", "web"}, // same registry name, different namespace
-		{"beta-project-1", "web"}, // different tenant entirely
-	} {
-		reg := registryIn(c.ns, c.name)
-		got := harborProjectName(reg)
+	for _, name := range []string{"web", "api", "docs"} {
+		got := harborProjectName(registryIn("acme-project-1", name))
 		if prev, dup := seen[got]; dup {
-			t.Errorf("%s/%s and %s collide on Harbor project %q", c.ns, c.name, prev, got)
+			t.Errorf("%s and %s collide on Harbor project %q", name, prev, got)
 		}
-		seen[got] = c.ns + "/" + c.name
+		seen[got] = name
 	}
 }
 
-// Deleting a Registry that never bound must not hang: there is no Harbor project
-// to remove.
-func TestHandleDelete_UnboundRegistryReleasesImmediately(t *testing.T) {
+// Deleting a Registry that never got a Harbor project must not hang: there is
+// nothing to remove.
+func TestHandleDelete_RegistryWithoutProjectReleasesImmediately(t *testing.T) {
 	reg := registryIn("acme-project-1", "web")
 	reg.Spec.ReclaimPolicy = reclaimDelete
 	reg.Finalizers = []string{registryFinalizer}
 	reg.DeletionTimestamp = &metav1.Time{Time: time.Now()}
 
-	fc := newFakeClient(t, namespaceInProject("acme-project-1", "p-acme"), reg)
+	fc := newFakeClient(t, reg)
 	r := newRegistryReconciler(t, fc)
 
 	res, err := r.handleDelete(context.Background(), reg, testLogger())
@@ -234,29 +218,66 @@ func TestHandleDelete_UnboundRegistryReleasesImmediately(t *testing.T) {
 		t.Fatalf("handleDelete() error = %v", err)
 	}
 	if res.RequeueAfter != 0 {
-		t.Errorf("handleDelete() requeued after %v for a Registry that never bound", res.RequeueAfter)
+		t.Errorf("handleDelete() requeued after %v for a Registry with no Harbor project", res.RequeueAfter)
 	}
 	for _, f := range reg.Finalizers {
 		if f == registryFinalizer {
-			t.Error("finalizer still present; an unbound Registry has nothing to clean up")
+			t.Error("finalizer still present; a Registry with no Harbor project has nothing to clean up")
 		}
 	}
 }
 
-// readyBackend builds a backend in the state a Registry can bind to.
-func readyBackend(name, tenant string) *registryv1alpha1.RegistryBackend {
+// registriesForBackend feeds the watch that wakes Registries when Harbor comes
+// up. It must cover the namespace's Registries and nothing else — including the
+// ones that have never bound, which are exactly the ones waiting on it.
+func TestRegistriesForBackend_OnlyItsOwnNamespace(t *testing.T) {
+	backend := readyBackend("ns-a")
+	fc := newFakeClient(t, backend,
+		registryIn("ns-a", "web"),
+		registryIn("ns-a", "api"),
+		registryIn("ns-b", "web"))
+	r := newRegistryReconciler(t, fc)
+
+	reqs := r.registriesForBackend(context.Background(), backend)
+	if len(reqs) != 2 {
+		t.Fatalf("got %d requests, want 2 (only ns-a's Registries)", len(reqs))
+	}
+	for _, req := range reqs {
+		if req.Namespace != "ns-a" {
+			t.Errorf("enqueued %s, which is not served by the ns-a backend", req.NamespacedName)
+		}
+	}
+}
+
+// Harbor ships a built-in project named "library" and it is PUBLIC.
+// CreateHarborProject treats 409 as success, so without a guard a Registry
+// named "library" would adopt that project, mint a push robot against it, and
+// report Ready — publishing the namespace's images world-readable. The project
+// name is the Registry's own name, so this is a name a user can just pick.
+func TestHarborProjectName_ReservedNamesAreRejected(t *testing.T) {
+	if !reservedProjectNames[harborProjectName(registryIn("acme-project-1", "library"))] {
+		t.Error(`a Registry named "library" resolves to Harbor's public built-in project and must be refused`)
+	}
+	if !reservedProjectNames[harborProjectName(registryIn("acme-project-1", "LIBRARY"))] {
+		t.Error("the reserved-name check must survive case folding, since harborProjectName lowercases")
+	}
+	for _, ok := range []string{"web", "api", "libraries", "my-library"} {
+		if reservedProjectNames[harborProjectName(registryIn("acme-project-1", ok))] {
+			t.Errorf("%q is not reserved and must be allowed", ok)
+		}
+	}
+}
+
+// readyBackend builds a namespace's backend in the state a Registry can bind to.
+func readyBackend(namespace string) *registryv1alpha1.RegistryBackend {
 	return &registryv1alpha1.RegistryBackend{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{tenantLabel: tenant}},
-		Spec: registryv1alpha1.RegistryBackendSpec{
-			TenantID: tenant,
-			Plan:     "starter",
-		},
+		ObjectMeta: metav1.ObjectMeta{Name: backendName, Namespace: namespace},
+		Spec:       registryv1alpha1.RegistryBackendSpec{Plan: "starter"},
 		Status: registryv1alpha1.RegistryBackendStatus{
 			Phase:           phaseReady,
 			EffectivePlan:   "starter",
-			HarborNamespace: tenant + "-management",
-			AdminSecretName: name + "-harbor-admin",
-			RegistryURL:     "https://registry." + tenant + ".example.com",
+			AdminSecretName: backendName + "-harbor-admin",
+			RegistryURL:     "https://registry." + namespace + ".example.com",
 		},
 	}
 }

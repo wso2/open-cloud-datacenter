@@ -6,8 +6,8 @@ import (
 	"text/template"
 )
 
-// TenantPlan is the resource profile applied to a tenant's Harbor deployment.
-type TenantPlan struct {
+// SizePlan is the resource profile applied to one Harbor deployment.
+type SizePlan struct {
 	RegistryStorage string // e.g. "50Gi"
 	DBStorage       string // e.g. "5Gi"
 	CoreCPUReq      string
@@ -18,7 +18,7 @@ type TenantPlan struct {
 	RegistryMemReq  string
 }
 
-var plans = map[string]TenantPlan{
+var plans = map[string]SizePlan{
 	"starter": {
 		RegistryStorage: "20Gi", DBStorage: "2Gi",
 		CoreCPUReq: "100m", CoreMemReq: "128Mi", CoreCPULimit: "500m", CoreMemLimit: "512Mi",
@@ -38,12 +38,14 @@ var plans = map[string]TenantPlan{
 
 // ValuesInput is the data rendered into the Harbor chart values template.
 type ValuesInput struct {
-	TenantID     string
+	// Namespace is where this Harbor runs, and its identity in every rendered
+	// name: the TLS Secret, the ingress host, and externalURL.
+	Namespace    string
 	BaseDomain   string
 	StorageClass string
 	IngressClass string
 	CertIssuer   string
-	Plan         TenantPlan
+	Plan         SizePlan
 
 	// SecretName is the operator-owned Secret (built by ensureAdminSecret) that
 	// Harbor's chart reads the admin password, core secret, xsrf key,
@@ -68,10 +70,10 @@ type ValuesInput struct {
 }
 
 // PlanFor returns the resource profile for a plan name.
-func PlanFor(name string) (TenantPlan, error) {
+func PlanFor(name string) (SizePlan, error) {
 	p, ok := plans[name]
 	if !ok {
-		return TenantPlan{}, fmt.Errorf("unknown plan %q; valid: starter, professional, enterprise", name)
+		return SizePlan{}, fmt.Errorf("unknown plan %q; valid: starter, professional, enterprise", name)
 	}
 	return p, nil
 }
@@ -85,7 +87,7 @@ func quote(s string) string {
 
 var templateFuncs = template.FuncMap{"quote": quote}
 
-// GenerateValues renders the Harbor chart values for one tenant.
+// GenerateValues renders the Harbor chart values for one namespace's Harbor.
 func GenerateValues(in ValuesInput) ([]byte, error) {
 	tmpl, err := template.New("harbor-values").Funcs(templateFuncs).Parse(harborValuesTemplate)
 	if err != nil {
@@ -105,10 +107,10 @@ expose:
     enabled: true
     certSource: secret
     secret:
-      secretName: {{printf "%s-harbor-tls" .TenantID | quote}}
+      secretName: {{printf "%s-harbor-tls" .Namespace | quote}}
   ingress:
     hosts:
-      core: {{printf "registry.%s.%s" .TenantID .BaseDomain | quote}}
+      core: {{printf "registry.%s.%s" .Namespace .BaseDomain | quote}}
     className: {{.IngressClass | quote}}
     annotations:
       kubernetes.io/ingress.class: {{.IngressClass | quote}}
@@ -117,7 +119,7 @@ expose:
       nginx.ingress.kubernetes.io/proxy-read-timeout: "900"
       nginx.ingress.kubernetes.io/proxy-send-timeout: "900"
 
-externalURL: {{printf "https://registry.%s.%s" .TenantID .BaseDomain | quote}}
+externalURL: {{printf "https://registry.%s.%s" .Namespace .BaseDomain | quote}}
 
 # Read directly from our owned Secret (key: HARBOR_ADMIN_PASSWORD) instead of
 # a literal value — keeps the admin password out of the Helm release record.

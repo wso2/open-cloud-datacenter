@@ -27,9 +27,13 @@ import (
 
 const backendFinalizer = "registry.opencloud.wso2.com/backend-cleanup"
 
-// RegistryBackendReconciler provisions one Harbor per tenant. The CR is the
+// RegistryBackendReconciler provisions one Harbor per namespace. The CR is the
 // source of truth; Harbor is installed via Helm from inside the reconcile loop
 // and its readiness is polled with RequeueAfter.
+//
+// Everything it touches lives in cr.Namespace: Harbor's pods and volumes, the
+// credential Secret they mount, and the Registries it serves. The operator
+// never creates that namespace — it is the namespace a user already had.
 type RegistryBackendReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
@@ -42,10 +46,7 @@ type RegistryBackendReconciler struct {
 // +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registrybackends/status;registries/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=registry.opencloud.wso2.com,resources=registrybackends/finalizers;registries/finalizers,verbs=update
 //
-// The operator emits Events and only ever reads namespaces — it never creates
-// one; see resolveHarborNamespace.
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
-// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 //
 // Harbor's chart objects are created by Helm using this pod's ServiceAccount,
 // so the ClusterRole must grant the resource types the Harbor chart manages:
@@ -54,8 +55,8 @@ type RegistryBackendReconciler struct {
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
 
-// Reconcile converges one tenant's Harbor deployment: credentials, namespace,
-// Helm release, PVC sizes, then readiness.
+// Reconcile converges one namespace's Harbor deployment: credentials, Helm
+// release, PVC sizes, then readiness.
 func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -78,8 +79,6 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	tenantID := cr.Spec.TenantID
-
 	// Size from the effective plan, which is the greater of the administrator's
 	// floor and what autoscaling has already grown to. Growth is recorded in
 	// status rather than written back into the spec.
@@ -88,30 +87,21 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		plan = planOrder[0]
 	}
 
-	// 1. Resolve the tenant's Harbor namespace. This never creates one:
-	// placing a namespace inside a Harvester project is Rancher's own
-	// admission-webhook-gated authorization boundary, not Kubernetes RBAC's,
-	// and this operator's ServiceAccount cannot be granted that across every
-	// current and future project without either far over-broad privilege or a
-	// second credential into Rancher's separate management cluster. An
-	// administrator marks one pre-existing namespace per tenant with
-	// harborManagementLabel when the Harvester project is set up; this just
-	// looks it up. Harbor's pods live here, so the credential Secret must be
-	// created here too — a pod can only read Secrets from its own namespace.
-	harborNS, err := r.resolveHarborNamespace(ctx, tenantID)
-	if err != nil {
-		return r.transient(ctx, &cr, "", "resolve Harbor namespace", err)
-	}
+	// Harbor deploys into the backend's own namespace — the namespace a user
+	// already had and put a Registry in. Nothing has to be created, labeled, or
+	// looked up first, and the credential Secret lands where Harbor's pods can
+	// mount it (a pod can only read Secrets from its own namespace).
+	harborNS := cr.Namespace
 
-	// 2. Ensure the full pinned Harbor credential set exists in an operator-owned
+	// 1. Ensure the full pinned Harbor credential set exists in an operator-owned
 	// Secret (admin + db passwords and the chart's internal keys — pinned so that
 	// re-rendered values are deterministic and upgrades never rotate secrets).
-	secrets, secretName, err := r.ensureAdminSecret(ctx, &cr, harborNS)
+	secrets, secretName, err := r.ensureAdminSecret(ctx, &cr)
 	if err != nil {
 		return r.transient(ctx, &cr, "", "ensure admin secret", err)
 	}
 
-	// 3. Render values and converge the Helm release (install when missing,
+	// 2. Render values and converge the Helm release (install when missing,
 	// upgrade when the desired values drift from the deployed ones — e.g. a
 	// plan change; no-op otherwise).
 	tplan, err := helm.PlanFor(plan)
@@ -119,7 +109,7 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.fail(ctx, &cr, "resolve plan", err)
 	}
 	values, err := helm.GenerateValues(helm.ValuesInput{
-		TenantID:      tenantID,
+		Namespace:     harborNS,
 		SecretName:    secretName, // core/jobservice/registry secrets + admin password read from here via existingSecret
 		DBPass:        secrets.DBPass,
 		EncryptionKey: secrets.EncryptionKey,
@@ -135,18 +125,18 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// metrics rather than going silent after one report.
 		return r.transient(ctx, &cr, secretName, "generate values", err)
 	}
-	if err := r.Helm.Install(ctx, tenantID, harborNS, values); err != nil {
+	if err := r.Helm.Install(ctx, harborNS, values); err != nil {
 		return r.transient(ctx, &cr, secretName, "helm install/upgrade", err)
 	}
 
 	// 2b. Grow plan-controlled PVCs to the plan's sizes (helm cannot resize
 	// existing claims; PVC expansion is a direct, grow-only patch).
-	if err := r.ensureStorageSize(ctx, &cr, harborNS, tplan); err != nil {
+	if err := r.ensureStorageSize(ctx, &cr, tplan); err != nil {
 		return r.transient(ctx, &cr, secretName, "ensure storage size", err)
 	}
 
 	// 3. Wait for Harbor to accept API requests (poll, don't block).
-	registryURL := fmt.Sprintf("https://registry.%s.%s", tenantID, r.HelmCfg.BaseDomain)
+	registryURL := fmt.Sprintf("https://registry.%s.%s", harborNS, r.HelmCfg.BaseDomain)
 	cli := r.harborClient(registryURL, secrets.AdminPass)
 	if err := cli.Ping(ctx); err != nil {
 		return r.provisioning(ctx, &cr, secretName, registryURL,
@@ -159,7 +149,7 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			fmt.Sprintf("configuring Harbor: %v", err), 15*time.Second)
 	}
 
-	// 5. Measure what the tenant's registries have committed, and decide whether
+	// 5. Measure what the namespace's registries have committed, and decide whether
 	// the deployment needs to be larger. Harbor reports both the quota it has
 	// promised and what is consumed, so no metrics pipeline is involved.
 	totals, terr := cli.ProjectStorageTotals(ctx)
@@ -175,7 +165,7 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			// in computeEffectivePlan only ever advances through planOrder, so
 			// this can only fire if planOrder (autoscale.go) and the plans map
 			// (values_generator.go) have drifted apart in a code change — a bug
-			// in this operator's own binary, identical across every tenant, not
+			// in this operator's own binary, identical for every backend, not
 			// something a spec edit on this object could ever fix. fail() would
 			// go quiet after one report; keep this loud and retried instead.
 			return r.transient(ctx, &cr, secretName, "compute effective plan", perr)
@@ -194,7 +184,6 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		s.ObservedGeneration = cr.Generation
 		s.RegistryURL = registryURL
 		s.AdminSecretName = secretName
-		s.HarborNamespace = harborNS
 		s.EffectivePlan = nextPlan
 		s.RegistryCount = registryCount
 		if terr == nil {
@@ -263,9 +252,9 @@ var harborSecretGenerators = map[string]func() (string, error){
 // yet present (e.g. one added to harborSecretGenerators after this Secret was
 // first created) is generated and added on a later reconcile; existing keys
 // are never overwritten, so live credentials are never silently rotated.
-func (r *RegistryBackendReconciler) ensureAdminSecret(ctx context.Context, cr *registryv1alpha1.RegistryBackend, namespace string) (harborSecrets, string, error) {
+func (r *RegistryBackendReconciler) ensureAdminSecret(ctx context.Context, cr *registryv1alpha1.RegistryBackend) (harborSecrets, string, error) {
 	name := cr.Name + "-harbor-admin"
-	key := client.ObjectKey{Namespace: namespace, Name: name}
+	key := client.ObjectKey{Namespace: cr.Namespace, Name: name}
 
 	var sec corev1.Secret
 	err := r.Get(ctx, key, &sec)
@@ -294,12 +283,12 @@ func (r *RegistryBackendReconciler) ensureAdminSecret(ctx context.Context, cr *r
 		}
 	case apierrors.IsNotFound(err):
 		sec = corev1.Secret{
-			// No owner reference: owner references cannot cross namespaces, and
-			// this Secret lives in the tenant's Harbor namespace while the CR
-			// lives in the operator's. Removal is handled by the finalizer under
-			// reclaimPolicy: Delete — under Retain it must survive, since the
+			// Deliberately not owner-referenced, though both objects share a
+			// namespace and a reference would be valid: garbage collection would
+			// take this Secret whenever the backend goes away, but under
+			// reclaimPolicy: Retain it must outlive the backend, since the
 			// encryption key is required to read the retained volumes.
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cr.Namespace},
 			Type:       corev1.SecretTypeOpaque,
 			Data:       map[string][]byte{},
 		}
@@ -341,15 +330,21 @@ func (r *RegistryBackendReconciler) ensureAdminSecret(ctx context.Context, cr *r
 // rule already rejects plan downgrades at admission. Idempotent — equal or
 // larger current size is a no-op. Requires a StorageClass with
 // allowVolumeExpansion (Longhorn: yes).
-func (r *RegistryBackendReconciler) ensureStorageSize(ctx context.Context, cr *registryv1alpha1.RegistryBackend, namespace string, plan helm.TenantPlan) error {
+func (r *RegistryBackendReconciler) ensureStorageSize(ctx context.Context, cr *registryv1alpha1.RegistryBackend, plan helm.SizePlan) error {
+	// Selected by the Helm release label, not just by namespace: Harbor shares
+	// this namespace with the user's own workloads, and the name matching below
+	// would otherwise resize any unrelated claim ending in "-registry".
 	var pvcs corev1.PersistentVolumeClaimList
-	if err := r.List(ctx, &pvcs, client.InNamespace(namespace)); err != nil {
+	if err := r.List(ctx, &pvcs,
+		client.InNamespace(cr.Namespace),
+		client.MatchingLabels{helmInstanceLabel: helm.ReleaseName(cr.Namespace)},
+	); err != nil {
 		return fmt.Errorf("list PVCs: %w", err)
 	}
 	for i := range pvcs.Items {
 		pvc := &pvcs.Items[i]
-		// The namespace is dedicated to this tenant's Harbor release, so name
-		// suffixes are unambiguous: the registry image store and the database.
+		// Within one Harbor release the name suffixes are unambiguous: the
+		// registry image store and the database.
 		var want string
 		switch {
 		case strings.HasSuffix(pvc.Name, "-registry"):
@@ -380,22 +375,19 @@ func (r *RegistryBackendReconciler) ensureStorageSize(ctx context.Context, cr *r
 	return nil
 }
 
-// dependentRegistries returns the Registries this backend serves, matching on
-// the binding each Registry records in its status. Registries do not reference a
-// backend in their spec, so the recorded binding is the only link — matching on
-// anything else would silently stop protecting them.
+// dependentRegistries returns the Registries this backend serves: every
+// Registry in its namespace. A Registry cannot name a backend or reach one
+// outside its namespace, so membership needs no status matching — which also
+// means a Registry counts as a dependent from the instant it is created,
+// before it has ever reconciled.
 func (r *RegistryBackendReconciler) dependentRegistries(ctx context.Context, cr *registryv1alpha1.RegistryBackend) ([]string, error) {
 	var list registryv1alpha1.RegistryList
-	if err := r.List(ctx, &list); err != nil {
+	if err := r.List(ctx, &list, client.InNamespace(cr.Namespace)); err != nil {
 		return nil, fmt.Errorf("list Registries: %w", err)
 	}
-	var names []string
+	names := make([]string, 0, len(list.Items))
 	for i := range list.Items {
-		reg := &list.Items[i]
-		if reg.Status.BackendName == cr.Name ||
-			(reg.Status.BackendName == "" && reg.Status.TenantID == cr.Spec.TenantID) {
-			names = append(names, reg.Namespace+"/"+reg.Name)
-		}
+		names = append(names, list.Items[i].Name)
 	}
 	return names, nil
 }
@@ -432,25 +424,9 @@ func (r *RegistryBackendReconciler) handleDelete(ctx context.Context, cr *regist
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
-	// Uninstall Harbor from the tenant's Harbor namespace. Prefer the namespace
-	// already recorded in status (where Harbor actually got deployed) over
-	// re-resolving by label — the label could have been moved or removed since,
-	// but cleanup must still find what it originally installed.
-	harborNS := cr.Status.HarborNamespace
-	if harborNS == "" {
-		var nsErr error
-		harborNS, nsErr = r.resolveHarborNamespace(ctx, cr.Spec.TenantID)
-		if nsErr != nil {
-			// Never recorded a namespace and none resolves now — nothing was
-			// ever installed, so there is nothing to clean up.
-			controllerutil.RemoveFinalizer(cr, backendFinalizer)
-			if err := r.Update(ctx, cr); err != nil {
-				return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
-			}
-			return ctrl.Result{}, nil
-		}
-	}
-	if err := r.Helm.Uninstall(ctx, cr.Spec.TenantID, harborNS); err != nil {
+	// Uninstall Harbor. Uninstall tolerates a release that is not there, so this
+	// is also the right path for a backend that never installed one.
+	if err := r.Helm.Uninstall(ctx, cr.Namespace); err != nil {
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, fmt.Errorf("helm uninstall: %w", err)
 	}
 
@@ -458,17 +434,17 @@ func (r *RegistryBackendReconciler) handleDelete(ctx context.Context, cr *regist
 	// The credential Secret goes with it: under Retain it must stay, because
 	// its encryption key is needed to read the retained volumes.
 	if cr.Spec.ReclaimPolicy == reclaimDelete {
-		if err := r.deletePVCs(ctx, cr, harborNS); err != nil {
+		if err := r.deletePVCs(ctx, cr); err != nil {
 			return ctrl.Result{}, fmt.Errorf("delete pvcs: %w", err)
 		}
 		sec := corev1.Secret{ObjectMeta: metav1.ObjectMeta{
 			Name:      cr.Name + "-harbor-admin",
-			Namespace: harborNS,
+			Namespace: cr.Namespace,
 		}}
 		if err := r.Delete(ctx, &sec); err != nil && !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, fmt.Errorf("delete admin secret: %w", err)
 		}
-		log.Info("reclaimed Harbor PVCs and credentials", "tenant", cr.Spec.TenantID)
+		log.Info("reclaimed Harbor PVCs and credentials", "namespace", cr.Namespace)
 	}
 
 	controllerutil.RemoveFinalizer(cr, backendFinalizer)
@@ -479,12 +455,13 @@ func (r *RegistryBackendReconciler) handleDelete(ctx context.Context, cr *regist
 }
 
 // deletePVCs removes the Harbor release's PVCs (best-effort, by the Helm
-// instance label).
-func (r *RegistryBackendReconciler) deletePVCs(ctx context.Context, cr *registryv1alpha1.RegistryBackend, namespace string) error {
+// instance label — never by namespace alone, which the user's own workloads
+// share).
+func (r *RegistryBackendReconciler) deletePVCs(ctx context.Context, cr *registryv1alpha1.RegistryBackend) error {
 	var pvcs corev1.PersistentVolumeClaimList
 	if err := r.List(ctx, &pvcs,
-		client.InNamespace(namespace),
-		client.MatchingLabels{"app.kubernetes.io/instance": "harbor-" + cr.Spec.TenantID},
+		client.InNamespace(cr.Namespace),
+		client.MatchingLabels{helmInstanceLabel: helm.ReleaseName(cr.Namespace)},
 	); err != nil {
 		return err
 	}
@@ -496,53 +473,10 @@ func (r *RegistryBackendReconciler) deletePVCs(ctx context.Context, cr *registry
 	return nil
 }
 
-// harborManagementLabel marks the one namespace, per tenant, an administrator
-// has designated to host that tenant's Harbor deployment. Set once, by hand,
-// when the Harvester project is provisioned — never by this operator.
-const harborManagementLabel = "registry.opencloud.wso2.com/harbor-management"
-
-// resolveHarborNamespace finds the tenant's pre-designated Harbor namespace.
-// It never creates one: placing a namespace inside a Harvester project is
-// gated by Rancher's own namespace-admission webhook, a separate
-// authorization boundary from Kubernetes RBAC that this operator's
-// ServiceAccount cannot be granted across every current and future project
-// without either far over-broad privilege or a second credential into
-// Rancher's management cluster. Requiring exactly one pre-existing, labeled
-// namespace costs one deliberate admin step per new tenant — no smaller than
-// the Harvester-project-creation step that already has to happen by hand
-// regardless.
-func (r *RegistryBackendReconciler) resolveHarborNamespace(ctx context.Context, tenantID string) (string, error) {
-	var list corev1.NamespaceList
-	if err := r.List(ctx, &list, client.MatchingLabels{harborManagementLabel: "true"}); err != nil {
-		return "", fmt.Errorf("list namespaces labeled %s: %w", harborManagementLabel, err)
-	}
-
-	var matches []string
-	for _, ns := range list.Items {
-		raw := ns.Annotations[tenantProjectKey]
-		if raw == "" {
-			raw = ns.Labels[tenantProjectKey]
-		}
-		if raw == "" {
-			continue
-		}
-		id, err := tenantIDFromProject(raw)
-		if err == nil && id == tenantID {
-			matches = append(matches, ns.Name)
-		}
-	}
-
-	switch len(matches) {
-	case 0:
-		return "", fmt.Errorf("no namespace for tenant %s is labeled %s=true; "+
-			"an administrator must mark one namespace to host Harbor", tenantID, harborManagementLabel)
-	case 1:
-		return matches[0], nil
-	default:
-		return "", fmt.Errorf("tenant %s has %d namespaces labeled %s=true (%v); exactly one is required",
-			tenantID, len(matches), harborManagementLabel, matches)
-	}
-}
+// helmInstanceLabel is the standard label Helm stamps on every object in a
+// release. It separates Harbor's objects from the user's own in a shared
+// namespace, so both PVC paths select on it rather than on namespace.
+const helmInstanceLabel = "app.kubernetes.io/instance"
 
 // harborClient returns a Harbor client honouring the configured TLS mode.
 func (r *RegistryBackendReconciler) harborClient(url, adminPass string) *harbor.Client {
@@ -621,11 +555,12 @@ func (r *RegistryBackendReconciler) fail(ctx context.Context, cr *registryv1alph
 	return ctrl.Result{}, reconcile.TerminalError(cause)
 }
 
-// SetupWithManager registers the controller with the manager.
+// SetupWithManager registers the controller with the manager. No
+// Owns(&corev1.Secret{}): this reconciler leaves the credential Secret
+// unowned (see ensureAdminSecret), so an ownership watch would match nothing.
 func (r *RegistryBackendReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&registryv1alpha1.RegistryBackend{}).
-		Owns(&corev1.Secret{}).
 		Named("registrybackend").
 		Complete(r)
 }

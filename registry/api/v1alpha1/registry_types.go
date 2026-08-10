@@ -14,10 +14,11 @@ import (
 
 // Registry requests a container registry for the namespace it is created in.
 //
-// The tenant is derived from the namespace's Harvester project, never declared
-// in the spec — so a Registry cannot reference another tenant's Harbor. The
-// first Registry in a tenant causes a Harbor deployment to be provisioned;
-// later ones reuse it and only add a Harbor project.
+// The Harbor serving a Registry is the one in its own namespace, derived from
+// metadata.namespace and never declared in the spec — so a Registry cannot
+// reference another namespace's Harbor, because there is no field to point
+// elsewhere. The namespace's first Registry causes a Harbor deployment to be
+// provisioned; later ones reuse it and only add a Harbor project.
 type Registry struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -55,16 +56,9 @@ type RegistryStatus struct {
 	// Conditions holds standard Kubernetes status conditions.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// TenantID is the Harvester project this registry resolved to.
-	TenantID string `json:"tenantID,omitempty"`
-
-	// BackendName records which RegistryBackend serves this registry, set once
-	// the binding succeeds. The backend uses it to refuse deletion while
-	// registries still depend on it.
-	BackendName string `json:"backendName,omitempty"`
-
-	// HarborProject is the project created in Harbor, derived as
-	// <namespace>-<name> so registries can never collide.
+	// HarborProject is the project created in Harbor for this Registry, and the
+	// record that one exists: the finalizer reads it to decide whether there is
+	// anything in Harbor to clean up.
 	HarborProject string `json:"harborProject,omitempty"`
 
 	// RegistryURL is the Harbor URL to log in and push to.

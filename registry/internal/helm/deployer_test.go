@@ -177,15 +177,15 @@ func TestFreezeStorageSizes_MissingDeployedPathIsSkipped(t *testing.T) {
 
 func TestReleaseName(t *testing.T) {
 	tests := []struct {
-		tenantID string
-		want     string
+		namespace string
+		want      string
 	}{
 		{"acme", "harbor-acme"},
-		{"tenant-with-dashes", "harbor-tenant-with-dashes"},
+		{"ns-with-dashes", "harbor-ns-with-dashes"},
 	}
 	for _, tt := range tests {
-		if got := releaseName(tt.tenantID); got != tt.want {
-			t.Errorf("releaseName(%q) = %q, want %q", tt.tenantID, got, tt.want)
+		if got := ReleaseName(tt.namespace); got != tt.want {
+			t.Errorf("ReleaseName(%q) = %q, want %q", tt.namespace, got, tt.want)
 		}
 	}
 }
