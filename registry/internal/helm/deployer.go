@@ -133,6 +133,22 @@ func (d *Deployer) Install(ctx context.Context, namespace string, values []byte)
 	// reconciler's job (ensureStorageSize patches the PVCs directly).
 	freezeStorageSizes(vals, deployed)
 
+	// The internal Postgres password must NOT be re-sent on an upgrade. Harbor's
+	// chart pipes database.internal.password through b64dec whenever the
+	// database Secret already exists, and Sprig's b64dec returns err.Error()
+	// instead of failing — so a plaintext password silently becomes
+	// "illegal base64 data at input byte N" and Harbor's core can no longer
+	// authenticate against the database it initialised on the first install.
+	// Blanking it takes the chart's intended path: `default` falls through to
+	// the stored base64 and b64dec round-trips it correctly. The password stays
+	// pinned by the Secret the first install wrote.
+	// Blanked on BOTH sides, so the password is excluded from drift detection.
+	// It never legitimately changes, and comparing it would force one pointless
+	// upgrade right after every install: the install stored the real value
+	// while every later render sends blank.
+	blankInternalDBPassword(vals)
+	blankInternalDBPassword(deployed)
+
 	if reflect.DeepEqual(vals, deployed) {
 		return nil // no drift — nothing to do
 	}
@@ -149,6 +165,21 @@ func (d *Deployer) Install(ctx context.Context, namespace string, values []byte)
 		return fmt.Errorf("helm upgrade: %w", err)
 	}
 	return nil
+}
+
+// dbPasswordPath is where Harbor's chart reads the internal Postgres password.
+var dbPasswordPath = []string{"database", "internal", "password"}
+
+// blankInternalDBPassword clears database.internal.password so an upgrade
+// preserves the password already stored in the chart's database Secret. See
+// the call site in Install for why re-sending it corrupts the credential.
+//
+// Blanking before the drift comparison (not just before the upgrade) is
+// deliberate: it means the desired values converge on a stable shape, so the
+// release settles after exactly one upgrade instead of diffing forever against
+// a value that can never match what is deployed.
+func blankInternalDBPassword(vals map[string]interface{}) {
+	nestedSet(vals, dbPasswordPath, "")
 }
 
 // freezeStorageSizes copies the deployed persistence sizes into the desired

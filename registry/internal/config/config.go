@@ -19,7 +19,13 @@ type HelmConfig struct {
 	StorageClass   string
 	IngressClass   string
 	CertIssuer     string
-	BaseDomain     string
+	// BaseDomain is the suffix every registry URL is built on, as
+	// registry.<namespace>.<BaseDomain>. With nip.io it MUST use the
+	// dash-separated form (192-168-10-6.nip.io): nip.io finds the address by
+	// scanning for four dot-separated octets anywhere in the name, so a
+	// namespace ending in a digit ("project-1") merges into the dotted form and
+	// resolves to the wrong host.
+	BaseDomain string
 	// InsecureHarborTLS skips TLS verification when the operator calls the
 	// Harbor REST API (dev / self-signed certs only). Default false.
 	InsecureHarborTLS bool
