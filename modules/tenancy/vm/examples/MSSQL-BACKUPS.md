@@ -524,7 +524,7 @@ restore `logins.sql` first (as in §5.1).
 
 ### 5.3 In a different datacenter (cross-DC DR)
 
-The restore VM half is identical — only *where* you create it differs:
+The restore VM half is identical — only _where_ you create it differs:
 
 1. Have the DC team provision a tenant space (namespace + network + RBAC) in the
    DR datacenter, one time.
@@ -571,11 +571,11 @@ application/pipeline at the standby.
 The timer frequency = your **RPO**; the S3 lifecycle `Expiration` (§1) = how far
 back you can recover.
 
-| Tier | Timer (`OnCalendar`, UTC) | Retention (S3 `Expiration` days) |
-|------|---------------------------|----------------------------------|
-| Daily | `*-*-* 01:00:00` | `30` |
-| 12-hourly | `*-*-* 01,13:00:00` | `14` |
-| Hourly | `*-*-* *:00:00` | `3` |
+| Tier      | Timer (`OnCalendar`, UTC) | Retention (S3 `Expiration` days) |
+| --------- | ------------------------- | -------------------------------- |
+| Daily     | `*-*-* 01:00:00`          | `30`                             |
+| 12-hourly | `*-*-* 01,13:00:00`       | `14`                             |
+| Hourly    | `*-*-* *:00:00`           | `3`                              |
 
 - `OnCalendar` is **UTC**. Add `RandomizedDelaySec` and stagger VMs so a fleet
   doesn't push to S3 at once.
@@ -595,8 +595,8 @@ back you can recover.
 - **One bucket + IAM user per team**, least privilege; never write to another
   team's or the platform's bucket.
 - **Don't use `sa` in production.** This example uses `sa` for brevity. Backing up
-  databases needs only a `db_backupoperator`/backup-scoped login; only the *login
-  export* (reading `sys.sql_logins.password_hash`) needs instance-admin. Split
+  databases needs only a `db_backupoperator`/backup-scoped login; only the _login
+  export_ (reading `sys.sql_logins.password_hash`) needs instance-admin. Split
   these: a least-privilege backup login for the timer, and a separate, tightly
   controlled admin step (or a different credential) for exporting logins.
 - Store the IAM keys and the `sa` password in a secrets manager. Never commit
