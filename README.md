@@ -1,4 +1,12 @@
+<p align="center">
+  <img src="docs/media/Refined%20Open-Source%20WSO2%20Project%20Banner.png" alt="Open Cloud Datacenter" width="100%">
+</p>
+
 # Open Cloud Datacenter (OCD)
+
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Issues](https://img.shields.io/github/issues/wso2/open-cloud-datacenter)](https://github.com/wso2/open-cloud-datacenter/issues)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](docs/CONTRIBUTING.md)
 
 Turn an on-prem datacenter into a self-service cloud. OCD is an open, modular control plane and module set for running compute, Kubernetes clusters, and networking on your own hardware — without public-cloud lock-in.
 
@@ -7,7 +15,9 @@ Turn an on-prem datacenter into a self-service cloud. OCD is an open, modular co
 - **Cost-efficiency** — optimize resource usage and avoid vendor lock-in.
 - **Community-driven** — built on open standards and collaborative development.
 
-> ℹ️ **This `main` branch is the index — it carries no code.** The work lives on three branches, mapped below. `main` is intentionally kept as the front door + roadmap.
+> ℹ️ **This `main` branch is the index — it carries no code.** Each layer of the
+> stack lives on its own branch, mapped below; `main` is intentionally kept as
+> the front door + roadmap, not a place to build from.
 
 ## See it in action
 
@@ -53,6 +63,26 @@ The same control plane, two ways — provision a virtual network from the **CLI*
 | **[`operators`](https://github.com/wso2/open-cloud-datacenter/tree/operators)** | Supporting | Kubernetes operators (Database, Key Vault, …) that back the control-plane services. |
 | `main` | — | This index + roadmap. No code. |
 
+## Getting started
+
+Where you start depends on what you're trying to do — each branch is a
+self-contained checkout with its own build/run instructions:
+
+- **Provision the base platform** (Harvester + Rancher, networking, backup,
+  monitoring) → checkout [`terraform`](https://github.com/wso2/open-cloud-datacenter/tree/terraform)
+  and follow its module docs. Start here if nothing exists yet.
+- **Drive the platform through a cloud-like API/CLI/UI** instead of raw
+  Terraform → checkout [`controlplane`](https://github.com/wso2/open-cloud-datacenter/tree/controlplane)
+  (`dcctl`, `cloud-ui`, DC-API).
+- **Work on a specific platform service** (Database, Key Vault, …) → checkout
+  [`operators`](https://github.com/wso2/open-cloud-datacenter/tree/operators).
+
+```bash
+git clone https://github.com/wso2/open-cloud-datacenter.git
+cd open-cloud-datacenter
+git checkout terraform   # or controlplane / operators — pick the layer you need
+```
+
 ## Roadmap
 
 ### Phase 1 — Platform Foundation · `terraform`
@@ -73,6 +103,22 @@ Phase 1 gives tenants a Terraform-consumable sandbox; Phase 2 delivers a **cloud
 - **M3 — Platform services (as-a-Service)** — **Database**, **Key Vault**, **Registry**, and **Cache** *(planned)*.
 - **M4 — Self-service portal** — a React-based web UI.
 - **M5 — Tenant & project hierarchy** — an organization hierarchy for managing infrastructure.
+
+## Reporting issues
+
+Found a bug or have a feature request? Use the [issue templates](.github/ISSUE_TEMPLATE)
+on this repo — bug reports and feature/improvement requests are triaged
+separately from general questions. Issues that apply to a specific layer
+(e.g. a Terraform module, an operator) are still filed here; mention the
+relevant branch in the report.
+
+## Contributing
+
+Contributions are welcome on every branch. Start with
+[`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the workflow, and the
+[pull request template](pull_request_template.md) for what a good PR looks
+like here. Please read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before
+participating.
 
 ## License
 
