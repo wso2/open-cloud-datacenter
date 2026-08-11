@@ -2,7 +2,7 @@
   <img src="docs/media/RepoBanner.png" alt="Open Cloud Datacenter" width="100%">
 </p>
 
-# Open Cloud Datacenter (OCD)
+# Open Cloud Data Center (OCD)
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Issues](https://img.shields.io/github/issues/wso2/open-cloud-datacenter)](https://github.com/wso2/open-cloud-datacenter/issues)
