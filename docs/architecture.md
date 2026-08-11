@@ -4,24 +4,7 @@
 
 The Open Cloud Data Center (OCDC) Terraform framework deploys and manages a full cloud-datacenter stack on top of [Harvester HCI](https://harvesterhci.io/). Harvester provides the hypervisor layer (based on KubeVirt), while Rancher provides the Kubernetes management plane. Tenant workload clusters are provisioned as RKE2 clusters running as virtual machines inside Harvester.
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                        Physical Nodes                           │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │                   Harvester HCI (KubeVirt)                │  │
-│  │                                                           │  │
-│  │  ┌─────────────────┐    ┌──────────────────────────────┐  │  │
-│  │  │  Rancher Server  │    │    Tenant RKE2 Clusters      │  │  │
-│  │  │  (RKE2 VM)       │    │  ┌──────────┐  ┌──────────┐ │  │  │
-│  │  │                 │    │  │ Cluster A │  │ Cluster B │ │  │  │
-│  │  │  cert-manager   │    │  │ (3 VMs)   │  │ (3 VMs)  │ │  │  │
-│  │  │  Rancher UI     │    │  └──────────┘  └──────────┘ │  │  │
-│  │  └────────┬────────┘    └──────────────────────────────┘  │  │
-│  │           │ manages                                        │  │
-│  │           └──────────────────────────────────────────────▶│  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-```
+![OCDC architecture overview: Rancher Server managing Tenant RKE2 Clusters inside Harvester HCI](media/architecture-overview.png)
 
 ---
 
@@ -187,62 +170,7 @@ This phase configures the `asgardeo` provider (or equivalent OIDC configuration 
 
 ## Module Dependency Graph
 
-```text
-                    ┌─────────────┐
-                    │  bootstrap  │
-                    │  (Phase 0)  │
-                    └──────┬──────┘
-                           │ rancher_lb_ip, rancher_hostname
-                           ▼
-                    ┌─────────────┐
-                    │ rancher auth│
-                    │  (Phase 1)  │
-                    └──────┬──────┘
-                           │ rancher2 provider configured
-           ┌───────────────┼───────────────┐
-           ▼               ▼               ▼
-    ┌──────────────┐ ┌──────────┐ ┌───────────┐
-    │  harvester-  │ │networking│ │  storage  │
-    │ integration  │ │(Phase 2b)│ │(Phase 2c) │
-    │  (Phase 2a)  │ └──────────┘ └───────────┘
-    └──────┬───────┘
-           │ cloud credential, cluster registered
-           │
-           ▼
-       ┌────────┐
-       │  rbac  │
-       │(Phase  │
-       │  2d)   │
-       └────────┘
-           │
-           │ projects/namespaces ready
-           ▼
-    ┌─────────────────────────┐
-    │ namespace-credential-   │
-    │ provisioner (Phase 2e)  │
-    └──────────┬──────────────┘
-               │ harvesterconfig + harvester-vm-kubeconfig per namespace
-               ▼
-    ┌───────────────────┐
-    │   identity        │
-    │   (Phase 3a)      │
-    └────────┬──────────┘
-             │ OIDC active
-             ▼
-    ┌───────────────────┐
-    │   monitoring      │
-    │   (Phase 3b)      │
-    └────────┬──────────┘
-             │ observability ready
-             ▼
-    ┌─────────────────────────────────┐
-    │       Workloads (Phase 4)       │
-    │  ┌─────────────┐ ┌───────────┐  │
-    │  │ k8s-cluster │ │    vm     │  │
-    │  │ (Phase 4a)  │ │ (Phase 4b)│  │
-    │  └─────────────┘ └───────────┘  │
-    └─────────────────────────────────┘
-```
+![Module dependency graph: bootstrap → rancher auth → harvester-integration/networking/storage → rbac → namespace-credential-provisioner → identity → monitoring → workloads (k8s-cluster, vm)](media/module-dependency-graph.png)
 
 ---
 
