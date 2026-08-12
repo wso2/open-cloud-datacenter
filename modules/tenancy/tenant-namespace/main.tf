@@ -37,7 +37,6 @@ resource "rancher2_namespace" "this" {
     content {
       limits_cpu      = container_resource_limit.value.cpu_limit
       limits_memory   = container_resource_limit.value.memory_limit
-      requests_cpu    = container_resource_limit.value.cpu_request
       requests_memory = container_resource_limit.value.memory_request
     }
   }
