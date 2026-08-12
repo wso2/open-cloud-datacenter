@@ -31,7 +31,7 @@ variable "namespaces" {
 
   validation {
     condition = alltrue([
-      for ns in keys(var.namespaces) : can(regex("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", ns))
+      for ns in keys(var.namespaces) : length(ns) <= 63 && can(regex("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", ns))
     ])
     error_message = "Namespace names must consist of lowercase alphanumeric characters or '-', and must start and end with an alphanumeric character."
   }
