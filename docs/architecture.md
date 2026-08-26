@@ -1,264 +1,141 @@
-# Architecture: Open Cloud Data Center on Harvester HCI
+# Test Suite Architecture
 
-## Overview
+## Purpose
 
-The Open Cloud Data Center (OCDC) Terraform framework deploys and manages a full cloud-datacenter stack on top of [Harvester HCI](https://harvesterhci.io/). Harvester provides the hypervisor layer (based on KubeVirt), while Rancher provides the Kubernetes management plane. Tenant workload clusters are provisioned as RKE2 clusters running as virtual machines inside Harvester.
+The Harvester Upgrade Test Suite validates the Harvester and Rancher behavior
+required by Open Cloud Datacenter after upgrades and configuration changes. It
+uses Terraform to manage temporary fixtures and Go acceptance tests to verify
+observable behavior.
+
+The design is based on
+[GitHub Discussion #242](https://github.com/wso2/open-cloud-datacenter/discussions/242).
+
+## Environment boundary
+
+The system uses two environment roles:
+
+- The **Host** runs Argo Workflows, workflow pods, artifact storage, and future
+  reporting services in a Rancher downstream Kubernetes cluster.
+- The **Target** is the Harvester environment under test. The suite creates only
+  temporary capability fixtures in it.
+
+```mermaid
+flowchart LR
+    Trigger[User or schedule] -->|Independent run| Workflow
+
+    subgraph Host["Host environment"]
+        Aggregate[Future aggregate workflow]
+        Workflow[Capability workflow]
+        Runner[Test runner pod]
+        State[(Terraform state PVC)]
+        Store[(Artifact storage)]
+        Aggregate -.->|Release-stage execution| Workflow
+        Workflow --> Runner
+        Runner --> State
+        Runner --> Store
+    end
+
+    subgraph Target["Target environment"]
+        Rancher[Rancher API]
+        Harvester[Harvester and Kubernetes APIs]
+        Fixtures[Temporary fixtures]
+        Rancher --> Fixtures
+        Harvester --> Fixtures
+    end
+
+    Runner --> Rancher
+    Runner --> Harvester
+    Trigger -.->|Full-suite run| Aggregate
+```
+
+Workflow pods never run in the Target. This keeps execution, diagnostics, and
+cleanup available when the Target is degraded.
+
+## Component responsibilities
+
+| Component | Responsibility |
+|---|---|
+| Capability workflow | Independently coordinates one capability's lifecycle and can be developed and submitted by its owning team |
+| Aggregate workflow | At release stage, selects registered capabilities and invokes their workflow entrypoints |
+| Shared workflow components | Provide reusable validation, locking, publication, and cleanup steps without owning capability behavior |
+| Terraform | Creates and destroys temporary capability fixtures |
+| Go runner | Executes API clients, behavioral assertions, and evidence collection |
+| Capability module | Declares capability metadata, fixtures, tests, and evidence |
+| Artifact store | Retains JUnit, JSON, logs, and redacted evidence |
+| Janitor | Detects expired runs and retries cleanup after exceptional failures |
+
+Terraform success is not treated as acceptance-test success. The Go assertion
+layer must verify reconciliation, quota enforcement, API errors, runtime
+behavior, and other outcomes that are not represented by Terraform state.
+
+## Execution modes
+
+### Independent capability execution
+
+Each capability owns an Argo `WorkflowTemplate`. Teams submit that template
+directly while developing or validating a capability. No aggregate workflow is
+required, and failures in unrelated or incomplete capabilities cannot block the
+team's feedback loop.
+
+### Aggregate suite execution
+
+At the initial release stage, an aggregate workflow will discover capability
+metadata, select the requested modules, and invoke their published workflow
+entrypoints. Any machine-readable catalog will be generated from the module
+metadata rather than maintained as a shared contributor-edited file.
+Aggregation adds ordering, concurrency, and suite-level reporting; it does not
+replace the capability-owned workflows.
+
+## Target capability run lifecycle
+
+The complete lifecycle is listed below. CAP-002 currently implements input
+validation, locking, Terraform provisioning, sanitized Terraform evidence
+publication, and unconditional Terraform cleanup. It deletes the workspace PVC
+after successful cleanup and retains it when the workflow fails.
+
+1. Validate Target connectivity, versions, capacity, and required inputs.
+2. Generate a unique run ID and acquire the required environment lock.
+3. Initialize Terraform state on the capability workspace PVC.
+4. Provision the selected capability fixtures.
+5. Run bounded behavioral assertions.
+6. Collect and redact diagnostics.
+7. Publish the common result bundle.
+8. Destroy all fixtures in an unconditional cleanup path.
+9. Release the environment lock.
+10. Let the janitor retry cleanup if the workflow terminated exceptionally.
+
+## Architectural invariants
+
+- Host and Target credentials are never committed or passed as ordinary workflow
+  parameters.
+- Every Target resource is associated with a unique run ID and expiry policy.
+- Every external wait has an explicit deadline.
+- Cleanup must eventually run after both provisioning and assertion failures.
+  CAP-002 invokes Terraform destroy from an unconditional exit handler.
+- Terraform state must not enter the evidence bundle. The initial CAP-002
+  workflow stores it on a per-workflow Host-cluster PVC, deletes the claim after
+  success, and retains it after failure for recovery.
+- Evidence is redacted before publication.
+- Every capability workflow remains independently runnable.
+- A new capability does not require changes to another capability workflow.
+- The aggregate workflow discovers capability metadata instead of using a
+  hard-coded task list or hand-maintained central catalog.
+- Development defaults must not be presented as production recommendations.
+
+## Result contract
+
+The complete result contract will publish:
 
 ```text
-┌─────────────────────────────────────────────────────────────────┐
-│                        Physical Nodes                           │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │                   Harvester HCI (KubeVirt)                │  │
-│  │                                                           │  │
-│  │  ┌─────────────────┐    ┌──────────────────────────────┐  │  │
-│  │  │  Rancher Server  │    │    Tenant RKE2 Clusters      │  │  │
-│  │  │  (RKE2 VM)       │    │  ┌──────────┐  ┌──────────┐ │  │  │
-│  │  │                 │    │  │ Cluster A │  │ Cluster B │ │  │  │
-│  │  │  cert-manager   │    │  │ (3 VMs)   │  │ (3 VMs)  │ │  │  │
-│  │  │  Rancher UI     │    │  └──────────┘  └──────────┘ │  │  │
-│  │  └────────┬────────┘    └──────────────────────────────┘  │  │
-│  │           │ manages                                        │  │
-│  │           └──────────────────────────────────────────────▶│  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+results/
+├── junit.xml
+└── result.json
+evidence/
+logs/
 ```
 
----
-
-## Deployment Phases
-
-The framework is designed to be applied incrementally. Each phase depends on the outputs of the previous phase. The phases correspond directly to Terraform workspaces or directories.
-
-### Phase 0 — Bootstrap
-
-**Purpose**: Deploy a Rancher management server inside Harvester using cloud-init.
-
-**Module**: `modules/bootstrap`
-
-**What it does**:
-- Generates an RSA SSH key pair and registers it as a Harvester SSH key.
-- Creates a `harvester_cloudinit_secret` that embeds a cloud-init script.
-- The cloud-init script installs RKE2, waits for the cluster to become ready, then installs cert-manager and Rancher via Helm — all inside the VM, without requiring external Terraform provider access to the cluster.
-- Creates a Harvester VM (`harvester_virtualmachine`) on the masquerade network.
-- Creates an IP pool (`harvester_ippool`) and a LoadBalancer (`harvester_loadbalancer`) that exposes ports 80 and 443 of the Rancher VM.
-
-**Outputs used in later phases**:
-- `rancher_hostname` — the FQDN to configure in DNS or `/etc/hosts`.
-- `rancher_lb_ip` — the LoadBalancer IP to map to the hostname.
-
-**Provider dependencies**: `harvester/harvester`, `hashicorp/tls`
-
----
-
-### Phase 1 — Rancher Auth
-
-**Purpose**: Establish authenticated Terraform sessions against the newly bootstrapped Rancher server.
-
-**No dedicated module** — this phase is handled at the environment level by configuring the `rancher2` provider with the Rancher URL and bootstrap credentials.
-
-```hcl
-provider "rancher2" {
-  api_url   = "https://rancher.example.internal"
-  bootstrap = true
-  ...
-}
-```
-
----
-
-### Phase 2 — Management
-
-**Purpose**: Register Harvester into Rancher and set up shared infrastructure (networks, images, RBAC).
-
-This phase uses four modules, typically applied together:
-
-#### 2a. harvester-integration (`modules/management/harvester-integration`)
-
-- Enables the Harvester feature flag in Rancher settings.
-- Installs the Harvester UI extension from the official Helm chart.
-- Creates a `rancher2_cloud_credential` storing the Harvester kubeconfig — this credential is later used by tenant cluster provisioning.
-- Creates a `rancher2_cluster` resource that imports Harvester as a virtualization management cluster.
-- Patches the Harvester CoreDNS ConfigMap so Harvester nodes can resolve the internal Rancher hostname — this is required before the registration command is applied.
-- Applies the Rancher registration manifest to Harvester using a `local-exec` provisioner and `kubectl`.
-- Configures `harvester_setting` resources for `cluster-registration-url` and `rancher-cluster`.
-
-**Provider dependencies**: `rancher/rancher2 ~> 8.0.0`, `harvester/harvester ~> 0.6.0`, `hashicorp/kubernetes ~> 2.30.0`
-
-#### 2b. networking (`modules/management/networking`)
-
-- Creates `harvester_network` resources for each VLAN defined in the `vlans` input map.
-- Attaches each VLAN to the specified cluster network (e.g., `mgmt`).
-- Networks created here are referenced by name when provisioning tenant clusters.
-
-**Provider dependencies**: `harvester/harvester ~> 0.6.0`
-
-#### 2c. storage (`modules/management/storage`)
-
-- Downloads OS images from public URLs into Harvester using `harvester_image` resources.
-- Images are stored in the specified namespace and referenced by name when provisioning tenant clusters.
-
-**Provider dependencies**: `harvester/harvester ~> 0.6.0`
-
-#### 2d. rbac (`modules/management/rbac`)
-
-- Creates Rancher projects (`rancher2_project`) on the Harvester cluster with CPU, memory, and storage quotas.
-- Creates a default namespace (`rancher2_namespace`) for each project, named `<team>-ns`.
-- Isolates tenant teams from each other using Rancher's project-level RBAC.
-
-**Provider dependencies**: `rancher/rancher2 ~> 3.0`
-
-#### 2e. namespace-credential-provisioner (`modules/management/namespace-credential-provisioner`)
-
-- Deploys a long-running reconciler on the Harvester cluster that watches for tenant namespaces.
-- For each namespace, automatically creates a scoped ServiceAccount, RoleBindings, and a
-  `harvester-vm-kubeconfig` Secret that consumer teams use to authenticate the `harvester`
-  Terraform provider — no admin involvement, no file handover.
-- Backfills existing namespaces on startup (safe to deploy to running clusters).
-- Cleans up cross-namespace RoleBindings when a namespace is deleted.
-
-**Must be deployed before `tenant-space` creates namespaces** so that credentials are
-ready by the time consumer teams run `terraform apply`.
-
-**Provider dependencies**: `hashicorp/kubernetes >= 2.0`
-
----
-
-### Phase 3 — Identity & Monitoring
-
-**Purpose**: Configure external authentication and deep observability for the datacenter.
-
-#### 3a. identity (`modules/identity/*`)
-
-- **rancher-oidc**: Configures Rancher to delegate authentication to an external OIDC provider (e.g. WSO2 Asgardeo or Azure AD).
-- **providers/asgardeo**: Presets for integrating WSO2 Asgardeo.
-
-#### 3b. monitoring (`modules/monitoring`)
-
-- Deploys `calert` and `google-chat-notifications` on top of the `rancher-monitoring` stack.
-- Configures PrometheusRules and Alertmanager to route critical alerts to Google Chat Spaces.
-- Installs curated Grafana dashboards for Harvester nodes, storage, and VMs.
-
----
-
-### Phase 4 — Workloads
-
-**Purpose**: Provision on-demand Kubernetes clusters and standalone VMs for tenant teams.
-
-#### 4a. k8s-cluster (`modules/workloads/k8s-cluster`)
-
-- **What it does**:
-  - Fetches the Harvester cloud credential from Rancher (`data.rancher2_cloud_credential`).
-  - Defines a `rancher2_machine_config_v2` describing the VM size, image, and network for cluster nodes.
-  - Provisions a `rancher2_cluster_v2` RKE2 cluster using the machine config.
-  - Each cluster gets a dedicated machine pool combining control-plane, etcd, and worker roles.
-
-**Provider dependencies**: `rancher/rancher2 ~> 3.0`
-
-#### 4b. vm (`modules/workloads/vm`)
-
-- **What it does**:
-  - Provisions standalone virtual machines directly on Harvester HCI.
-  - Supports multiple additional disks, custom network interfaces, and cloud-init (user-data/network-data).
-  - Automatically manages SSH keys and cloud-init secrets.
-
-**Provider dependencies**: `harvester/harvester ~> 0.6.0`
-
----
-
-### Phase 5 — Asgardeo Auth (Future)
-
-**Purpose**: Integrate Asgardeo as an external OIDC identity provider for Rancher and tenant clusters.
-
-This phase configures the `asgardeo` provider (or equivalent OIDC configuration in Rancher) so that user authentication is delegated to WSO2 Asgardeo instead of local Rancher accounts.
-
----
-
-## Provider Dependency Summary
-
-| Provider | Used In | Purpose |
-|----------|---------|---------|
-| `harvester/harvester ~> 1.7` | bootstrap, workloads/vm | Manage Harvester VMs, networks, images |
-| `rancher/rancher2 ~> 13.1` | management/cluster-roles, management/tenant-space, identity/rancher-oidc | Rancher projects, namespaces, role templates, OIDC auth config |
-| `hashicorp/kubernetes ~> 3.0` | monitoring | Deploy monitoring resources to Harvester cluster |
-| `hashicorp/kubernetes ~> 2.35` | workloads/harvester-cloud-credential | Cross-cluster credential provisioning |
-| `asgardeo/asgardeo ~> 0.1` | identity/providers/asgardeo | Asgardeo application and OIDC configuration (Phase 5, future) |
-
----
-
-## Module Dependency Graph
-
-```text
-                    ┌─────────────┐
-                    │  bootstrap  │
-                    │  (Phase 0)  │
-                    └──────┬──────┘
-                           │ rancher_lb_ip, rancher_hostname
-                           ▼
-                    ┌─────────────┐
-                    │ rancher auth│
-                    │  (Phase 1)  │
-                    └──────┬──────┘
-                           │ rancher2 provider configured
-           ┌───────────────┼───────────────┐
-           ▼               ▼               ▼
-    ┌──────────────┐ ┌──────────┐ ┌───────────┐
-    │  harvester-  │ │networking│ │  storage  │
-    │ integration  │ │(Phase 2b)│ │(Phase 2c) │
-    │  (Phase 2a)  │ └──────────┘ └───────────┘
-    └──────┬───────┘
-           │ cloud credential, cluster registered
-           │
-           ▼
-       ┌────────┐
-       │  rbac  │
-       │(Phase  │
-       │  2d)   │
-       └────────┘
-           │
-           │ projects/namespaces ready
-           ▼
-    ┌─────────────────────────┐
-    │ namespace-credential-   │
-    │ provisioner (Phase 2e)  │
-    └──────────┬──────────────┘
-               │ harvesterconfig + harvester-vm-kubeconfig per namespace
-               ▼
-    ┌───────────────────┐
-    │   identity        │
-    │   (Phase 3a)      │
-    └────────┬──────────┘
-             │ OIDC active
-             ▼
-    ┌───────────────────┐
-    │   monitoring      │
-    │   (Phase 3b)      │
-    └────────┬──────────┘
-             │ observability ready
-             ▼
-    ┌─────────────────────────────────┐
-    │       Workloads (Phase 4)       │
-    │  ┌─────────────┐ ┌───────────┐  │
-    │  │ k8s-cluster │ │    vm     │  │
-    │  │ (Phase 4a)  │ │ (Phase 4b)│  │
-    │  └─────────────┘ └───────────┘  │
-    └─────────────────────────────────┘
-```
-
----
-
-## Network Architecture
-
-Harvester uses two network modes for VMs:
-
-- **Masquerade**: VMs get NAT'd outbound internet access via the Harvester node. The Rancher bootstrap VM uses this mode. External access is provided via a Harvester LoadBalancer with an IP pool drawn from a routable subnet.
-- **VLAN (bridge)**: VMs are directly bridged onto a physical VLAN. Tenant cluster VMs use this mode, giving them routable IPs in the datacenter network fabric.
-
-The `management/networking` module creates VLAN-backed networks in Harvester. These are referenced by `modules/workloads/k8s-cluster` when provisioning tenant VM node pools.
-
----
-
-## Security Considerations
-
-- Sensitive variables (`vm_password`, `rancher_admin_password`, `harvester_kubeconfig`) are marked `sensitive = true` in all modules. Supply them via a `*.secret.tfvars` file or a secrets manager integration — never commit them to source control.
-- The bootstrap Rancher server uses a self-signed certificate by default (managed by cert-manager). In production, configure an ACME issuer or bring your own certificate.
-- Rancher RBAC (projects/namespaces with resource quotas) provides soft multi-tenancy isolation between teams. For stronger isolation, provision each tenant a dedicated cluster using `modules/workloads/k8s-cluster`.
+CAP-002 currently publishes the `evidence/terraform` portion of this contract:
+run metadata, a sanitized plan summary, applied-resource inventory, and cleanup
+status. JUnit, behavioral-test logs, and broader Kubernetes evidence are added
+with the Go runner. The executable schema, retention rules, and broader evidence
+redaction policy will be versioned at that point.

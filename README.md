@@ -1,79 +1,252 @@
-# Open Cloud Datacenter (OCD)
+# Harvester Upgrade Test Suite
 
-Turn an on-prem datacenter into a self-service cloud. OCD is an open, modular control plane and module set for running compute, Kubernetes clusters, and networking on your own hardware — without public-cloud lock-in.
+The Harvester Upgrade Test Suite is a reusable acceptance-testing pipeline for
+validating the Harvester and Rancher capabilities that Open Cloud Datacenter
+depends on after an upgrade or configuration change.
 
-- **Sovereignty** — full control over your data and infrastructure.
-- **Portability** — move workloads across on-prem hardware and providers.
-- **Cost-efficiency** — optimize resource usage and avoid vendor lock-in.
-- **Community-driven** — built on open standards and collaborative development.
+> **Project status:** Early development. The first milestone is establishing the
+> pipeline infrastructure and implementing **CAP-002: Tenant Space** as the
+> reference capability. The suite is not yet ready for production use.
 
-> ℹ️ **This `main` branch is the index — it carries no code.** The work lives on three branches, mapped below. `main` is intentionally kept as the front door + roadmap.
+This project lives on the `testsuite` branch. The branch is maintained as a
+self-contained project with its own code, infrastructure, documentation, and
+release history.
 
-## See it in action
+## Goals
 
-The same control plane, two ways — provision a virtual network from the **CLI** or the **web console**:
+- Run repeatable acceptance tests against a Harvester environment.
+- Keep the test runner and its evidence available when the target fails.
+- Create temporary test fixtures and reliably clean them up.
+- Verify observable behavior, not only successful infrastructure provisioning.
+- Produce portable JUnit, JSON, log, and evidence outputs.
+- Let teams develop, submit, and validate each capability workflow independently.
+- Allow capabilities to be added without redesigning shared pipeline components.
+- Provide development and production-ready deployment references for community
+  environments.
 
-<table>
-<tr>
-<td width="50%" valign="top"><strong><code>dcctl</code> — CLI</strong><br/><br/><img src="docs/media/dcctl-vnet-demo.gif" alt="dcctl creating a VNet and subnet" width="100%"></td>
-<td width="50%" valign="top"><strong>Web console</strong><br/><br/><img src="docs/media/cloudui-vnet-demo.gif" alt="Creating a VNet in the web console" width="100%"></td>
-</tr>
-</table>
+## Architecture
 
-## How this repo is organized
+The suite separates the system running the pipeline from the system under test:
 
-```text
-              ┌─────────────────────────────────────────────┐
-              │          Open Cloud Datacenter (OCD)         │
-              │   turn an on-prem datacenter into a cloud    │
-              └───────────────────────┬─────────────────────┘
-                          branch = layer of the stack
-      ┌───────────────────────────────┼───────────────────────────────┐
-      ▼                               ▼                               ▼
-┌──────────────┐              ┌──────────────────┐            ┌────────────────┐
-│  terraform   │   Phase 1    │   controlplane   │  Phase 2   │   operators    │
-│  IaC modules │   Platform   │  DC-API · dcctl  │  Cloud     │  K8s operators │
-│  Harvester + │   Foundation │  cloud-ui (web)  │  Control   │  DBaaS, Key    │
-│  Rancher,    │ ─ consumed ─▶│  REST/CLI/UI     │◀─ backed ─ │  Vault, …      │
-│  net/backup/ │     by       │  cloud facade    │     by     │                │
-│  monitoring  │              │                  │            │                │
-└──────────────┘              └──────────────────┘            └────────────────┘
-      ▲
-      └─ main (this branch): index + roadmap only — no code
+- **Host environment:** A Harvester and Rancher environment containing a
+  downstream Kubernetes cluster. Argo Workflows, test runner pods, and artifact
+  storage run in this cluster.
+- **Target environment:** The Harvester environment being tested. Only temporary,
+  uniquely named test resources are created here.
 
-  request flow:  user → dcctl / cloud-ui → DC-API → Harvester (VMs)
-                                                   → Rancher (clusters)
-                                                   → operators · PostgreSQL (state)
+```mermaid
+flowchart LR
+    User[Team member] -->|Trigger| Pipeline
+
+    subgraph Host["Host environment"]
+        Pipeline[Argo Workflow]
+        Runner[Terraform and Go test runner]
+        Artifacts[(Results and evidence storage)]
+        Pipeline --> Runner
+        Runner --> Artifacts
+    end
+
+    subgraph Target["Target environment"]
+        APIs[Rancher and Harvester APIs]
+        Fixtures[Temporary test fixtures]
+        APIs --> Fixtures
+    end
+
+    Runner -->|Create, test, and clean up| APIs
 ```
 
-| Branch | Phase | What's here |
-|---|---|---|
-| **[`terraform`](https://github.com/wso2/open-cloud-datacenter/tree/terraform)** | Phase 1 — Platform Foundation | Terraform / IaC modules wrapping the Harvester + Rancher providers: tenancy, networks, backup, monitoring. Start here to provision the platform. |
-| **[`controlplane`](https://github.com/wso2/open-cloud-datacenter/tree/controlplane)** | Phase 2 — Cloud Control Plane | The cloud facade — **DC-API** (REST), **dcctl** (CLI), **cloud-ui** (web). Detailed plan in [`MILESTONES.md`](https://github.com/wso2/open-cloud-datacenter/blob/controlplane/MILESTONES.md). |
-| **[`operators`](https://github.com/wso2/open-cloud-datacenter/tree/operators)** | Supporting | Kubernetes operators (Database, Key Vault, …) that back the control-plane services. |
-| `main` | — | This index + roadmap. No code. |
+Workflow pods do not run in the Target environment. They access approved Target
+APIs remotely using scoped credentials stored in the Host environment. This
+separation keeps diagnostics, test results, and cleanup facilities available
+when a Target capability is degraded.
+
+## Technology stack
+
+| Technology | Responsibility |
+|---|---|
+| Argo Workflows | Orchestrates the test lifecycle in Kubernetes |
+| Terraform | Creates and removes temporary test fixtures |
+| Go | Implements API clients, behavioral checks, and evidence collection |
+| Ginkgo v2 and Gomega | Structures capability tests and asynchronous assertions |
+| Kubernetes `client-go` and dynamic client | Accesses Kubernetes and Harvester APIs and CRDs |
+| JUnit and JSON | Provides portable test and automation results |
+| S3-compatible object storage | Retains workflow artifacts and evidence; MinIO is used by the development setup |
+| Kubernetes persistent storage | Shares Terraform state and the saved plan between CAP-002 workflow steps |
+
+## Capability workflow lifecycle
+
+The complete test suite will use the bounded lifecycle below. CAP-002 currently
+implements configuration preparation, Terraform provisioning, sanitized
+Terraform evidence publication, and Terraform cleanup; each remaining stage
+will be added as a separate milestone.
+
+1. Validate Target connectivity, versions, capacity, and required inputs.
+2. Acquire an environment lock to prevent conflicting runs.
+3. Provision uniquely named temporary fixtures with Terraform.
+4. Run Go acceptance tests against the Target APIs and resources.
+5. Publish JUnit, structured JSON, logs, and relevant Kubernetes evidence.
+6. Run Terraform cleanup even when provisioning or assertions fail.
+7. Let a scheduled janitor retry cleanup of expired resources after exceptional
+   failures.
+
+Terraform owns the fixture lifecycle. The Go test layer proves that the
+resulting capability behaves correctly.
+
+## First milestone: CAP-002 Tenant Space
+
+The first CAP-002 phase provisions one configured development tenant and
+exercises:
+
+- Rancher project creation.
+- Workload and network namespace creation.
+- Namespace-to-project labels.
+- Project quota configuration.
+- A protected zero-quota network namespace.
+- Harvester VLAN network configuration.
+- Expected project role bindings.
+
+This phase proves the Terraform provisioning and destruction paths through Argo.
+An exit handler always attempts cleanup, publishes sanitized plan, applied-state,
+and cleanup evidence, and Argo deletes the per-workflow state PVC after a fully
+successful run. Automated failed-run recovery, quota enforcement,
+reconciliation, and negative-path assertions are later milestones.
+
+The initial scenario covers a tenant with quota. Tenant-without-quota and deeper
+network and RBAC scenarios can be added without changing other capability
+workflows.
+
+## Capability contract
+
+Each capability is an independent module:
+
+```text
+capabilities/tenant-space/
+├── capability.yaml
+├── scripts/                  # Container step implementations
+├── workflow/
+│   └── workflow-template.yaml
+├── fixtures/
+├── tests/
+└── evidence.yaml
+```
+
+Directory names are readable capability names; `capability.yaml` retains stable
+IDs such as `CAP-002`. The metadata declares the capability ID, priority,
+labels, timeout, required inputs, lock scope, workflow reference, and expected outputs. The
+capability-owned `WorkflowTemplate` can be submitted without a suite-wide
+orchestrator, allowing teams to develop and test modules in parallel. Every
+capability publishes the same result contract:
+
+```text
+results/
+├── junit.xml
+└── result.json
+evidence/
+logs/
+```
+
+Adding a capability requires only a self-contained module, not changes to other
+capability workflows or a hand-maintained central catalog. A future aggregate
+workflow will discover capability metadata and execute all selected workflows
+for a complete suite run.
+
+## Repository layout
+
+```text
+.
+├── capabilities/        # Independent capability fixtures and acceptance tests
+├── cmd/                 # Test-suite command entry points
+├── docs/                # Architecture, setup, operations, and authoring guides
+├── infra/               # Host infrastructure and Argo/MinIO configuration
+│   ├── development/     # Small-footprint development reference
+│   └── production/      # Production reference, added after the dev setup is proven
+├── internal/            # Shared Go clients, assertions, locking, and evidence code
+├── pipeline/            # Shared workflow components and future aggregate runner
+├── CONTRIBUTING.md
+├── LICENSE
+└── README.md
+```
+
+The development infrastructure will document the current Argo Workflows and
+MinIO-based setup. The production reference will add appropriate availability,
+durability, secret-management, network-policy, and operational controls after
+the first vertical slice has been validated.
+
+## Getting started
+
+Clone only the test-suite project branch:
+
+```bash
+git clone --branch testsuite --single-branch \
+  https://github.com/wso2/open-cloud-datacenter.git \
+  harvester-upgrade-test-suite
+cd harvester-upgrade-test-suite
+```
+
+The completed development setup will require:
+
+- A Host Harvester and Rancher environment.
+- A downstream Kubernetes cluster for workflow execution.
+- Argo Workflows.
+- S3-compatible artifact storage, with MinIO as the development reference.
+- Network access from workflow pods to the approved Target APIs.
+- Scoped Harvester, Rancher, and Kubernetes credentials stored as Host secrets.
+
+Bootstrap and execution commands will be documented as the infrastructure and
+runner are added. Until then, this repository describes the agreed architecture
+and development contract rather than a runnable release.
+
+## Security boundaries
+
+- Never commit Target credentials, kubeconfigs, Terraform variable files,
+  Terraform state, saved plans, or generated evidence containing secrets.
+- Store credentials in the Host secret store, not in workflow parameters.
+- Grant workflow service accounts only the permissions required by a capability.
+- Restrict workflow egress to approved Target APIs, Git, the image registry, and
+  artifact storage.
+- Submit approved workflow templates instead of arbitrary workflow definitions.
+- Use unique run IDs, execution deadlines, reserved test networks, and
+  environment-level locking.
+- Keep Terraform state isolated from artifacts. CAP-002 stores local state on a
+  per-workflow development PVC, deletes it after successful cleanup, and retains
+  it when the workflow fails.
 
 ## Roadmap
 
-### Phase 1 — Platform Foundation · `terraform`
+1. Establish the development Host infrastructure with Argo Workflows and MinIO.
+2. Build the shared workflow components, runner image, result contract, and
+   cleanup guarantees.
+3. Implement CAP-002 Tenant Space as the first independently runnable workflow.
+4. Add environment locking, evidence collection, and the cleanup janitor.
+5. Add further Harvester capabilities as independent workflows.
+6. Introduce an aggregate workflow that discovers and runs the capability set
+   for an initial suite release.
+7. Document and validate a production deployment model.
 
-- **Tenancy & identity** — tenant isolation; Asgardeo OIDC claim-based RBAC (no local Rancher users); per-tenant quotas (CPU / memory / storage) at the project and namespace level.
-- **Terraform modules** — wrap the Harvester & Rancher providers for easy provisioning; modules to provision database instances.
-- **Network abstraction** — VLAN-backed networks in Harvester; load-balancer services via kube-vip with per-environment IP pools.
-- **Backup** — etcd backups to object storage; full Kubernetes backup via Velero.
-- **Monitoring** — a single Grafana stack covering Harvester HCI and tenant clusters; Alertmanager routing.
+The architecture proposal and design discussion are tracked in
+[GitHub Discussion #242](https://github.com/wso2/open-cloud-datacenter/discussions/242).
 
-### Phase 2 — Cloud Control Plane · `controlplane`
+## Related project branches
 
-Phase 1 gives tenants a Terraform-consumable sandbox; Phase 2 delivers a **cloud experience** — a REST API (DC-API), a CLI, and eventually a portal — that abstracts away Harvester, Rancher, and Kubernetes. The interface resembles a public cloud, with the Phase 1 platform as the backend. Detailed milestones live in [`MILESTONES.md`](https://github.com/wso2/open-cloud-datacenter/blob/controlplane/MILESTONES.md).
+Open Cloud Datacenter currently maintains major projects as separate branches
+in the same repository:
 
-- **M1 — Compute & cluster provisioning API** — a facade API for provisioning compute and Kubernetes clusters.
-- **M1.5 — Full RBAC** — integrate an external identity provider.
-- **M2 — Storage & networking** — network load balancers; a Kube-OVN virtual-network model (VPC, default gateway, DHCP, DNS); Longhorn-based storage.
-- **M3 — Platform services (as-a-Service)** — **Database**, **Key Vault**, **Registry**, and **Cache** *(planned)*.
-- **M4 — Self-service portal** — a React-based web UI.
-- **M5 — Tenant & project hierarchy** — an organization hierarchy for managing infrastructure.
+- [`terraform`](https://github.com/wso2/open-cloud-datacenter/tree/terraform):
+  reusable Harvester and Rancher infrastructure modules.
+- [`operators`](https://github.com/wso2/open-cloud-datacenter/tree/operators):
+  Kubernetes operators backing platform services.
+- [`controlplane`](https://github.com/wso2/open-cloud-datacenter/tree/controlplane):
+  API, CLI, and web control-plane components.
+
+The test suite may consume released infrastructure modules, but it does not
+duplicate their implementation.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Changes for this project must target the
+`testsuite` branch.
 
 ## License
 
-Licensed under the terms in [LICENSE](LICENSE). See also [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+Licensed under the terms in [LICENSE](LICENSE). See
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community participation guidelines.

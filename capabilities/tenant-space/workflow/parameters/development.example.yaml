@@ -1,0 +1,14 @@
+rancher-url: https://REPLACE_WITH_RANCHER_HOSTNAME
+harvester-cluster-id: REPLACE_WITH_HARVESTER_CLUSTER_ID
+project-name: cap002-tenant-space-dev
+vm-network-vlan-id: "700"
+cpu-limit: "24"
+memory-limit: 32Gi
+storage-limit: 256Gi
+group-role-bindings-json: |-
+  [
+    {
+      "user_principal_id": "REPLACE_WITH_RANCHER_PRINCIPAL_ID",
+      "role_template_id": "REPLACE_WITH_ROLE_TEMPLATE_ID"
+    }
+  ]

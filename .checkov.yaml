@@ -1,4 +1,0 @@
-skip-check:
-  # Examples use semantic version tags (e.g. ?ref=v0.1.0) for readability.
-  # Commit-hash pinning is recommended for production use but not enforced here.
-  - CKV_TF_1

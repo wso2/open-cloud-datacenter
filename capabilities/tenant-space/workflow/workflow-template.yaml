@@ -1,0 +1,307 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cap-002-tenant-space
+  namespace: argo
+  labels:
+    testsuite.opencloud.wso2.com/capability-id: CAP-002
+    testsuite.opencloud.wso2.com/capability-name: tenant-space
+spec:
+  entrypoint: provision-tenant-space
+  onExit: exit-handler
+  arguments:
+    parameters:
+      - name: rancher-url
+        value: https://REPLACE_WITH_RANCHER_HOSTNAME
+        description: HTTPS URL of the Rancher API managing the target Harvester cluster.
+      - name: harvester-cluster-id
+        value: REPLACE_WITH_HARVESTER_CLUSTER_ID
+        description: Rancher cluster ID of the target Harvester cluster.
+      - name: project-name-prefix
+        value: cap002-tenant-space-dev
+        description: Prefix for the Rancher project name; an 8-character workflow UID suffix is appended.
+      - name: vm-network-vlan-id
+        value: "700"
+        description: VLAN ID used by the tenant VM network.
+      - name: cpu-limit
+        value: "24"
+        description: Tenant CPU quota.
+      - name: memory-limit
+        value: 32Gi
+        description: Tenant memory quota.
+      - name: storage-limit
+        value: 256Gi
+        description: Tenant storage quota.
+      - name: group-role-bindings-json
+        value: |-
+          [
+            {
+              "user_principal_id": "REPLACE_WITH_RANCHER_PRINCIPAL",
+              "role_template_id": "REPLACE_WITH_ROLE_TEMPLATE_ID"
+            }
+          ]
+        description: JSON array of Rancher project role bindings.
+  serviceAccountName: cap-002-tenant-space
+  activeDeadlineSeconds: 3600
+  synchronization:
+    mutexes:
+      - name: cap-002-tenant-space
+  podSpecPatch: >-
+    {"securityContext":{"fsGroup":65532,"fsGroupChangePolicy":"OnRootMismatch"}}
+  volumeClaimGC:
+    strategy: OnWorkflowSuccess
+  volumeClaimTemplates:
+    - metadata:
+        name: terraform-workspace
+        labels:
+          testsuite.opencloud.wso2.com/capability-id: CAP-002
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: harvester
+        resources:
+          requests:
+            storage: 2Gi
+  volumes:
+    - name: harvester-kubeconfig
+      secret:
+        secretName: cap-002-target-credentials
+        defaultMode: 0400
+        items:
+          - key: harvester-kubeconfig
+            path: kubeconfig
+    - name: tmp
+      emptyDir: {}
+  templates:
+    - name: provision-tenant-space
+      steps:
+        - - name: prepare
+            template: prepare
+        - - name: init
+            template: terraform-init
+        - - name: plan
+            template: terraform-plan
+        - - name: apply
+            template: terraform-apply
+        - - name: collect-terraform-evidence
+            template: collect-terraform-evidence
+
+    - name: exit-handler
+      dag:
+        tasks:
+          - name: destroy
+            template: terraform-destroy
+          - name: publish-evidence
+            template: publish-evidence
+            depends: destroy.Succeeded || destroy.Failed || destroy.Errored
+
+    - name: prepare
+      container:
+        image: cap-002-terraform-runner
+        imagePullPolicy: IfNotPresent
+        command:
+          - /bin/sh
+          - /opt/testsuite/capabilities/tenant-space/scripts/prepare.sh
+        env:
+          - name: rancherUrl
+            value: "{{workflow.parameters.rancher-url}}"
+          - name: harvesterClusterId
+            value: "{{workflow.parameters.harvester-cluster-id}}"
+          - name: projectNamePrefix
+            value: "{{workflow.parameters.project-name-prefix}}"
+          - name: vmNetworkVlanId
+            value: "{{workflow.parameters.vm-network-vlan-id}}"
+          - name: cpuLimit
+            value: "{{workflow.parameters.cpu-limit}}"
+          - name: memoryLimit
+            value: "{{workflow.parameters.memory-limit}}"
+          - name: storageLimit
+            value: "{{workflow.parameters.storage-limit}}"
+          - name: groupRoleBindingsJson
+            value: "{{workflow.parameters.group-role-bindings-json}}"
+          - name: workflowUid
+            value: "{{workflow.uid}}"
+          - name: workflowName
+            value: "{{workflow.name}}"
+          - name: TF_VAR_rancher_api_token
+            valueFrom:
+              secretKeyRef:
+                name: cap-002-target-credentials
+                key: rancher-api-token
+          - name: HOME
+            value: /workspace/home
+          - name: TF_PLUGIN_CACHE_DIR
+            value: /workspace/plugin-cache
+        volumeMounts:
+          - name: terraform-workspace
+            mountPath: /workspace
+          - name: harvester-kubeconfig
+            mountPath: /credentials/harvester
+            readOnly: true
+          - name: tmp
+            mountPath: /tmp
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: "1"
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          capabilities:
+            drop:
+              - ALL
+
+    - name: terraform-init
+      container:
+        image: cap-002-terraform-runner
+        imagePullPolicy: IfNotPresent
+        command:
+          - /bin/sh
+          - /opt/testsuite/capabilities/tenant-space/scripts/terraform-init.sh
+        env:
+          - name: WORKFLOW_UID
+            value: "{{workflow.uid}}"
+          - name: HOME
+            value: /workspace/home
+          - name: TF_PLUGIN_CACHE_DIR
+            value: /workspace/plugin-cache
+          - name: TF_IN_AUTOMATION
+            value: "1"
+          - name: TF_INPUT
+            value: "0"
+        volumeMounts:
+          - name: terraform-workspace
+            mountPath: /workspace
+          - name: tmp
+            mountPath: /tmp
+        resources:
+          requests: {cpu: 250m, memory: 256Mi}
+          limits: {cpu: "2", memory: 1Gi}
+        securityContext: &containerSecurityContext
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          capabilities:
+            drop: [ALL]
+
+    - name: terraform-plan
+      container:
+        image: cap-002-terraform-runner
+        imagePullPolicy: IfNotPresent
+        command:
+          - /bin/sh
+          - /opt/testsuite/capabilities/tenant-space/scripts/terraform-plan.sh
+        env: &terraformEnvironment
+          - name: WORKFLOW_UID
+            value: "{{workflow.uid}}"
+          - name: TF_VAR_rancher_api_token
+            valueFrom:
+              secretKeyRef:
+                name: cap-002-target-credentials
+                key: rancher-api-token
+          - name: HOME
+            value: /workspace/home
+          - name: TF_PLUGIN_CACHE_DIR
+            value: /workspace/plugin-cache
+          - name: TF_IN_AUTOMATION
+            value: "1"
+          - name: TF_INPUT
+            value: "0"
+        volumeMounts: &terraformVolumeMounts
+          - name: terraform-workspace
+            mountPath: /workspace
+          - name: harvester-kubeconfig
+            mountPath: /credentials/harvester
+            readOnly: true
+          - name: tmp
+            mountPath: /tmp
+        resources: &terraformResources
+          requests: {cpu: 250m, memory: 256Mi}
+          limits: {cpu: "2", memory: 1Gi}
+        securityContext: *containerSecurityContext
+
+    - name: terraform-apply
+      container:
+        image: cap-002-terraform-runner
+        imagePullPolicy: IfNotPresent
+        command:
+          - /bin/sh
+          - /opt/testsuite/capabilities/tenant-space/scripts/terraform-apply.sh
+        env: *terraformEnvironment
+        volumeMounts: *terraformVolumeMounts
+        resources: *terraformResources
+        securityContext: *containerSecurityContext
+
+    - name: collect-terraform-evidence
+      container:
+        image: cap-002-terraform-runner
+        imagePullPolicy: IfNotPresent
+        command:
+          - /bin/sh
+          - /opt/testsuite/capabilities/tenant-space/scripts/collect-terraform-evidence.sh
+        env:
+          - name: WORKFLOW_UID
+            value: "{{workflow.uid}}"
+          - name: HOME
+            value: /workspace/home
+          - name: TF_PLUGIN_CACHE_DIR
+            value: /workspace/plugin-cache
+          - name: TF_IN_AUTOMATION
+            value: "1"
+          - name: TF_INPUT
+            value: "0"
+        volumeMounts:
+          - name: terraform-workspace
+            mountPath: /workspace
+          - name: tmp
+            mountPath: /tmp
+        resources: *terraformResources
+        securityContext: *containerSecurityContext
+
+    - name: terraform-destroy
+      container:
+        image: cap-002-terraform-runner
+        imagePullPolicy: IfNotPresent
+        command:
+          - /bin/sh
+          - /opt/testsuite/capabilities/tenant-space/scripts/terraform-destroy.sh
+        env: *terraformEnvironment
+        volumeMounts: *terraformVolumeMounts
+        resources: *terraformResources
+        securityContext: *containerSecurityContext
+
+    - name: publish-evidence
+      container:
+        image: cap-002-terraform-runner
+        imagePullPolicy: IfNotPresent
+        command:
+          - /bin/sh
+          - /opt/testsuite/capabilities/tenant-space/scripts/publish-evidence.sh
+        env:
+          - name: WORKFLOW_UID
+            value: "{{workflow.uid}}"
+          - name: WORKFLOW_NAME
+            value: "{{workflow.name}}"
+          - name: WORKFLOW_STATUS
+            value: "{{workflow.status}}"
+        volumeMounts:
+          - name: terraform-workspace
+            mountPath: /workspace
+          - name: tmp
+            mountPath: /tmp
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+          limits: {cpu: "1", memory: 512Mi}
+        securityContext: *containerSecurityContext
+      outputs:
+        artifacts:
+          - name: terraform-evidence
+            path: "/workspace/runs/{{workflow.uid}}/evidence/terraform"

@@ -1,0 +1,31 @@
+apiVersion: testsuite.opencloud.wso2.com/v1alpha1
+kind: Capability
+metadata:
+  id: CAP-002
+  name: tenant-space
+  title: Tenant Space
+spec:
+  version: 0.1.0
+  description: Provisions and removes a quota-enabled Harvester tenant space.
+  workflowTemplate: cap-002-tenant-space
+  timeout: 90m
+  priority: critical
+  labels:
+    - harvester
+    - rancher
+    - tenancy
+    - terraform
+  lockScope: tenant-space-vlan
+  inputs:
+    parameters:
+      - rancher-url
+      - harvester-cluster-id
+      - project-name-prefix
+      - vm-network-vlan-id
+      - cpu-limit
+      - memory-limit
+      - storage-limit
+      - group-role-bindings-json
+    targetCredentials: cap-002-target-credentials
+  outputs:
+    - terraform-evidence
