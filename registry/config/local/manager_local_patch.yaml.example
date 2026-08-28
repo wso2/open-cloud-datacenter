@@ -20,6 +20,28 @@ spec:
         - name: STORAGE_CLASS
           value: "REPLACE_WITH_YOUR_REAL_STORAGE_CLASS"
         # The operator verifies Harbor's certificate, so this issuer's CA must
-        # be trusted by the manager pod.
+        # be trusted by the manager pod. A publicly-rooted issuer needs nothing
+        # further; a private CA needs the mount below, or every reconcile stops
+        # at "waiting for Harbor to accept API requests".
         - name: CERT_ISSUER
           value: "REPLACE_WITH_YOUR_REAL_CLUSTER_ISSUER"
+        # Uncomment for a private CA. SSL_CERT_DIR takes a colon-separated list
+        # and replaces the default search path, so it must name the image's own
+        # directory too — dropping /etc/ssl/certs would leave the operator
+        # unable to verify the public Harbor chart repository.
+        #- name: SSL_CERT_DIR
+        #  value: /etc/ssl/certs:/etc/harbor-ca
+        #volumeMounts:
+        #- name: harbor-ca
+        #  mountPath: /etc/harbor-ca
+        #  readOnly: true
+      # The Secret cert-manager writes for the issuer above, or any ConfigMap
+      # holding its CA. Merged by name with the volumes in
+      # config/manager/manager.yaml, so listing it here does not drop those.
+      #volumes:
+      #- name: harbor-ca
+      #  secret:
+      #    secretName: REPLACE_WITH_THE_SECRET_HOLDING_YOUR_CA
+      #    items:
+      #    - key: ca.crt
+      #      path: ca.crt
