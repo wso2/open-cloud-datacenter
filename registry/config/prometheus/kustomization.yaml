@@ -1,0 +1,7 @@
+resources:
+- monitor.yaml
+
+# The ServiceMonitor verifies the metrics certificate, so enabling it also
+# requires the [METRICS WITH CERTMANAGER] patch under
+# config/default/kustomization.yaml, which issues the "metrics-server-cert"
+# secret and mounts it into the manager.

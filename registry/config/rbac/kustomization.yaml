@@ -1,0 +1,15 @@
+resources:
+- service_account.yaml
+- role.yaml
+- role_binding.yaml
+- leader_election_role.yaml
+- leader_election_role_binding.yaml
+- metrics_auth_role.yaml
+- metrics_auth_role_binding.yaml
+- metrics_reader_role.yaml
+- registry_admin_role.yaml
+- registry_editor_role.yaml
+- registry_viewer_role.yaml
+- registrybackend_admin_role.yaml
+- registrybackend_editor_role.yaml
+- registrybackend_viewer_role.yaml

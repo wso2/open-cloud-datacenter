@@ -1,0 +1,5 @@
+# Only Registry is applied. RegistryBackend is created by the operator and is not
+# something a user authors, so there is no sample for it.
+resources:
+- registry_v1alpha1_registry.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

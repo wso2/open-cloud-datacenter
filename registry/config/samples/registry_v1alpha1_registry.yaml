@@ -1,0 +1,32 @@
+# A Registry is the only resource a user creates. Apply it in any namespace:
+# the operator provisions a Harbor into that namespace if it has none yet, then
+# creates a project inside it for this Registry. Nothing has to be prepared
+# first — no label, no annotation, no pre-created object.
+#
+# Every later Registry in this same namespace reuses that Harbor and only adds
+# another project to it. A Registry in a different namespace gets a Harbor of
+# its own.
+#
+# No namespace is pinned here, because the operator treats them all alike —
+# supply one at apply time and the Harbor follows it:
+#
+#     kubectl apply -n <your-namespace> -f registry_v1alpha1_registry.yaml
+#
+# Without -n this lands in whatever your kubeconfig's current namespace is
+# (usually "default"), which is a real namespace owned by someone — always
+# pass -n rather than relying on the context.
+#
+# Push credentials land in the Secret named by .status.credentialsSecretName,
+# in that same namespace.
+#
+# Deleting this Registry deletes its Harbor project and every image in it.
+# There is no retain option — delete means delete.
+apiVersion: registry.opencloud.wso2.com/v1alpha1
+kind: Registry
+metadata:
+  name: web
+spec:
+  # Storage quota for this registry (starter=5Gi, professional=20Gi,
+  # enterprise=100Gi). Raise or lower it at any time; Harbor refuses a decrease
+  # below what is already stored until images are removed.
+  plan: starter

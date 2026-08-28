@@ -1,0 +1,125 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: registry
+    app.kubernetes.io/managed-by: kustomize
+  name: system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller-manager
+  namespace: system
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: registry
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+      app.kubernetes.io/name: registry
+  replicas: 1
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        control-plane: controller-manager
+        app.kubernetes.io/name: registry
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - command:
+        - /registry-provisioner
+        image: controller:latest
+        # Using a mutable :latest tag — always pull so a redeploy picks up a
+        # freshly pushed image instead of a cached one.
+        imagePullPolicy: Always
+        name: manager
+        env:
+        # REQUIRED: the base domain used to build registry URLs
+        # (https://registry.<namespace>.<BASE_DOMAIN>). Replace with your own
+        # domain. The value below is a documentation-reserved address
+        # (RFC 5737) in nip.io form, a convenient stand-in for clusters without
+        # real DNS: nip.io resolves <address>.nip.io back to that address.
+        #
+        # With nip.io, use the DASH-separated form as below, not dots. nip.io
+        # finds the address by scanning for four dot-separated octets anywhere
+        # in the name, so a namespace ending in a digit ("team-1") merges into
+        # that scan and resolves to the wrong host. The symptom is a
+        # RegistryBackend stuck in Provisioning with every Harbor pod healthy,
+        # because the readiness check never reaches the ingress.
+        - name: BASE_DOMAIN
+          value: "192-0-2-1.nip.io"
+        # cert-manager ClusterIssuer for each Harbor's ingress TLS. Must
+        # already exist: `kubectl get clusterissuer`. The operator verifies
+        # Harbor's certificate, so the issuer's CA must be trusted by the
+        # manager pod.
+        - name: CERT_ISSUER
+          value: "letsencrypt-prod"
+        # StorageClass for Harbor's PVCs. Must support allowVolumeExpansion
+        # for plan upgrades to be able to grow storage. Replace with the
+        # StorageClass name available on your cluster.
+        - name: STORAGE_CLASS
+          value: "longhorn"
+        # Optional Harbor/Helm settings (defaults shown; override as needed).
+        # - name: INGRESS_CLASS
+        #   value: "nginx"
+        # - name: HARBOR_CHART_VERSION
+        #   value: "1.19.2"
+        # Point Helm's cache/config/data at the writable /tmp volume below,
+        # since the root filesystem is read-only.
+        - name: HELM_CACHE_HOME
+          value: /tmp/helm/cache
+        - name: HELM_CONFIG_HOME
+          value: /tmp/helm/config
+        - name: HELM_DATA_HOME
+          value: /tmp/helm/data
+        ports:
+        - containerPort: 8443
+          name: https
+          protocol: TCP
+        - containerPort: 8081
+          name: health
+          protocol: TCP
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - "ALL"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      # Writable scratch for Helm (values, pulled charts, cache) because the
+      # root filesystem is read-only.
+      - name: tmp
+        emptyDir: {}
+      serviceAccountName: controller-manager
+      terminationGracePeriodSeconds: 10

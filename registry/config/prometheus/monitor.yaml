@@ -1,0 +1,31 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: registry
+    app.kubernetes.io/managed-by: kustomize
+  name: controller-manager-metrics-monitor
+  namespace: system
+spec:
+  endpoints:
+  - path: /metrics
+    port: https
+    scheme: https
+    bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    tlsConfig:
+      # The scrape sends a ServiceAccount token, so the endpoint is verified
+      # before it is trusted with one. Requires the [METRICS WITH CERTMANAGER]
+      # patch in config/default/kustomization.yaml, which issues
+      # 'metrics-server-cert' with a SAN for the name below and mounts it into
+      # the manager. Only 'ca' is needed — scrapers authenticate by token, not
+      # by client certificate.
+      serverName: regi-controller-manager-metrics-service.registry-system.svc
+      insecureSkipVerify: false
+      ca:
+        secret:
+          name: metrics-server-cert
+          key: ca.crt
+  selector:
+    matchLabels:
+      control-plane: controller-manager

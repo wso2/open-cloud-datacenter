@@ -1,0 +1,22 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: registry
+    app.kubernetes.io/managed-by: kustomize
+  name: registrybackend-viewer-role
+rules:
+- apiGroups:
+  - registry.opencloud.wso2.com
+  resources:
+  - registrybackends
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - registry.opencloud.wso2.com
+  resources:
+  - registrybackends/status
+  verbs:
+  - get

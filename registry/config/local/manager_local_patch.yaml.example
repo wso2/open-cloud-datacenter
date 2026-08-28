@@ -1,0 +1,25 @@
+# Copy this file to manager_local_patch.yaml (gitignored) and fill in your
+# own cluster's real values. Only the fields you list here get overridden;
+# env vars are merged by name, so you don't need to repeat the full env list
+# from config/manager/manager.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: regi-controller-manager
+  namespace: registry-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: manager
+        env:
+        # With nip.io, use the dash-separated form (e.g. 10-0-0-5.nip.io); the
+        # dotted form mis-resolves for namespaces ending in a digit.
+        - name: BASE_DOMAIN
+          value: "REPLACE_WITH_YOUR_REAL_BASE_DOMAIN"
+        - name: STORAGE_CLASS
+          value: "REPLACE_WITH_YOUR_REAL_STORAGE_CLASS"
+        # The operator verifies Harbor's certificate, so this issuer's CA must
+        # be trusted by the manager pod.
+        - name: CERT_ISSUER
+          value: "REPLACE_WITH_YOUR_REAL_CLUSTER_ISSUER"
