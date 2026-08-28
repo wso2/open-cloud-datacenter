@@ -1,0 +1,244 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: registrybackends.registry.opencloud.wso2.com
+spec:
+  group: registry.opencloud.wso2.com
+  names:
+    kind: RegistryBackend
+    listKind: RegistryBackendList
+    plural: registrybackends
+    shortNames:
+    - rb
+    singular: registrybackend
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.effectivePlan
+      name: Plan
+      type: string
+    - jsonPath: .status.registryCount
+      name: Registries
+      type: integer
+    - jsonPath: .status.registryURL
+      name: URL
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          RegistryBackend is one namespace's Harbor deployment, shared by every
+          Registry in that namespace.
+
+          It is a singleton per namespace: always the same name, in the namespace it
+          serves, with Harbor's pods, volumes, and credentials deployed there too. The
+          namespace is the whole identity, so there is no field naming what this
+          backend is for. The operator creates it when the namespace's first Registry
+          appears; users never author one. A fixed name makes "one Harbor per
+          namespace" enforceable without locking — concurrent first Registries attempt
+          the identical object and the API server settles it — the same way Kubernetes
+          provisions its own per-namespace singletons (the default ServiceAccount, the
+          kube-root-ca.crt ConfigMap).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RegistryBackendSpec is the desired state of a namespace's
+              Harbor deployment.
+            properties:
+              autoscale:
+                default:
+                  enabled: true
+                description: |-
+                  Autoscale raises the deployment size when the storage committed to the
+                  namespace's registries approaches what is provisioned. Growth is permanent,
+                  since PersistentVolumeClaims cannot shrink.
+                properties:
+                  committedThresholdPercent:
+                    default: 80
+                    description: |-
+                      CommittedThresholdPercent is the share of provisioned registry storage
+                      that may be committed to registry quotas before the plan is raised.
+                    format: int32
+                    maximum: 100
+                    minimum: 50
+                    type: integer
+                  enabled:
+                    default: true
+                    description: Enabled turns automatic growth on.
+                    type: boolean
+                required:
+                - enabled
+                type: object
+              plan:
+                default: starter
+                description: |-
+                  Plan is the floor for deployment sizing. The operator may size above it
+                  when Autoscale is enabled, never below. Upgrade-only, because sizing
+                  expands PersistentVolumeClaims and Kubernetes cannot shrink them.
+                enum:
+                - starter
+                - professional
+                - enterprise
+                type: string
+                x-kubernetes-validations:
+                - message: plan can only be upgraded (starter -> professional -> enterprise),
+                    never downgraded
+                  rule: self == oldSelf || (oldSelf == 'starter' && self != 'starter')
+                    || (oldSelf == 'professional' && self == 'enterprise')
+            type: object
+          status:
+            description: RegistryBackendStatus is the observed state of a namespace's
+              Harbor deployment.
+            properties:
+              adminSecretName:
+                description: |-
+                  AdminSecretName is the Secret in this namespace holding Harbor's pinned
+                  credentials.
+                type: string
+              committedStorageBytes:
+                description: |-
+                  CommittedStorageBytes is the total storage committed to this namespace's
+                  registry quotas, which is what autoscaling compares against provisioned
+                  capacity.
+                format: int64
+                type: integer
+              conditions:
+                description: Conditions holds standard Kubernetes status conditions.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              effectivePlan:
+                description: |-
+                  EffectivePlan is the size actually deployed: the greater of spec.plan and
+                  what autoscaling has determined is needed. Sizing reads this, not
+                  spec.plan, so growth never rewrites the spec the admin authored.
+                enum:
+                - starter
+                - professional
+                - enterprise
+                type: string
+              message:
+                description: Message describes the current phase, including why it
+                  is not Ready.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation last reconciled.
+                format: int64
+                type: integer
+              phase:
+                description: Phase is the lifecycle state. Empty until the first reconcile.
+                enum:
+                - Provisioning
+                - Ready
+                - Failed
+                - Terminating
+                type: string
+              registryCount:
+                description: |-
+                  RegistryCount is how many Registry objects this backend serves. Zero
+                  means it is idle and safe for an administrator to remove.
+                format: int32
+                type: integer
+              registryURL:
+                description: RegistryURL is the Harbor URL for this namespace.
+                type: string
+              unlimitedProjectCount:
+                description: |-
+                  UnlimitedProjectCount is how many of this namespace's Harbor projects
+                  currently have no storage quota ceiling (set directly through Harbor,
+                  never through a Registry). Nonzero means sizing for this Harbor is
+                  currently driven by UsedStorageBytes rather than CommittedStorageBytes.
+                format: int32
+                type: integer
+              usedStorageBytes:
+                description: |-
+                  UsedStorageBytes is the storage this namespace's registries actually
+                  consume, as reported by Harbor. Normally recorded for visibility only;
+                  it becomes the growth trigger only when it exceeds
+                  CommittedStorageBytes, which can only happen when
+                  UnlimitedProjectCount is greater than zero (see computeEffectivePlan).
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
