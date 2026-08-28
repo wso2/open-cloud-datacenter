@@ -1,0 +1,11 @@
+# Teaches kustomize that a Certificate's issuerRef names an Issuer, so the
+# namePrefix in config/default/kustomization.yaml is applied to both sides.
+# Without this the Certificate points at an unprefixed name that no longer
+# exists, and cert-manager never issues it.
+nameReference:
+- kind: Issuer
+  group: cert-manager.io
+  fieldSpecs:
+  - kind: Certificate
+    group: cert-manager.io
+    path: spec/issuerRef/name

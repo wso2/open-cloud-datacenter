@@ -10,6 +10,12 @@ import (
 // render and install the Harbor Helm chart.
 type Config struct {
 	Helm HelmConfig
+
+	// MetricsCertDir holds a serving certificate (tls.crt/tls.key) for the
+	// metrics endpoint. Empty means the manager self-signs for localhost,
+	// which only a scraper skipping verification can read; set it to make the
+	// endpoint verifiable under its Service DNS name.
+	MetricsCertDir string
 }
 
 // HelmConfig holds the settings used to render and install the Harbor chart.
@@ -39,6 +45,7 @@ func Load() (*Config, error) {
 			CertIssuer:     envStr("CERT_ISSUER", "letsencrypt-prod"),
 			BaseDomain:     mustEnv("BASE_DOMAIN"),
 		},
+		MetricsCertDir: envStr("METRICS_CERT_DIR", ""),
 	}, nil
 }
 

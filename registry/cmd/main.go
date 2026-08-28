@@ -47,13 +47,16 @@ func main() {
 		Scheme:                 scheme,
 		HealthProbeBindAddress: ":8081",
 		// Metrics served over HTTPS; the API server validates each scraper's
-		// bearer token. With CertDir unset the serving certificate is
-		// self-signed for localhost, so set CertDir to a cert-manager
-		// certificate covering the Service DNS name to make it verifiable.
+		// bearer token. CertDir comes from METRICS_CERT_DIR: set, the endpoint
+		// serves that certificate and is verifiable under its Service DNS name;
+		// unset, it self-signs for localhost and only an insecure scraper can
+		// read it. See config/default/kustomization.yaml's
+		// [METRICS WITH CERTMANAGER] block for the manifests that mount one.
 		Metrics: metricsserver.Options{
 			BindAddress:    ":8443",
 			SecureServing:  true,
 			FilterProvider: filters.WithAuthenticationAndAuthorization,
+			CertDir:        cfg.MetricsCertDir,
 		},
 		LeaderElection:   true,
 		LeaderElectionID: "registry-provisioner.opencloud.wso2.com",

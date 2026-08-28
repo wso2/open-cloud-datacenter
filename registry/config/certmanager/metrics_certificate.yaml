@@ -1,0 +1,37 @@
+# Serving certificate for the metrics endpoint, so a scraper can verify it
+# instead of skipping verification. Applied only via the
+# [METRICS WITH CERTMANAGER] block in config/default/kustomization.yaml.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    app.kubernetes.io/name: registry
+    app.kubernetes.io/managed-by: kustomize
+  name: metrics-certs
+  namespace: system
+spec:
+  # Must match the metrics Service's DNS name exactly, including the namePrefix
+  # from config/default/kustomization.yaml. Change both together, and keep it in
+  # step with serverName in config/prometheus/monitor.yaml.
+  dnsNames:
+    - regi-controller-manager-metrics-service.registry-system.svc
+    - regi-controller-manager-metrics-service.registry-system.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: selfsigned-issuer
+  # The name monitor.yaml reads the CA from, and the manager mounts.
+  secretName: metrics-server-cert
+---
+# A self-signed issuer is enough here: the scraper is told to trust this exact
+# CA, so nothing else needs to chain to it. Point issuerRef at a real
+# ClusterIssuer instead if the cluster already has one.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  labels:
+    app.kubernetes.io/name: registry
+    app.kubernetes.io/managed-by: kustomize
+  name: selfsigned-issuer
+  namespace: system
+spec:
+  selfSigned: {}

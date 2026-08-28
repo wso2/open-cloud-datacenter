@@ -8,14 +8,28 @@ resources:
 - ../manager
 # [PROMETHEUS] To enable a Prometheus Operator ServiceMonitor for metrics
 # scraping, uncomment this — requires the monitoring.coreos.com CRDs to
-# already be installed on the cluster.
+# already be installed on the cluster, and the [METRICS WITH CERTMANAGER]
+# block below, since the ServiceMonitor verifies the serving certificate.
 #- ../prometheus
+# [METRICS WITH CERTMANAGER] Issues 'metrics-server-cert' for the metrics
+# Service's DNS name. Uncomment together with the patch at the bottom of this
+# file; requires cert-manager on the cluster.
+#- ../certmanager
 - metrics_service.yaml
 # [NETWORK POLICY] Restrict :8443 to Pods in namespaces labeled
 # 'metrics: enabled'. Optional — the endpoint is already authenticated
 # (see cmd/main.go); this is defense-in-depth on top of that, and depends
 # on the cluster's CNI actually enforcing NetworkPolicy.
 #- ../network-policy
+
+# [METRICS WITH CERTMANAGER] Mounts the certificate issued above and sets
+# METRICS_CERT_DIR so the endpoint stops self-signing. Uncomment together with
+# ../certmanager.
+#patches:
+#- path: metrics_cert_patch.yaml
+#  target:
+#    kind: Deployment
+#    name: controller-manager
 
 # Set the operator image via `kustomize edit set image controller=<repo>/<image>:<tag>`
 # or `make deploy IMG=<repo>/<image>:<tag>`.

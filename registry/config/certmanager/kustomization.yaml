@@ -1,0 +1,5 @@
+resources:
+- metrics_certificate.yaml
+
+configurations:
+- kustomizeconfig.yaml

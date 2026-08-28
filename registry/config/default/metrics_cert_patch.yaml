@@ -1,0 +1,32 @@
+# Mounts the metrics serving certificate and points the manager at it. Applied
+# only via the [METRICS WITH CERTMANAGER] block in this directory's
+# kustomization.yaml, which also pulls in ../certmanager to issue the Secret.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller-manager
+  namespace: system
+spec:
+  template:
+    spec:
+      containers:
+      - name: manager
+        env:
+        # Empty leaves the endpoint self-signed for localhost; set, it serves
+        # the mounted certificate (see cmd/main.go).
+        - name: METRICS_CERT_DIR
+          value: /tmp/k8s-metrics-server/metrics-certs
+        volumeMounts:
+        - name: metrics-certs
+          mountPath: /tmp/k8s-metrics-server/metrics-certs
+          readOnly: true
+      volumes:
+      - name: metrics-certs
+        secret:
+          secretName: metrics-server-cert
+          optional: false
+          items:
+          - key: tls.crt
+            path: tls.crt
+          - key: tls.key
+            path: tls.key
