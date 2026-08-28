@@ -27,15 +27,24 @@ type HelmConfig struct {
 	CertIssuer     string
 	// BaseDomain is the suffix every registry URL is built on, as
 	// registry.<namespace>.<BaseDomain>. With nip.io it MUST use the
-	// dash-separated form (192-0-2-1.nip.io): nip.io finds the address by
-	// scanning for four dot-separated octets anywhere in the name, so a
-	// namespace ending in a digit ("project-1") merges into the dotted form and
-	// resolves to the wrong host.
+	// dash-separated form (192-0-2-1.nip.io), because a namespace ending in a
+	// digit merges into the dotted form and resolves to a different address:
+	//
+	//	registry.project-1.192.0.2.1.nip.io  ->  1.192.0.2   (wrong host)
+	//	registry.project1.192.0.2.1.nip.io   ->  192.0.2.1
+	//	registry.project-1.192-0-2-1.nip.io  ->  192.0.2.1
+	//
+	// Reproduce with `getent hosts <name>`.
 	BaseDomain string
 }
 
 // Load builds the operator configuration from environment variables.
 func Load() (*Config, error) {
+	baseDomain, err := requireEnv("BASE_DOMAIN")
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
 		Helm: HelmConfig{
 			HarborRepoURL:  envStr("HARBOR_HELM_REPO", "https://helm.goharbor.io"),
@@ -43,19 +52,21 @@ func Load() (*Config, error) {
 			StorageClass:   envStr("STORAGE_CLASS", "longhorn"),
 			IngressClass:   envStr("INGRESS_CLASS", "nginx"),
 			CertIssuer:     envStr("CERT_ISSUER", "letsencrypt-prod"),
-			BaseDomain:     mustEnv("BASE_DOMAIN"),
+			BaseDomain:     baseDomain,
 		},
 		MetricsCertDir: envStr("METRICS_CERT_DIR", ""),
 	}, nil
 }
 
-// mustEnv returns the value of key, panicking if it is unset or empty.
-func mustEnv(key string) string {
+// requireEnv returns the value of key, or an error if it is unset or empty.
+// Startup still stops on a missing value; returning it lets the caller report
+// which one instead of unwinding a stack.
+func requireEnv(key string) (string, error) {
 	v := os.Getenv(key)
 	if v == "" {
-		panic(fmt.Sprintf("required environment variable %s is not set", key))
+		return "", fmt.Errorf("required environment variable %s is not set", key)
 	}
-	return v
+	return v, nil
 }
 
 // envStr returns the value of key, or def if it is unset or empty.

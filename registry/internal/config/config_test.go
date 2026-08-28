@@ -25,26 +25,33 @@ func TestEnvStr(t *testing.T) {
 	})
 }
 
-func TestMustEnv(t *testing.T) {
+func TestRequireEnv(t *testing.T) {
 	t.Run("returns the value when set", func(t *testing.T) {
-		t.Setenv("TEST_MUST_ENV", "required-value")
-		if got := mustEnv("TEST_MUST_ENV"); got != "required-value" {
-			t.Errorf("mustEnv() = %q, want %q", got, "required-value")
+		t.Setenv("TEST_REQUIRE_ENV", "required-value")
+		got, err := requireEnv("TEST_REQUIRE_ENV")
+		if err != nil {
+			t.Fatalf("requireEnv() error = %v", err)
+		}
+		if got != "required-value" {
+			t.Errorf("requireEnv() = %q, want %q", got, "required-value")
 		}
 	})
-	t.Run("panics when unset", func(t *testing.T) {
-		defer func() {
-			r := recover()
-			if r == nil {
-				t.Fatal("mustEnv() did not panic for a missing required env var")
-			}
-			msg, ok := r.(string)
-			if !ok || !strings.Contains(msg, "TEST_MUST_ENV_NEVER_SET") {
-				t.Errorf("panic value = %v, want it to name the missing env var", r)
-			}
-		}()
-		mustEnv("TEST_MUST_ENV_NEVER_SET")
+	t.Run("errors when unset, naming the variable", func(t *testing.T) {
+		_, err := requireEnv("TEST_REQUIRE_ENV_NEVER_SET")
+		if err == nil {
+			t.Fatal("requireEnv() error = nil, want an error for a missing required env var")
+		}
+		if !strings.Contains(err.Error(), "TEST_REQUIRE_ENV_NEVER_SET") {
+			t.Errorf("error = %v, want it to name the missing env var", err)
+		}
 	})
+}
+
+func TestLoadErrorsWithoutBaseDomain(t *testing.T) {
+	t.Setenv("BASE_DOMAIN", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() error = nil, want an error when BASE_DOMAIN is unset")
+	}
 }
 
 func TestLoad(t *testing.T) {
@@ -65,13 +72,18 @@ func TestLoad(t *testing.T) {
 		}
 	})
 
-	t.Run("missing required BASE_DOMAIN panics rather than silently defaulting", func(t *testing.T) {
-		defer func() {
-			if recover() == nil {
-				t.Fatal("Load() did not panic when BASE_DOMAIN was unset")
-			}
-		}()
-		Load()
+	t.Run("missing required BASE_DOMAIN errors rather than silently defaulting", func(t *testing.T) {
+		t.Setenv("BASE_DOMAIN", "")
+		cfg, err := Load()
+		if err == nil {
+			t.Fatal("Load() error = nil, want an error when BASE_DOMAIN is unset")
+		}
+		if cfg != nil {
+			t.Errorf("Load() config = %v, want nil alongside the error", cfg)
+		}
+		if !strings.Contains(err.Error(), "BASE_DOMAIN") {
+			t.Errorf("error = %v, want it to name BASE_DOMAIN", err)
+		}
 	})
 
 	t.Run("env vars override every default", func(t *testing.T) {

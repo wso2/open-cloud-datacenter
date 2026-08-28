@@ -58,6 +58,14 @@ const (
 	// deployment is grown.
 	defaultCommittedThresholdPercent = 80
 
+	// Event actions name what the operator did to the object, which the events
+	// API requires alongside the reason. UpperCamelCase, same convention as
+	// reasons.
+	actionReconcile = "Reconcile"
+	actionProvision = "Provision"
+	actionResize    = "Resize"
+	actionDelete    = "Delete"
+
 	// eventReasonReady etc. are CamelCase to satisfy the condition-reason
 	// and Event-reason conventions.
 	reasonReady        = "Ready"

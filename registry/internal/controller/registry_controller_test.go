@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -21,7 +21,7 @@ func newRegistryReconciler(t *testing.T, fc client.WithWatch) *RegistryReconcile
 	return &RegistryReconciler{
 		Client:   fc,
 		Scheme:   newTestScheme(t),
-		Recorder: record.NewFakeRecorder(64),
+		Recorder: events.NewFakeRecorder(64),
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -37,7 +37,7 @@ const backendFinalizer = "registry.opencloud.wso2.com/backend-cleanup"
 type RegistryBackendReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder events.EventRecorder
 	Helm     HarborDeployer
 	HelmCfg  config.HelmConfig
 }
@@ -229,12 +229,13 @@ func (r *RegistryBackendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
-	r.Recorder.Event(&cr, corev1.EventTypeNormal, reasonReady, "Harbor ready at "+registryURL)
+	r.Recorder.Eventf(&cr, nil, corev1.EventTypeNormal, reasonReady, actionProvision,
+		"Harbor ready at %s", registryURL)
 
 	if nextPlan != plan {
 		// Requeue immediately: the next pass renders and expands at the larger
 		// plan, keeping growth in one place rather than duplicating it here.
-		r.Recorder.Eventf(&cr, corev1.EventTypeNormal, reasonResized,
+		r.Recorder.Eventf(&cr, nil, corev1.EventTypeNormal, reasonResized, actionResize,
 			"growing Harbor from %s to %s; registries have committed %d bytes", plan, nextPlan, totals.Committed)
 		return ctrl.Result{Requeue: true}, nil
 	}
@@ -403,8 +404,8 @@ func (r *RegistryBackendReconciler) ensureStorageSize(ctx context.Context, cr *r
 		if err := r.Update(ctx, pvc); err != nil {
 			return fmt.Errorf("expand PVC %s to %s: %w", pvc.Name, want, err)
 		}
-		r.Recorder.Event(cr, corev1.EventTypeNormal, "StorageExpanded",
-			fmt.Sprintf("PVC %s: %s -> %s", pvc.Name, current.String(), want))
+		r.Recorder.Eventf(cr, nil, corev1.EventTypeNormal, "StorageExpanded", actionResize,
+			"PVC %s: %s -> %s", pvc.Name, current.String(), want)
 	}
 	return nil
 }
@@ -481,7 +482,7 @@ func (r *RegistryBackendReconciler) handleDelete(ctx context.Context, cr *regist
 				len(dependents), dependents, forceAnnotation)
 		}
 
-		r.Recorder.Event(cr, corev1.EventTypeWarning, reasonBlocked, msg)
+		r.Recorder.Eventf(cr, nil, corev1.EventTypeWarning, reasonBlocked, actionDelete, "%s", msg)
 		_ = r.patchStatus(ctx, client.ObjectKeyFromObject(cr), func(s *registryv1alpha1.RegistryBackendStatus) {
 			s.Phase = phaseTerminating
 			s.Message = msg
@@ -605,7 +606,7 @@ func (r *RegistryBackendReconciler) provisioning(ctx context.Context, cr *regist
 // error so controller-runtime applies exponential backoff.
 func (r *RegistryBackendReconciler) transient(ctx context.Context, cr *registryv1alpha1.RegistryBackend, secretName, step string, cause error) (ctrl.Result, error) {
 	msg := fmt.Sprintf("%s: %v", step, cause)
-	r.Recorder.Event(cr, corev1.EventTypeWarning, reasonTransient, msg)
+	r.Recorder.Eventf(cr, nil, corev1.EventTypeWarning, reasonTransient, actionReconcile, "%s", msg)
 	_ = r.patchStatus(ctx, client.ObjectKeyFromObject(cr), func(s *registryv1alpha1.RegistryBackendStatus) {
 		s.Phase = phaseProvisioning
 		s.Message = msg
@@ -622,7 +623,7 @@ func (r *RegistryBackendReconciler) transient(ctx context.Context, cr *registryv
 // re-triggers reconcile through the watch.
 func (r *RegistryBackendReconciler) fail(ctx context.Context, cr *registryv1alpha1.RegistryBackend, step string, cause error) (ctrl.Result, error) {
 	msg := fmt.Sprintf("%s: %v", step, cause)
-	r.Recorder.Event(cr, corev1.EventTypeWarning, reasonError, msg)
+	r.Recorder.Eventf(cr, nil, corev1.EventTypeWarning, reasonError, actionReconcile, "%s", msg)
 	_ = r.patchStatus(ctx, client.ObjectKeyFromObject(cr), func(s *registryv1alpha1.RegistryBackendStatus) {
 		s.Phase = phaseFailed
 		s.Message = msg

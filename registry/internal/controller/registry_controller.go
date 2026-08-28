@@ -11,7 +11,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,7 +38,7 @@ const registryFinalizer = "registry.opencloud.wso2.com/registry-cleanup"
 type RegistryReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder events.EventRecorder
 	HelmCfg  config.HelmConfig
 }
 
@@ -144,7 +144,8 @@ func (r *RegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
-	r.Recorder.Event(&cr, corev1.EventTypeNormal, reasonReady, "registry ready; credentials in Secret "+credName)
+	r.Recorder.Eventf(&cr, nil, corev1.EventTypeNormal, reasonReady, actionProvision,
+		"registry ready; credentials in Secret %s", credName)
 
 	// Steady-state: re-check for drift (project deleted out-of-band, etc.).
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
@@ -174,7 +175,7 @@ func (r *RegistryReconciler) bindBackend(ctx context.Context, cr *registryv1alph
 			}
 			// Another Registry created it first; use theirs.
 		} else {
-			r.Recorder.Eventf(cr, corev1.EventTypeNormal, reasonProvisioning,
+			r.Recorder.Eventf(cr, nil, corev1.EventTypeNormal, reasonProvisioning, actionProvision,
 				"provisioning Harbor for namespace %s", cr.Namespace)
 		}
 		res, _ := r.provisioning(ctx, cr,
@@ -281,8 +282,8 @@ func (r *RegistryReconciler) handleDelete(ctx context.Context, cr *registryv1alp
 		// is merely unreachable cannot leave images behind that the user asked
 		// to destroy. Only a missing backend counts as nothing-to-do.
 		if !apierrors.IsNotFound(err) {
-			r.Recorder.Event(cr, corev1.EventTypeWarning, reasonTransient,
-				"waiting to delete Harbor project: "+err.Error())
+			r.Recorder.Eventf(cr, nil, corev1.EventTypeWarning, reasonTransient, actionDelete,
+				"waiting to delete Harbor project: %s", err.Error())
 			return ctrl.Result{RequeueAfter: 15 * time.Second}, err
 		}
 	}
@@ -466,7 +467,7 @@ func (r *RegistryReconciler) provisioning(ctx context.Context, cr *registryv1alp
 // transient records a retryable failure and returns the error for backoff.
 func (r *RegistryReconciler) transient(ctx context.Context, cr *registryv1alpha1.Registry, step string, cause error) (ctrl.Result, error) {
 	msg := fmt.Sprintf("%s: %v", step, cause)
-	r.Recorder.Event(cr, corev1.EventTypeWarning, reasonTransient, msg)
+	r.Recorder.Eventf(cr, nil, corev1.EventTypeWarning, reasonTransient, actionReconcile, "%s", msg)
 	_ = r.patchStatus(ctx, client.ObjectKeyFromObject(cr), func(s *registryv1alpha1.RegistryStatus) {
 		s.Phase = phaseProvisioning
 		s.Message = msg
@@ -480,7 +481,7 @@ func (r *RegistryReconciler) transient(ctx context.Context, cr *registryv1alpha1
 // re-triggers reconcile through the watch.
 func (r *RegistryReconciler) fail(ctx context.Context, cr *registryv1alpha1.Registry, step string, cause error) (ctrl.Result, error) {
 	msg := fmt.Sprintf("%s: %v", step, cause)
-	r.Recorder.Event(cr, corev1.EventTypeWarning, reasonError, msg)
+	r.Recorder.Eventf(cr, nil, corev1.EventTypeWarning, reasonError, actionReconcile, "%s", msg)
 	_ = r.patchStatus(ctx, client.ObjectKeyFromObject(cr), func(s *registryv1alpha1.RegistryStatus) {
 		s.Phase = phaseFailed
 		s.Message = msg

@@ -10,6 +10,9 @@ metadata:
   name: metrics-certs
   namespace: system
 spec:
+  # A self-signed issuer with no subject produces an empty issuer DN, which some
+  # TLS stacks reject outright.
+  commonName: metrics-server
   # Must match the metrics Service's DNS name exactly, including the namePrefix
   # from config/default/kustomization.yaml. Change both together, and keep it in
   # step with serverName in config/prometheus/monitor.yaml.

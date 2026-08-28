@@ -68,7 +68,7 @@ func main() {
 	if err := (&controller.RegistryBackendReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("registrybackend"),
+		Recorder: mgr.GetEventRecorder("registrybackend"),
 		Helm:     helmDeployer,
 		HelmCfg:  cfg.Helm,
 	}).SetupWithManager(mgr); err != nil {
@@ -78,7 +78,7 @@ func main() {
 	if err := (&controller.RegistryReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("registry"),
+		Recorder: mgr.GetEventRecorder("registry"),
 		HelmCfg:  cfg.Helm,
 	}).SetupWithManager(mgr); err != nil {
 		logger.Fatal("failed to setup Registry controller", zap.Error(err))
