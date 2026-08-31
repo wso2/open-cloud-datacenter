@@ -335,6 +335,18 @@ variable "chart_values" {
   default     = ""
 }
 
+variable "harvester_credential_rotation" {
+  type        = number
+  description = <<-EOT
+    Bump this number to force the Harvester cloud credential's kubeconfig token to be
+    renewed. A fresh kubeconfig is fetched dynamically from Rancher (the same mechanism
+    used on initial creation) — you never need to supply kubeconfig content yourself.
+    Only used when create_cloud_credential = true; changing it on brownfield clusters
+    (create_cloud_credential = false) has no effect.
+  EOT
+  default     = 0
+}
+
 # ── Cluster membership ────────────────────────────────────────────────────────
 # Optional list of users/groups to bind to this cluster after provisioning.
 # Defaults to [] — omitting it leaves no additional bindings and does not

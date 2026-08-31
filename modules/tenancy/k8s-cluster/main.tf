@@ -369,6 +369,28 @@ data "http" "harvester_cloud_provider_kubeconfig" {
   }
 }
 
+# Rancher mints a new token in data.rancher2_cluster_v2.harvester[0].kube_config on
+# every refresh, so using that value directly would make the cloud credential drift
+# on every plan. terraform_data pins the value across applies (ignore_changes on
+# input) and only re-reads the live, freshly-fetched kube_config when
+# harvester_credential_rotation is bumped (triggers_replace forces the resource, and
+# therefore its input, to be recomputed). This is the token renewal mechanism: bump
+# the rotation number to pull a brand-new kubeconfig the same way it was generated on
+# initial creation — never hand-supply kubeconfig content.
+resource "terraform_data" "harvester_kubeconfig_rotation" {
+  count = var.create_cloud_credential ? 1 : 0
+
+  input = data.rancher2_cluster_v2.harvester[0].kube_config
+
+  triggers_replace = [
+    var.harvester_credential_rotation,
+  ]
+
+  lifecycle {
+    ignore_changes = [input]
+  }
+}
+
 resource "rancher2_cloud_credential" "harvester" {
   count = var.create_cloud_credential ? 1 : 0
   name  = "harvester-${var.cluster_name}-credential"
@@ -376,11 +398,7 @@ resource "rancher2_cloud_credential" "harvester" {
   harvester_credential_config {
     cluster_id         = data.rancher2_cluster_v2.harvester[0].cluster_v1_id
     cluster_type       = "imported"
-    kubeconfig_content = data.rancher2_cluster_v2.harvester[0].kube_config
-  }
-
-  lifecycle {
-    ignore_changes = [harvester_credential_config[0].kubeconfig_content]
+    kubeconfig_content = terraform_data.harvester_kubeconfig_rotation[0].output
   }
 }
 
