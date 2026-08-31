@@ -191,6 +191,36 @@ module "my_rke2_cluster" {
 }
 ```
 
+## Dynamic Harvester cloud credential (`create_cloud_credential`)
+
+Separately from the cloud provider secret above, `create_cloud_credential = true` has the
+module provision a `rancher2_cloud_credential` itself — the credential Rancher's Harvester
+node driver uses to provision/manage VMs and disks for this cluster's machine pools. It's
+built from the imported Harvester cluster's kubeconfig (`data.rancher2_cluster_v2.harvester`),
+fetched dynamically via `harvester_cluster_name`/`harvester_cluster_id`, `rancher_api_url`,
+and `rancher_api_token` — no kubeconfig content is ever supplied by hand.
+
+```hcl
+module "my_rke2_cluster" {
+  # ...
+  create_cloud_credential = true
+  harvester_cluster_name  = "us-dc-harvester-cluster"
+  rancher_api_url         = var.rancher_api_url
+  rancher_api_token       = var.rancher_api_token
+}
+```
+
+Rancher's embedded token for this credential expires periodically. To renew it, bump
+`harvester_credential_rotation`:
+
+```hcl
+  harvester_credential_rotation = 1  # was 0 — fetches a fresh kubeconfig and updates
+                                      # the existing credential in place
+```
+
+This requires Terraform >= 1.16 (the module's `store.sensitive_output` mechanism, which
+keeps the token from ever rendering in plan/apply output).
+
 ## Brownfield import
 
 For clusters already running in Rancher that were not provisioned by this module:

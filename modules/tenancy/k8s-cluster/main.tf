@@ -1,5 +1,7 @@
 terraform {
-  required_version = ">= 1.7"
+  # >= 1.16 for terraform_data's store.sensitive_output block, used to safely gate
+  # renewal of the Harvester cloud credential's kubeconfig token (see below).
+  required_version = ">= 1.16"
   required_providers {
     rancher2 = {
       source  = "rancher/rancher2"
@@ -370,24 +372,21 @@ data "http" "harvester_cloud_provider_kubeconfig" {
 }
 
 # Rancher mints a new token in data.rancher2_cluster_v2.harvester[0].kube_config on
-# every refresh, so using that value directly would make the cloud credential drift
-# on every plan. terraform_data pins the value across applies (ignore_changes on
-# input) and only re-reads the live, freshly-fetched kube_config when
-# harvester_credential_rotation is bumped (triggers_replace forces the resource, and
-# therefore its input, to be recomputed). This is the token renewal mechanism: bump
-# the rotation number to pull a brand-new kubeconfig the same way it was generated on
-# initial creation — never hand-supply kubeconfig content.
+# every refresh, so referencing it directly would rotate the credential on every apply.
+# terraform_data's store.sensitive_output (Terraform >= 1.16) gates that: the stored
+# value only recomputes when store.version changes, and — unlike the legacy input/output
+# attributes — sensitive_output correctly preserves the sensitivity mark, so the token
+# never renders in plain text in plan/apply/state output. Bump
+# harvester_credential_rotation to pull a fresh kubeconfig and update the existing
+# credential's kubeconfig_content in place (same secret ID, no cluster/machine_pool
+# cascade) — the same dynamic-fetch mechanism used on initial creation.
 resource "terraform_data" "harvester_kubeconfig_rotation" {
   count = var.create_cloud_credential ? 1 : 0
 
-  input = data.rancher2_cluster_v2.harvester[0].kube_config
-
-  triggers_replace = [
-    var.harvester_credential_rotation,
-  ]
-
-  lifecycle {
-    ignore_changes = [input]
+  store {
+    input     = data.rancher2_cluster_v2.harvester[0].kube_config
+    sensitive = true
+    version   = var.harvester_credential_rotation
   }
 }
 
@@ -395,10 +394,14 @@ resource "rancher2_cloud_credential" "harvester" {
   count = var.create_cloud_credential ? 1 : 0
   name  = "harvester-${var.cluster_name}-credential"
 
+  # kubeconfig_content intentionally uses the full imported-cluster kube_config (not
+  # the narrower harvesterhci.io:cloudprovider ServiceAccount kubeconfig fetched below
+  # for machine_selector_config). Rancher's Harvester node driver needs this credential
+  # to provision/manage VMs and disks, which the CCM-scoped ServiceAccount cannot do.
   harvester_credential_config {
     cluster_id         = data.rancher2_cluster_v2.harvester[0].cluster_v1_id
     cluster_type       = "imported"
-    kubeconfig_content = terraform_data.harvester_kubeconfig_rotation[0].output
+    kubeconfig_content = terraform_data.harvester_kubeconfig_rotation[0].store.sensitive_output
   }
 }
 
