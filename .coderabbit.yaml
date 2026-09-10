@@ -13,3 +13,4 @@ reviews:
       - "^terraform$"
       - "^operators$"
       - "^terraform-provider-dcapi$"
+      - "^tools$"
