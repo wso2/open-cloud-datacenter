@@ -1,0 +1,63 @@
+# This stack binds Loki to localhost. Enable auth and configure the clients before remote exposure.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  # Increase timeouts for large bulk queries and bundle imports
+  http_server_read_timeout: 60s
+  http_server_write_timeout: 60s
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # ==========================================================
+  # 1. HISTORICAL & UNORDERED LOG INGESTION
+  # ==========================================================
+  reject_old_samples: false
+  reject_old_samples_max_age: 100y
+  creation_grace_period: 100y
+  unordered_writes: true
+
+  # ==========================================================
+  # 2. BULK INGESTION RATE & STREAM LIMITS (CRITICAL FOR BUNDLES)
+  # Prevents 429 rate-limiting when Promtail pushes 800+ files at once
+  # ==========================================================
+  ingestion_rate_mb: 50
+  ingestion_burst_size_mb: 100
+  max_streams_per_user: 10000
+  max_global_streams_per_user: 10000
+
+  # ==========================================================
+  # 3. LARGE LOG LINE & STACK TRACE PROTECTION
+  # Prevents drops on long JSON payloads or Kubernetes stack traces
+  # ==========================================================
+  max_line_size: 256KB
+  max_line_size_truncate: true
+
+  # ==========================================================
+  # 4. GRAFANA QUERY PERFORMANCE
+  # ==========================================================
+  max_query_length: 0
+  max_entries_limit_per_query: 50000
+  max_query_series: 10000
+  volume_enabled: true

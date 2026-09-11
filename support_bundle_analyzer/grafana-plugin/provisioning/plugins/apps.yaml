@@ -1,0 +1,7 @@
+apiVersion: 1
+
+apps:
+  - type: 'harv-logs-app'
+    org_id: 1
+    org_name: 'wso2'
+    disabled: false

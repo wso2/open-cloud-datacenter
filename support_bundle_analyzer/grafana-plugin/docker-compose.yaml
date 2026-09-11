@@ -1,0 +1,53 @@
+services:
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ../configs/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    ports:
+      - "9080:9080"
+    volumes:
+      - ../configs/promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - ../bundle-logs:/var/log/bundle/bundle-logs:ro
+    command: -config.file=/etc/promtail/config.yaml
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    user: root 
+    ports:
+      - "3000:3000/tcp"
+    environment:
+      NODE_ENV: development
+      GF_LOG_FILTERS: plugin.harv-logs-app:debug
+      GF_LOG_LEVEL: debug
+      GF_DATAPROXY_LOGGING: 1
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: harv-logs-app
+      GF_INSTALL_PLUGINS: grafana-llm-app
+      RCA_RULES_PATH: /var/lib/grafana/plugins/harv-logs-app/rules/rca-rules.yaml
+      
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_DEFAULT_APP_MODE: "development"
+    depends_on:
+      - loki
+    restart: unless-stopped
+    volumes:
+      - ../configs/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+      - ./provisioning/plugins:/etc/grafana/provisioning/plugins:ro
+      - ./dist:/var/lib/grafana/plugins/harv-logs-app 
+volumes:
+  loki-data:

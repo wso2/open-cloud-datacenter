@@ -1,0 +1,243 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+  sync_period: 10s
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # ============================================================================
+  # CHUNK 1: CATTLE & RANCHER SYSTEM POD LOGS
+  # (Defines the reusable anchor '&pod_pipeline' inside valid schema)
+  # ============================================================================
+  - job_name: pod_logs_cattle_system
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: pod-logs-cattle
+          __path__: /var/log/bundle/bundle-logs/logs/{cattle,rancher}-*/*/*.log*
+    pipeline_stages: &pod_pipeline
+      # 1. Extract Kubernetes Namespace, Pod, and Container from folder path
+      - regex:
+          source: filename
+          expression: ".*/logs/(?P<namespace>[^/]+)/(?P<pod>[^/]+)/(?P<container>[^/]+)\\.log(?:\\.\\d+)?$"
+      - labels:
+          namespace:
+          pod:
+          container:
+
+      # 2. CRITICAL FIX: Strip Harvester's prepended timestamp to get valid JSON/logfmt
+      - regex:
+          expression: "^(?P<exporter_time>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2}))\\s+(?P<clean_msg>.*)$"
+
+      # 3. Parse JSON payloads (Harvester API, Longhorn, Audit logs) from clean_msg
+      - json:
+          source: clean_msg
+          expressions:
+            level: level
+            severity: severity
+            msg: msg
+            message: message
+            log_time: ts
+          drop_malformed: false
+
+      # 4. Parse logfmt payloads (k3s, Calico, Multus, controllers) from clean_msg
+      - logfmt:
+          source: clean_msg
+          mapping:
+            level: level
+            log_time: time
+            alt_time: t
+            msg: msg
+
+      # 5. Regex fallback for klog headers: "I0710 09:02:03... leaderelection.go:271] msg"
+      - regex:
+          source: clean_msg
+          expression: "^(?P<klog_level>[IWEF])(?P<log_time>\\d{4} \\d{2}:\\d{2}:\\d{2}\\.\\d+)\\s+(?P<msg>.*)$"
+
+      # 6. Regex fallback for Rancher format: "YYYY/MM/DD HH:MM:SS [INFO] msg"
+      - regex:
+          source: clean_msg
+          expression: "^(?P<log_time>\\d{4}/\\d{2}/\\d{2} \\d{2}:\\d{2}:\\d{2})\\s+\\[(?P<level>[A-Z]+)\\]\\s+(?P<msg>.*)$"
+
+      # 7. Normalize level label for Grafana badge colors (info/warn/error)
+      - template:
+          source: level
+          template: '{{ if eq .klog_level "E" }}error{{ else if eq .klog_level "W" }}warn{{ else if eq .klog_level "I" }}info{{ else }}{{ .severity | default .level | lower }}{{ end }}'
+      - labels:
+          level:
+
+      # 8. Use parsed log_time, falling back to exporter_time safely
+      - template:
+          source: final_time
+          template: '{{ if .klog_level }}{{ .exporter_time }}{{ else }}{{ .log_time | default .exporter_time }}{{ end }}'
+      - timestamp:
+          source: final_time
+          format: RFC3339Nano
+          fallback_formats:
+            - RFC3339
+            - "2006/01/02 15:04:05"
+            - "0102 15:04:05.000000"
+          action_on_failure: skip
+
+      # 9. Output parsed message or fall back to clean line
+      - template:
+          source: final_msg
+          template: '{{ .msg | default .message | default .clean_msg }}'
+      - output:
+          source: final_msg
+
+  # ============================================================================
+  # CHUNK 2: HARVESTER SYSTEM POD LOGS
+  # ============================================================================
+  - job_name: pod_logs_harvester_system
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: pod-logs-harvester
+          __path__: /var/log/bundle/bundle-logs/logs/harvester-*/*/*.log*
+    pipeline_stages: *pod_pipeline
+
+  # ============================================================================
+  # CHUNK 3: LONGHORN SYSTEM POD LOGS
+  # ============================================================================
+  - job_name: pod_logs_longhorn_system
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: pod-logs-longhorn
+          __path__: /var/log/bundle/bundle-logs/logs/longhorn-*/*/*.log*
+    pipeline_stages: *pod_pipeline
+
+  # ============================================================================
+  # CHUNK 4: GUEST NAMESPACES (DYNAMIC CATCH-ALL)
+  # Automatically excludes cattle-, harvester-, longhorn-, and rancher- namespaces
+  # ============================================================================
+  - job_name: pod_logs_guest_namespaces
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: pod-logs-guest
+          __path__: /var/log/bundle/bundle-logs/logs/*/*/*.log*
+    pipeline_stages:
+      # Exclude system namespaces already processed by Chunks 1-3
+      - drop:
+          source: "filename"
+          expression: ".*/logs/(cattle|harvester|longhorn|rancher)-[^/]+/*"
+          drop_counter_reason: "system_namespace_handled_by_other_job"
+      - regex:
+          source: filename
+          expression: ".*/logs/(?P<namespace>[^/]+)/(?P<pod>[^/]+)/(?P<container>[^/]+)\\.log(?:\\.\\d+)?$"
+      - labels:
+          namespace:
+          pod:
+          container:
+      - regex:
+          expression: "^(?P<exporter_time>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2}))\\s+(?P<clean_msg>.*)$"
+      - json:
+          source: clean_msg
+          expressions:
+            level: level
+            severity: severity
+            msg: msg
+            message: message
+            log_time: ts
+          drop_malformed: false
+      - logfmt:
+          source: clean_msg
+          mapping:
+            level: level
+            log_time: time
+            alt_time: t
+            msg: msg
+      - regex:
+          source: clean_msg
+          expression: "^(?P<klog_level>[IWEF])(?P<log_time>\\d{4} \\d{2}:\\d{2}:\\d{2}\\.\\d+)\\s+(?P<msg>.*)$"
+      - template:
+          source: level
+          template: '{{ if eq .klog_level "E" }}error{{ else if eq .klog_level "W" }}warn{{ else if eq .klog_level "I" }}info{{ else }}{{ .severity | default .level | lower }}{{ end }}'
+      - labels:
+          level:
+      - template:
+          source: final_time
+          template: '{{ .log_time | default .exporter_time }}'
+      - timestamp:
+          source: final_time
+          format: RFC3339Nano
+          fallback_formats:
+            - RFC3339
+            - "2006/01/02 15:04:05"
+            - "0102 15:04:05.000000"
+          action_on_failure: skip
+      - template:
+          source: final_msg
+          template: '{{ .msg | default .message | default .clean_msg }}'
+      - output:
+          source: final_msg
+
+  # ============================================================================
+  # NODE HOST LOGS (rke2-server, kubelet, kernel, etc.)
+  # ============================================================================
+  - job_name: harvester_node_logs
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: harvester-nodes
+          __path__: /var/log/bundle/bundle-logs/nodes/*/logs/*.log*
+    pipeline_stages:
+      - regex:
+          source: filename
+          expression: ".*/nodes/(?P<node>[^/]+)/logs/(?P<service>[^/]+)\\.log(?:\\.\\d+)?$"
+      - labels:
+          node:
+          service:
+      - logfmt:
+          mapping:
+            level: level
+            log_time: time
+            msg: msg
+      - regex:
+          expression: "^(?P<log_time>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2}))(?:\\s+)(?:(?i)(?P<level>ERROR|WARN|INFO|DEBUG|FATAL|E|W|I)\\s+)?(?P<msg>.*)$"
+      - template:
+          source: level
+          template: '{{ if eq .level "E" }}error{{ else if eq .level "W" }}warn{{ else if eq .level "I" }}info{{ else }}{{ .level | lower }}{{ end }}'
+      - labels:
+          level:
+      - timestamp:
+          source: log_time
+          format: RFC3339Nano
+          fallback_formats:
+            - RFC3339
+          action_on_failure: skip
+      - output:
+          source: msg
+
+  # ============================================================================
+  # ROOT BUNDLE LOGS (e.g., bundleGenerationError.log)
+  # ============================================================================
+  - job_name: harvester_bundle_root_logs
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: harvester-bundle-root
+          __path__: /var/log/bundle/bundle-logs/*.log*
+    pipeline_stages:
+      - regex:
+          source: filename
+          expression: ".*/bundle-logs/(?P<filename>[^/]+)$"
+      - labels:
+          filename:
+      - regex:
+          expression: "^(?P<log_time>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2}))(?:\\s+)(?:(?i)(?P<level>ERROR|WARN|INFO|DEBUG|FATAL)\\s+)?(?P<msg>.*)$"
+      - labels:
+          level:
+      - timestamp:
+          source: log_time
+          format: RFC3339Nano
+          fallback_formats:
+            - RFC3339
+          action_on_failure: skip

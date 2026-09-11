@@ -1,0 +1,189 @@
+# Harvester support-bundle RCA ruleset.
+# Edit this file to add/refine patterns as you learn from new postmortems.
+# Reload without restarting Grafana via: POST /api/plugins/<id>/resources/rca/reload-rules
+
+correlation_order:
+  - cattle-system
+  - cattle-fleet-system
+  - harvester-system
+  - longhorn-system
+  - kube-system
+  
+namespaces:
+  - name: cattle-system
+    patterns:
+      - id: cattle-proxy-websocket-connectivity
+        regex: '(?i)(Failed to dial steve aggregation server|Remotedialer proxy error|Empty dialer response|subscribe websocket: close sent)'
+        severity: medium
+        category: connectivity
+        description: Steve aggregation, remotedialer proxy, or websocket subscription connectivity failure.
+      - id: cattle-webhook-connection-failure
+        regex: '(?i)failed calling webhook "rancher\.cattle\.io".*(refused|timeout)'
+        severity: high
+        category: connectivity
+        description: Rancher webhook refused or timed out while handling an API request.
+      - id: cattle-certificate-failure
+        regex: '(?i)x509: certificate (signed by unknown authority|has expired)'
+        severity: high
+        category: security
+        description: Rancher or cluster certificate validation failure.
+      - id: cattle-agent-sync-failure
+        regex: '(?i)error syncing.*cattle-cluster-agent'
+        severity: medium
+        category: connectivity
+        description: Cluster agent failed to synchronize state with Rancher.
+      - id: cattle-webhook-internal-error
+        regex: '(?i)internal error occurred.*webhook'
+        severity: high
+        category: control-plane
+        description: Internal webhook error caused an API request rejection.
+
+  - name: cattle-fleet-system
+    patterns:
+      - id: fleet-general-degradation
+        regex: '(?i)(level=(error|warn)|msg=.*(fail|error|timeout|invalid|reconcile))'
+        severity: medium
+        category: deployments
+        description: General Fleet warning or error indicating deployment degradation.
+      - id: fleet-controller-agent-error
+        regex: '(?i)level=error.*(fleet-controller|fleet-agent)'
+        severity: high
+        category: deployments
+        description: Fleet controller or agent emitted an error.
+      - id: fleet-bundle-apply-failure
+        regex: '(?i)bundle.*(ErrApplied|failed)'
+        severity: high
+        category: deployments
+        description: Fleet bundle application failed.
+      - id: fleet-registration-token-missing
+        regex: '(?i)ClusterRegistrationToken.*not found'
+        severity: medium
+        category: connectivity
+        description: Fleet agent could not find its cluster registration token.
+      - id: fleet-git-fetch-failure
+        regex: '(?i)git fetch.*(fatal|error)'
+        severity: medium
+        category: gitops
+        description: Fleet Git repository fetch failed.
+
+  - name: harvester-system
+    patterns:
+      - id: harvester-deprecation-validation
+        regex: '(?i)(Endpoints is deprecated|VirtualMachineImage\.harvesterhci\.io .* is invalid|PersistentVolumeClaim .* is invalid|VirtualMachineInstancePresets is now deprecated)'
+        severity: medium
+        category: validation
+        description: Kubernetes API deprecation or Harvester resource validation failure.
+      - id: harvester-api-error
+        regex: '(?i)(level=error|level=fatal).*harvesterhci\.io'
+        severity: high
+        category: control-plane
+        description: Harvester API error or fatal event involving a Harvester resource.
+      - id: harvester-webhook-connection-failure
+        regex: '(?i)error.*harvester-webhook.*(connection refused|timeout)'
+        severity: high
+        category: connectivity
+        description: Harvester webhook connection was refused or timed out.
+      - id: harvester-upgrade-job-failure
+        regex: 'Job\.batch.*apply-hvst-upgrade.*failed'
+        severity: high
+        category: upgrades
+        description: Harvester pre-upgrade or post-upgrade job failed.
+      - id: harvester-resource-name-too-long
+        regex: 'Invalid value:.*must be no more than 63 characters'
+        severity: medium
+        category: validation
+        description: Kubernetes resource name exceeded the 63-character limit.
+
+  - name: longhorn-system
+    patterns:
+      - id: longhorn-multiunmapper-size-mismatch
+        regex: '(?i)One of the MultiUnmapper get different size \d+ from others \d+'
+        severity: medium
+        category: storage
+        description: Longhorn replicas report inconsistent MultiUnmapper sizes.
+      - id: longhorn-controller-fatal-error
+        regex: '(?i)level=(error|fatal)'
+        severity: high
+        category: storage
+        description: Longhorn controller emitted an error or fatal event.
+      - id: longhorn-volume-state-failure
+        regex: '(?i)volume.*(detached|faulted)'
+        severity: high
+        category: storage
+        description: Longhorn volume became detached or faulted.
+      - id: longhorn-invalid-volume-value
+        regex: '(?i)unable to list: values\[[0-9]+\]\[longhornvolume\]: Invalid value'
+        severity: medium
+        category: storage
+        description: Longhorn encountered an invalid volume value while listing resources.
+      - id: longhorn-replica-operation-failure
+        regex: '(?i)replica.*(rebuild failed|scheduling failed)'
+        severity: high
+        category: storage
+        description: Longhorn replica rebuild or scheduling failed.
+      - id: instance-manager-failure
+        regex: '(?i)(reading.*(failed|error)|error reading from wire)'
+        severity: high
+        category: storage
+        description: Longhorn instance manager failed or emitted an error.
+
+  - name: kube-system
+    patterns:
+      - id: kube-network-etcd-connectivity
+        regex: '(?i)(networkattachmentdefinition\.k8s\.cni\.cncf\.io .* not found|failed to get net-attach-def|grpc: addrConn\.createTransport failed to connect|apply request took too long)'
+        severity: medium
+        category: networking
+        description: CNI network attachment lookup or ETCD connectivity failure.
+      - id: kube-etcd-warning-error
+        regex: '(?i)etcd.*(warn|error)'
+        severity: high
+        category: control-plane
+        description: ETCD emitted a warning or error.
+      - id: kube-harvester-csi-error
+        regex: '(?i)harvester-(cloud-provider|csi-driver).*error'
+        severity: high
+        category: storage
+        description: Harvester cloud provider or CSI driver emitted an error.
+      - id: kube-cni-network-failure
+        regex: '(?i)cni.*(failed|network plugin)'
+        severity: medium
+        category: networking
+        description: CNI or Kubernetes network plugin failure.
+      - id: kube-pod-startup-failure
+        regex: '(?i)(CrashLoopBackOff|ContainerCreating)'
+        severity: medium
+        category: workload
+        description: Pod repeatedly crashes or remains stuck during creation.
+
+node_patterns:
+  - id: node-disk-pressure
+    regex: '(?i)(No space left on device|DiskPressure|out of space|not enough space)'
+    severity: high
+    category: storage
+    description: Node disk pressure or disk full condition on a worker node.
+  - id: node-memory-pressure
+    regex: '(?i)(MemoryPressure|Out of memory|oom-kill|killed process|out of memory)'
+    severity: high
+    category: resources
+    description: Node memory pressure or OOM event impacting the kubelet or workload containers.
+  - id: node-kubelet-not-ready
+    regex: '(?i)(KubeletNotReady|node is not ready|NodeNotReady|is not ready)'
+    severity: high
+    category: control-plane
+    description: Kubelet or node readiness check failed, indicating degraded node health.
+  - id: node-network-issue
+    regex: '(?i)(network.*(down|unreachable|timeout)|failed to setup network|network plugin.*failed)'
+    severity: medium
+    category: networking
+    description: Node network issue preventing Kubernetes or container traffic from flowing normally.
+  - id: node-container-runtime-failure
+    regex: '(?i)(container runtime.*(error|failed)|dockerd.*(error|failed)|cri-o.*(error|failed))'
+    severity: high
+    category: workload
+    description: Container runtime or systemd service on the node failed.
+  - id: node-sigkill-error
+    regex: '(?i)SIGKILL'
+    severity: high
+    category: workload
+    description: A process or workload on the node was forcibly terminated with SIGKILL.
+    
