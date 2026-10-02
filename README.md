@@ -1,79 +1,160 @@
-# Open Cloud Datacenter (OCD)
+# Harvester Cluster Test Suite
 
-Turn an on-prem datacenter into a self-service cloud. OCD is an open, modular control plane and module set for running compute, Kubernetes clusters, and networking on your own hardware — without public-cloud lock-in.
+This branch contains an automated test suite for validating the day-to-day operations of a Harvester cluster. The tests are written with [Robot Framework](https://robotframework.org/) and are intended to exercise common workflows through a repeatable, readable test interface.
 
-- **Sovereignty** — full control over your data and infrastructure.
-- **Portability** — move workloads across on-prem hardware and providers.
-- **Cost-efficiency** — optimize resource usage and avoid vendor lock-in.
-- **Community-driven** — built on open standards and collaborative development.
+The suite covers:
 
-> ℹ️ **This `main` branch is the index — it carries no code.** The work lives on three branches, mapped below. `main` is intentionally kept as the front door + roadmap.
+- Creating projects and namespaces.
+- Virtual machine lifecycle operations and storage volume mounts.
+- Creating Kubernetes clusters with single-node and multi-node configurations.
+- Read-write-many (RWX) volume behavior in Kubernetes clusters.
 
-## See it in action
+This project provides an abstraction over the original Harvester test suite: it organizes cluster workflows as reusable Robot Framework tests and keywords, with options for filtering and running suites. It is focused on validating the operational workflows listed above against a Harvester environment.
 
-The same control plane, two ways — provision a virtual network from the **CLI** or the **web console**:
+## Quick Start
 
-<table>
-<tr>
-<td width="50%" valign="top"><strong><code>dcctl</code> — CLI</strong><br/><br/><img src="docs/media/dcctl-vnet-demo.gif" alt="dcctl creating a VNet and subnet" width="100%"></td>
-<td width="50%" valign="top"><strong>Web console</strong><br/><br/><img src="docs/media/cloudui-vnet-demo.gif" alt="Creating a VNet in the web console" width="100%"></td>
-</tr>
-</table>
+### Prerequisites
 
-## How this repo is organized
+Ensure you have:
 
-```text
-              ┌─────────────────────────────────────────────┐
-              │          Open Cloud Datacenter (OCD)         │
-              │   turn an on-prem datacenter into a cloud    │
-              └───────────────────────┬─────────────────────┘
-                          branch = layer of the stack
-      ┌───────────────────────────────┼───────────────────────────────┐
-      ▼                               ▼                               ▼
-┌──────────────┐              ┌──────────────────┐            ┌────────────────┐
-│  terraform   │   Phase 1    │   controlplane   │  Phase 2   │   operators    │
-│  IaC modules │   Platform   │  DC-API · dcctl  │  Cloud     │  K8s operators │
-│  Harvester + │   Foundation │  cloud-ui (web)  │  Control   │  DBaaS, Key    │
-│  Rancher,    │ ─ consumed ─▶│  REST/CLI/UI     │◀─ backed ─ │  Vault, …      │
-│  net/backup/ │     by       │  cloud facade    │     by     │                │
-│  monitoring  │              │                  │            │                │
-└──────────────┘              └──────────────────┘            └────────────────┘
-      ▲
-      └─ main (this branch): index + roadmap only — no code
+- Python 3.8 or later.
+- `kubectl` installed and configured.
+- Access to a Harvester cluster.
+- A kubeconfig file for the Harvester cluster.
 
-  request flow:  user → dcctl / cloud-ui → DC-API → Harvester (VMs)
-                                                   → Rancher (clusters)
-                                                   → operators · PostgreSQL (state)
+### Install Dependencies
+
+From the repository root, create and activate a virtual environment, then install the test dependencies:
+
+```bash
+cd tests/harvester_robot_tests
+python3 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-| Branch | Phase | What's here |
-|---|---|---|
-| **[`terraform`](https://github.com/wso2/open-cloud-datacenter/tree/terraform)** | Phase 1 — Platform Foundation | Terraform / IaC modules wrapping the Harvester + Rancher providers: tenancy, networks, backup, monitoring. Start here to provision the platform. |
-| **[`controlplane`](https://github.com/wso2/open-cloud-datacenter/tree/controlplane)** | Phase 2 — Cloud Control Plane | The cloud facade — **DC-API** (REST), **dcctl** (CLI), **cloud-ui** (web). Detailed plan in [`MILESTONES.md`](https://github.com/wso2/open-cloud-datacenter/blob/controlplane/MILESTONES.md). |
-| **[`operators`](https://github.com/wso2/open-cloud-datacenter/tree/operators)** | Supporting | Kubernetes operators (Database, Key Vault, …) that back the control-plane services. |
-| `main` | — | This index + roadmap. No code. |
+### Configure the Environment
 
-## Roadmap
+Copy the example environment file and edit it with your cluster credentials and paths:
 
-### Phase 1 — Platform Foundation · `terraform`
+```bash
+cp .env.example .env
+```
 
-- **Tenancy & identity** — tenant isolation; Asgardeo OIDC claim-based RBAC (no local Rancher users); per-tenant quotas (CPU / memory / storage) at the project and namespace level.
-- **Terraform modules** — wrap the Harvester & Rancher providers for easy provisioning; modules to provision database instances.
-- **Network abstraction** — VLAN-backed networks in Harvester; load-balancer services via kube-vip with per-environment IP pools.
-- **Backup** — etcd backups to object storage; full Kubernetes backup via Velero.
-- **Monitoring** — a single Grafana stack covering Harvester HCI and tenant clusters; Alertmanager routing.
+At minimum, configure `HARVESTER_ENDPOINT`, `HARVESTER_USERNAME`, and `HARVESTER_PASSWORD`. Set `KUBECONFIG` if you are not using the default `~/.kube/config`.
 
-### Phase 2 — Cloud Control Plane · `controlplane`
+Example `.env` values:
 
-Phase 1 gives tenants a Terraform-consumable sandbox; Phase 2 delivers a **cloud experience** — a REST API (DC-API), a CLI, and eventually a portal — that abstracts away Harvester, Rancher, and Kubernetes. The interface resembles a public cloud, with the Phase 1 platform as the backend. Detailed milestones live in [`MILESTONES.md`](https://github.com/wso2/open-cloud-datacenter/blob/controlplane/MILESTONES.md).
+```dotenv
+KUBECONFIG=/home/user/.kube/config
+export HARVESTER_OPERATION_STRATEGY=crd
 
-- **M1 — Compute & cluster provisioning API** — a facade API for provisioning compute and Kubernetes clusters.
-- **M1.5 — Full RBAC** — integrate an external identity provider.
-- **M2 — Storage & networking** — network load balancers; a Kube-OVN virtual-network model (VPC, default gateway, DHCP, DNS); Longhorn-based storage.
-- **M3 — Platform services (as-a-Service)** — **Database**, **Key Vault**, **Registry**, and **Cache** *(planned)*.
-- **M4 — Self-service portal** — a React-based web UI.
-- **M5 — Tenant & project hierarchy** — an organization hierarchy for managing infrastructure.
+HARVESTER_ENDPOINT=https://harvester.example.com
+export RANCHER_ENDPOINT="https://rancher.example.com"
+export RANCHER_API_KEY="rancher-api-key"
+
+//Need for vm testing
+export OPENSUSE_IMAGE_URL="locally-host-opensuse-iso-file-url"
+export UBUNTU_IMAGE_URL="locally-host-ubuntu 24-iso-file-url"
+
+//Need for cluster testing
+export EXISTING_HARVESTER_NAME="harvester-cluster-id"
+export EXISTING_IMAGE="harvester-iso-image"
+export EXISTING_NETWORK="test-cluster-provisioning-network"
+
+
+ROBOT_OUTPUT_DIR=./results
+
+export WAIT_TIMEOUT=600
+
+```
+
+### Verify Kubernetes Access
+
+Confirm that `kubectl` can reach the cluster and list its nodes:
+
+```bash
+kubectl get nodes
+```
+
+If this fails, verify the kubeconfig path and that the cluster is reachable.
+
+### Run Tests
+
+Make the runner executable, then run all tests or select a test file or suite category:
+
+```bash
+chmod +x run.sh
+
+# Run all tests
+./run.sh
+
+# Run a specific test file
+./run.sh -f tests/regression/vm/test_vm.robot
+
+# Run a category (for example: vm, volume, image, addon, rancher, or host)
+./run.sh -s vm
+```
+
+
+## Test Results
+
+By default, results are written to `./results/`:
+
+```bash
+# Linux
+xdg-open results/report.html
+xdg-open results/log.html
+
+# macOS
+open results/report.html
+open results/log.html
+
+# Windows
+start results/report.html
+start results/log.html
+```
+
+Use the Robot Framework report for a summary and the log for detailed keyword-level execution information.
+
+Tests are also grouped by component subdirectory. For example, `./run.sh -s vm` or `./run.sh -s rancher` runs a category by suite name.
+
+## Troubleshooting
+
+**`kubectl: command not found`**
+
+Install `kubectl` using the [Kubernetes installation guide](https://kubernetes.io/docs/tasks/tools/).
+
+**Unable to connect to the server**
+
+- Verify the kubeconfig path and current context.
+- Confirm the Harvester cluster is reachable from your machine.
+- Check that the cluster certificate is valid and trusted.
+
+**Robot Framework or the Kubernetes Python package is missing**
+
+Activate the virtual environment and install the project dependencies:
+
+```bash
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+On Windows, activate with `venv\Scripts\activate`.
+
+**`.env` file not found**
+
+Create it from the example and set the connection details:
+
+```bash
+cp .env.example .env
+```
+
+## Further Information
+
+- Browse the [`tests/`](https://github.com/harvester/tests) repo for the available suites.
+- Consult the [Harvester documentation](https://docs.harvesterhci.io/) for cluster setup and administration.
 
 ## License
 
-Licensed under the terms in [LICENSE](LICENSE). See also [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+See [LICENSE](LICENSE) for the project license and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community guidelines.
