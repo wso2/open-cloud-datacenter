@@ -579,9 +579,10 @@ resource "kubernetes_annotations" "harvester_longhorn_not_default" {
   force = true
 }
 
+# Not a default SC, so no ordering against harvester_longhorn_not_default is
+# needed — keeping it independent lets it be targeted without the annotation.
 resource "kubernetes_storage_class_v1" "longhorn_rwx" {
-  count      = var.manage_storage_class ? 1 : 0
-  depends_on = [kubernetes_annotations.harvester_longhorn_not_default]
+  count = var.manage_storage_class ? 1 : 0
 
   metadata {
     name = "longhorn-rwx"
@@ -593,7 +594,7 @@ resource "kubernetes_storage_class_v1" "longhorn_rwx" {
   volume_binding_mode    = "Immediate"
 
   parameters = {
-    numberOfReplicas    = "1"
+    numberOfReplicas    = tostring(var.rwx_storage_class_replicas)
     staleReplicaTimeout = "2880"
     fromBackup          = ""
     fsType              = "ext4"

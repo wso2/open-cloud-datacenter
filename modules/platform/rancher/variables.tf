@@ -314,6 +314,12 @@ variable "storage_class_replicas" {
   default     = 2
 }
 
+variable "rwx_storage_class_replicas" {
+  type        = number
+  description = "Longhorn replica count for the longhorn-rwx StorageClass. Changing this replaces the StorageClass object (parameters are immutable in the Kubernetes API); it only affects volumes provisioned after the change — existing PVs/Longhorn volumes keep their current replica count and must be migrated separately."
+  default     = 1
+}
+
 # ── Storage network ───────────────────────────────────────────────────────────
 variable "manage_storage_network" {
   type        = bool

@@ -60,7 +60,7 @@ variable "manage_app" {
 variable "harvester_chart_version" {
   type        = string
   description = "Version of the Harvester UI extension Helm chart. Check https://github.com/harvester/harvester-ui-extension/releases for latest."
-  default     = "1.7.1"
+  default     = "1.8.2"
 }
 
 # ── Optional: CoreDNS patching for private Rancher hostname ──────────────────

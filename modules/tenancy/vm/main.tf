@@ -48,6 +48,7 @@ resource "harvester_ssh_key" "this" {
 resource "harvester_virtualmachine" "this" {
   name                 = var.name
   namespace            = var.namespace
+  description          = var.description
   restart_after_update = var.restart_after_update
 
   cpu    = var.cpu
@@ -65,6 +66,15 @@ resource "harvester_virtualmachine" "this" {
     name           = var.network_interface_name
     wait_for_lease = var.wait_for_lease
     network_name   = var.network_name
+  }
+
+  dynamic "network_interface" {
+    for_each = var.additional_network_interfaces
+    content {
+      name           = network_interface.value.name
+      wait_for_lease = false
+      network_name   = network_interface.value.network_name
+    }
   }
 
   disk {
@@ -110,6 +120,11 @@ resource "harvester_virtualmachine" "this" {
 
   # No explicit "disk" block for cloudinitdisk — known perpetual-diff
   # provider issue, see https://github.com/harvester/harvester/issues/10728
+
+  lifecycle {
+    # Harvester reports wait_for_lease inconsistently on refresh, causing a flip-flop diff.
+    ignore_changes = [network_interface[0].wait_for_lease]
+  }
 }
 
 # Optional scheduled backup — created only when backup_schedule is set.

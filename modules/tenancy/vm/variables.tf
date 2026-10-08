@@ -36,6 +36,21 @@ variable "network_name" {
   description = "Harvester network attachment name (e.g. \"iam-team-vlan\"). Must exist in the same namespace or cluster."
 }
 
+variable "additional_network_interfaces" {
+  type = list(object({
+    name         = string
+    network_name = string
+  }))
+  description = "Additional Harvester network interfaces beyond the primary one (e.g. a dedicated storage-network NIC some brownfield VMs already have)."
+  default     = []
+}
+
+variable "description" {
+  type        = string
+  description = "VM description shown in the Harvester/Rancher UI. Leave null to omit."
+  default     = null
+}
+
 variable "run_strategy" {
   type        = string
   description = "VM run strategy: RerunOnFailure, Always, Halted, or Manual."
