@@ -14,23 +14,6 @@ variable "create_default_namespace" {
   default     = true
 }
 
-variable "namespaces" {
-  type        = list(string)
-  description = "Kubernetes namespace names to create within the project. Defaults to [project_name] — a single namespace matching the project. Pass additional names to create more."
-  default     = null
-  validation {
-    condition = var.namespaces == null || (
-      length(var.namespaces) > 0 &&
-      length(var.namespaces) == length(toset(var.namespaces)) &&
-      alltrue([for ns in var.namespaces :
-        length(ns) <= 63 &&
-        can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", ns))
-      ])
-    )
-    error_message = "At least one namespace is required. All names must be unique, at most 63 characters, and match RFC 1123 DNS label format (lowercase alphanumeric and hyphens, must start and end with alphanumeric)."
-  }
-}
-
 # Resource quotas — all optional. Omit entirely for projects with no quota enforcement.
 # When set, the same limits apply at both project aggregate and per-namespace default
 # level unless namespace_* overrides are provided.
@@ -62,36 +45,6 @@ variable "storage_limit" {
   validation {
     condition     = var.storage_limit == null ? true : trimspace(var.storage_limit) != ""
     error_message = "storage_limit must be null or a non-empty quantity string."
-  }
-}
-
-variable "namespace_cpu_limit" {
-  type        = string
-  description = "Per-namespace default CPU limit. Defaults to cpu_limit."
-  default     = null
-  validation {
-    condition     = var.namespace_cpu_limit == null ? true : trimspace(var.namespace_cpu_limit) != ""
-    error_message = "namespace_cpu_limit must be null or a non-empty quantity string."
-  }
-}
-
-variable "namespace_memory_limit" {
-  type        = string
-  description = "Per-namespace default memory limit. Defaults to memory_limit."
-  default     = null
-  validation {
-    condition     = var.namespace_memory_limit == null ? true : trimspace(var.namespace_memory_limit) != ""
-    error_message = "namespace_memory_limit must be null or a non-empty quantity string."
-  }
-}
-
-variable "namespace_storage_limit" {
-  type        = string
-  description = "Per-namespace default storage limit. Defaults to storage_limit."
-  default     = null
-  validation {
-    condition     = var.namespace_storage_limit == null ? true : trimspace(var.namespace_storage_limit) != ""
-    error_message = "namespace_storage_limit must be null or a non-empty quantity string."
   }
 }
 

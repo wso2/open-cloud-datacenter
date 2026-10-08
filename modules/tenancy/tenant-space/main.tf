@@ -1,9 +1,6 @@
 locals {
-  namespace_cpu_limit     = var.namespace_cpu_limit != null ? var.namespace_cpu_limit : var.cpu_limit
-  namespace_memory_limit  = var.namespace_memory_limit != null ? var.namespace_memory_limit : var.memory_limit
-  namespace_storage_limit = var.namespace_storage_limit != null ? var.namespace_storage_limit : var.storage_limit
-  namespaces              = var.namespaces != null ? (var.create_default_namespace ? distinct(concat([var.project_name], var.namespaces)) : var.namespaces) : (var.create_default_namespace ? [var.project_name] : [])
-
+  namespace              = var.create_default_namespace ? var.project_name : null
+  
   # Common namespace path — mutually exclusive with the network namespace path.
   # When enabled, all network resources land here instead of the -net namespace.
   create_common_ns    = var.create_common_namespace
@@ -48,9 +45,9 @@ resource "rancher2_project" "this" {
         requests_storage = var.storage_limit
       }
       namespace_default_limit {
-        limits_cpu       = local.namespace_cpu_limit
-        limits_memory    = local.namespace_memory_limit
-        requests_storage = local.namespace_storage_limit
+        limits_cpu       = var.cpu_limit
+        limits_memory    = var.memory_limit   
+        requests_storage = var.storage_limit
       }
     }
   }
@@ -63,9 +60,6 @@ resource "rancher2_project" "this" {
       condition = var.cpu_limit != null || alltrue([
         var.memory_limit == null,
         var.storage_limit == null,
-        var.namespace_cpu_limit == null,
-        var.namespace_memory_limit == null,
-        var.namespace_storage_limit == null,
       ])
       error_message = "Quota variables (memory_limit, storage_limit, namespace_*_limit) are only applied when cpu_limit is set. Either set cpu_limit or remove the other quota variables."
     }
@@ -94,8 +88,10 @@ resource "rancher2_project" "this" {
 
 # One namespace per entry. Each is a standard k8s namespace assigned to this project.
 resource "rancher2_namespace" "this" {
-  for_each         = toset(local.namespaces)
-  name             = each.value
+  #check for null to avoid creating a namespace when create_default_namespace = false
+  count = local.namespace != null ? 1 : 0
+
+  name             = local.namespace
   project_id       = rancher2_project.this.id
   wait_for_cluster = false
 
