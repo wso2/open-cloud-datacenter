@@ -120,11 +120,6 @@ resource "harvester_virtualmachine" "this" {
 
   # No explicit "disk" block for cloudinitdisk — known perpetual-diff
   # provider issue, see https://github.com/harvester/harvester/issues/10728
-
-  lifecycle {
-    # Harvester reports wait_for_lease inconsistently on refresh, causing a flip-flop diff.
-    ignore_changes = [network_interface[0].wait_for_lease]
-  }
 }
 
 # Optional scheduled backup — created only when backup_schedule is set.
