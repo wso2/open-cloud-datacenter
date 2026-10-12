@@ -1,9 +1,11 @@
 name: support-bundle-analyzer-release
 
 on:
-  push:
-    tags:
-      - 'support-bundle-analyzer/v*'
+  pull_request:
+    types:
+      - closed
+    branches:
+      - tools
 
 permissions: {}
 
@@ -18,14 +20,31 @@ defaults:
 jobs:
   release:
     name: Build and publish release
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.title, 'support-bundle-analyzer/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Check out tagged source
+      - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Validate release inputs
+        env:
+          RELEASE_TAG: ${{ github.event.pull_request.title }}
+        run: |
+          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
+          
+          [[ "$RELEASE_TAG" =~ ^support-bundle-analyzer/v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::Release tag must be support-bundle-analyzer/vX.Y.Z"; exit 1; }
+
+          for file in \
+            support_bundle_analyzer/grafana-plugin/package-lock.json \
+            support_bundle_analyzer/grafana-plugin/go.mod \
+            support_bundle_analyzer/grafana-plugin/go.sum; do
+            [[ -f "$file" ]] || { echo "::error::Required release input is missing: $file"; exit 1; }
+          done
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
@@ -63,19 +82,17 @@ jobs:
           mage -v
 
       - name: Package plugin
-        run: tar -czf "$RUNNER_TEMP/harv-logs-app.tar.gz" -C support_bundle_analyzer dist
+        run: tar -czf "$RUNNER_TEMP/harv-logs-app.tar.gz" -C support_bundle_analyzer/grafana-plugin dist
 
       - name: Publish tagged release
+        if: success()
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
           ARCHIVE: ${{ runner.temp }}/harv-logs-app.tar.gz
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           RELEASE_DESCRIPTION: >-
             Harv Logs is a local analysis stack for Harvester support bundles, combining Loki log search with Grafana incident timelines and root-cause analysis.
         run: |
-          [[ "$RELEASE_TAG" =~ ^support-bundle-analyzer/v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
-            || { echo "::error::Release tag must be support-bundle-analyzer/vX.Y.Z"; exit 1; }
-
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" "$ARCHIVE" --clobber
           else
@@ -87,10 +104,14 @@ jobs:
             notes_file="$RUNNER_TEMP/release-notes.md"
             {
               printf '%s\n\n' "$RELEASE_DESCRIPTION"
+              printf '**Contributor:** @%s\n\n' "$PR_AUTHOR"
               printf '%s\n' "$generated_notes"
             } > "$notes_file"
+            
+            # This GitHub CLI command will automatically create the Git tag on the merged commit
             gh release create "$RELEASE_TAG" "$ARCHIVE" \
               --title "Support Bundle Analyzer $version" \
               --notes-file "$notes_file" \
-              --target "$GITHUB_SHA"
+              --target "$GITHUB_SHA" \
+              --latest=false
           fi

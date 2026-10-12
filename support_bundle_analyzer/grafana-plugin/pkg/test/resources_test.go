@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"path/filepath"
 	"testing"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -20,6 +21,7 @@ func (s *mockCallResourceResponseSender) Send(response *backend.CallResourceResp
 }
 
 func TestCallResource(t *testing.T) {
+	t.Setenv("RCA_RULES_PATH", filepath.Join("..", "..", "rules", "rca-rules.yaml"))
 	inst, err := plugin.NewApp(context.Background(), backend.AppInstanceSettings{})
 	if err != nil {
 		t.Fatalf("new app: %s", err)

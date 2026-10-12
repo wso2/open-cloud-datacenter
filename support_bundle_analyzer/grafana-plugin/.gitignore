@@ -46,5 +46,3 @@ ci/
 .idea
 
 .eslintcache
-
-package-lock.json
