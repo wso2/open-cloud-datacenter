@@ -1,6 +1,6 @@
 .PHONY: help load up down clean
 
-HARV_LOGS_RELEASE_URL ?=
+HARV_LOGS_RELEASE_URL ?= https://github.com/wso2/open-cloud-datacenter/releases/latest/download/harv-logs-app.tar.gz
 
 # Default target
 help:
