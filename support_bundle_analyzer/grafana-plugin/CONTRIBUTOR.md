@@ -58,6 +58,20 @@ The `server` script starts the Compose setup in this directory. For an end-to-en
 
 The production build writes the complete plugin bundle to `dist/`. The root project mounts that directory into Grafana as the unsigned `harv-logs-app` app.
 
+## Automated Releases
+
+Releases are published by GitHub Actions when a release pull request is merged into the `tools` branch. To prepare one, open a PR targeting `tools` and set its title to the release tag in this exact format:
+
+```text
+support-bundle-analyzer/v1.2.3
+```
+
+Use the actual `major.minor.patch` version in place of `1.2.3`. The workflow starts only after the PR is merged, and rejects titles that do not match this format. Do not create the Git tag manually; GitHub creates it on the merge commit when publishing a new release.
+
+Before publishing, the workflow installs frontend dependencies with `npm ci`, runs `npm run typecheck`, `npm run lint`, `npm run test:ci`, and `go test ./...`, then builds the frontend and backend with `npm run build` and `mage -v`. If those checks succeed, it archives the plugin's `dist/` directory as `harv-logs-app.tar.gz` and attaches it to the GitHub release. When the release tag already exists, the workflow replaces that release's archive instead of creating a new release.
+
+Run the same checks locally before requesting the release merge. The release workflow requires `package-lock.json`, `go.mod`, and `go.sum` to be present; keep these files committed and in sync with dependency changes.
+
 
 ### Supplementary Command Reference
 

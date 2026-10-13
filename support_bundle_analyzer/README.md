@@ -25,9 +25,8 @@ bundle-logs/ --> Promtail --> Loki --> Grafana + Harv Logs app
 3. Docker Compose starts Loki, Promtail, and Grafana.
 4. Promtail rereads the bundle and sends normalized log entries to Loki.
 5. Grafana provisions the Loki datasource and loads the `harv-logs-app` app from `dist/`.
-The app archive is published as a stable GitHub release when a
-`support-bundle-analyzer/vX.Y.Z` tag is pushed. For local development or
-unreleased changes, follow the [developer guide](grafana-plugin/CONTRIBUTOR.md)
+
+The app archive is published as a stable GitHub release automatically when a Pull Request titled with the target release tag (e.g., `support-bundle-analyzer/vX.Y.Z`) is merged into the `tools` branch. For local development or unreleased changes, follow the [developer guide](https://www.google.com/search?q=grafana-plugin/CONTRIBUTOR.md)
 to build the plugin.
 
 Promtail handles pod logs, node service logs, and root bundle logs. It extracts labels including `job`, `namespace`, `pod`, `container`, `node`, `service`, and `level`, and parses common JSON, logfmt, klog, and timestamped log formats.
@@ -84,7 +83,7 @@ The Compose configuration enables Grafana anonymous Admin access for local devel
 The Makefile downloads the latest stable release by default. Override the URL when testing a specific release, for example:
 
 ```bash
-make HARV_LOGS_RELEASE_URL=https://github.com/wso2/open-cloud-datacenter/releases/download/support-bundle-analyzer/v1.0.0/harv-logs-app.tar.gz load BUNDLE=/path/to/support-bundle.zip
+make HARV_LOGS_RELEASE_URL=https://github.com/wso2/open-cloud-datacenter/releases/download/support-bundle-analyzer%2Fv0.1.0/harv-logs-app.tar.gz load BUNDLE=/path/to/support-bundle.zip
 ```
 
 If `dist/` already exists, the download script leaves it unchanged. Remove it with `make clean` to force a fresh plugin download.
@@ -128,7 +127,7 @@ For plugin developers, see the
 | `grafana-plugin/src/` | React and TypeScript Grafana app. |
 | `grafana-plugin/rules/` | RCA correlation rules. |
 | `grafana-plugin/tests/` | Browser end-to-end tests. |
-| `../.github/workflows/support-bundle-analyzer-release.yaml` | Builds and uploads the plugin archive from the `tools` branch. |
+| `../.github/workflows/support-bundle-analyzer-release.yaml` | Builds and uploads the plugin archive automatically when a release PR is merged into the `tools` branch. |
 
 Generated files such as `bundle-logs/`, `dist/`, `node_modules/`, and release
 archives are intentionally excluded from version control.
@@ -140,5 +139,4 @@ archives are intentionally excluded from version control.
 - Reload another bundle with `make load BUNDLE=/path/to/another-bundle.zip`.
 - Reset extracted data and the local plugin with `make clean`.
 - Confirm Promtail is ready at http://localhost:9080/ has blue phrased logs.
-- Set `HARV_LOGS_RELEASE_URL` to the selected version's archive URL when the
-        latest published plugin is not the one you need.
+- Set `HARV_LOGS_RELEASE_URL` to the selected version's archive URL when the latest published plugin is not the one you need.
