@@ -1,11 +1,9 @@
 name: support-bundle-analyzer-release
 
 on:
-  pull_request_target:
-    types:
-      - closed
-    branches:
-      - tools
+  push:
+    tags:
+      - 'support-bundle-analyzer/v*'
 
 permissions: {}
 
@@ -20,7 +18,6 @@ defaults:
 jobs:
   release:
     name: Build and publish release
-    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.title, 'support-bundle-analyzer/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -32,7 +29,7 @@ jobs:
 
       - name: Validate release inputs
         env:
-          RELEASE_TAG: ${{ github.event.pull_request.title }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
           
@@ -89,26 +86,32 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ARCHIVE: ${{ runner.temp }}/harv-logs-app.tar.gz
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_AUTHOR: ${{ github.actor }}
           RELEASE_DESCRIPTION: >-
-            Harv Logs is a local analysis stack for Harvester support bundles, combining Loki log search with Grafana incident timelines and root-cause analysis.
+              Harv Logs is a local analysis stack for Harvester support bundles, combining Loki log search with Grafana incident timelines and root-cause analysis.
+              
+              For more details and usage instructions, please refer to the [README](https://github.com/wso2/open-cloud-datacenter/blob/tools/support_bundle_analyzer/README.md).
         run: |
+          version="${RELEASE_TAG##*/}"
+          
+          generated_notes=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$RELEASE_TAG" \
+            -f target_commitish="$GITHUB_SHA" \
+            --jq .body)
+          
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          {
+            printf '%s\n\n' "$RELEASE_DESCRIPTION"
+            printf '**Contributor:** @%s\n\n' "$PR_AUTHOR"
+            printf '%s\n' "$generated_notes"
+          } > "$notes_file"
+          
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --title "Support Bundle Analyzer $version" \
+              --notes-file "$notes_file"
             gh release upload "$RELEASE_TAG" "$ARCHIVE" --clobber
           else
-            version="${RELEASE_TAG##*/}"
-            generated_notes=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
-              -f tag_name="$RELEASE_TAG" \
-              -f target_commitish="$GITHUB_SHA" \
-              --jq .body)
-            notes_file="$RUNNER_TEMP/release-notes.md"
-            {
-              printf '%s\n\n' "$RELEASE_DESCRIPTION"
-              printf '**Contributor:** @%s\n\n' "$PR_AUTHOR"
-              printf '%s\n' "$generated_notes"
-            } > "$notes_file"
-            
-            # This GitHub CLI command will automatically create the Git tag on the merged commit
             gh release create "$RELEASE_TAG" "$ARCHIVE" \
               --title "Support Bundle Analyzer $version" \
               --notes-file "$notes_file" \
