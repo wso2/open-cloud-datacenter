@@ -26,7 +26,7 @@ bundle-logs/ --> Promtail --> Loki --> Grafana + Harv Logs app
 4. Promtail rereads the bundle and sends normalized log entries to Loki.
 5. Grafana provisions the Loki datasource and loads the `harv-logs-app` app from `dist/`.
 
-The app archive is published as a stable GitHub release automatically when a Pull Request titled with the target release tag (e.g., `support-bundle-analyzer/vX.Y.Z`) is merged into the `tools` branch. For local development or unreleased changes, follow the [developer guide](https://www.google.com/search?q=grafana-plugin/CONTRIBUTOR.md)
+The app archive is published as a stable GitHub release automatically when a Pull Request titled with the target release tag (e.g., `support-bundle-analyzer/vX.Y.Z`) is merged into the `tools` branch. For local development or unreleased changes, follow the [developer guide](grafana-plugin/CONTRIBUTOR.md)
 to build the plugin.
 
 Promtail handles pod logs, node service logs, and root bundle logs. It extracts labels including `job`, `namespace`, `pod`, `container`, `node`, `service`, and `level`, and parses common JSON, logfmt, klog, and timestamped log formats.

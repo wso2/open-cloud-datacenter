@@ -66,7 +66,8 @@ Releases are published by GitHub Actions when a release pull request is merged i
 support-bundle-analyzer/v1.2.3
 ```
 
-Use the actual `major.minor.patch` version in place of `1.2.3`. The workflow starts only after the PR is merged, and rejects titles that do not match this format. Do not create the Git tag manually; GitHub creates it on the merge commit when publishing a new release.
+Use the actual `major.minor.patch` version in place of `1.2.3`. After a PR is merged into `tools`, the release job runs only when its title starts with `support-bundle-analyzer/v`. Titles with that prefix but an invalid version fail validation; other titles skip the release job without publishing a release. Do not create the Git tag manually. GitHub creates it on the merge commit when publishing a new release.
+
 
 Before publishing, the workflow installs frontend dependencies with `npm ci`, runs `npm run typecheck`, `npm run lint`, `npm run test:ci`, and `go test ./...`, then builds the frontend and backend with `npm run build` and `mage -v`. If those checks succeed, it archives the plugin's `dist/` directory as `harv-logs-app.tar.gz` and attaches it to the GitHub release. When the release tag already exists, the workflow replaces that release's archive instead of creating a new release.
 
