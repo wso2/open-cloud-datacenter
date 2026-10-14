@@ -236,15 +236,25 @@ jobs:
           cache-dependency-path: database-ui/yarn.lock
 
       # Rancher's publish script builds the catalog image (Helm index, chart and
-      # bundle behind nginx). It does not stop on errors, so the push is checked.
+      # bundle behind nginx). It does not stop on errors, so the image's catalog
+      # index is checked before the push, and the push itself is checked.
+      # TAG is cleared because the script's chart patch uses it as the chart
+      # version when set; the job's TAG (dbaas/vX.Y.Z) is not a valid one, so
+      # helm package fails and the image ships an empty catalog.
       - name: Build and push the UI extension image
         id: ui
         working-directory: database-ui
         env:
           OWNER: ${{ needs.prepare.outputs.owner }}
+          TAG: ""
         run: |
           yarn install --frozen-lockfile
-          yarn publish-pkgs -c -p -r ghcr.io -o "$OWNER"
+          yarn publish-pkgs -c -r ghcr.io -o "$OWNER"
+          index=$(docker run --rm --entrypoint cat "$UI_IMAGE:$VERSION" /home/plugin-server/plugin-contents/index.yaml)
+          echo "$index"
+          chart_version=$(yq '.entries["database-ui"][0].version' <<< "$index")
+          [[ "$chart_version" == "$VERSION" ]] || { echo "::error::$UI_IMAGE:$VERSION has no database-ui $VERSION chart in its catalog index"; exit 1; }
+          docker push "$UI_IMAGE:$VERSION"
           digest=$(docker buildx imagetools inspect "$UI_IMAGE:$VERSION" --format '{{json .Manifest.Digest}}' | tr -d '"')
           [[ "$digest" == sha256:* ]] || { echo "::error::$UI_IMAGE:$VERSION was not pushed"; exit 1; }
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
