@@ -25,6 +25,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validate release inputs
@@ -35,6 +36,9 @@ jobs:
           
           [[ "$RELEASE_TAG" =~ ^support-bundle-analyzer/v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
             || { echo "::error::Release tag must be support-bundle-analyzer/vX.Y.Z"; exit 1; }
+
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/tools \
+            || { echo "::error::Release tag commit must be contained in the tools branch"; exit 1; }
 
           for file in \
             support_bundle_analyzer/grafana-plugin/package-lock.json \
