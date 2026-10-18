@@ -282,10 +282,10 @@ variable "gvisor" {
   }
 
   validation {
-    condition = can(regex("^[a-z0-9]([-a-z0-9_.]*[a-z0-9])?$", var.gvisor.runtime_handler)) && alltrue([
+    condition = can(regex("^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$", var.gvisor.runtime_handler)) && alltrue([
       for k, v in var.gvisor.runsc_config : can(regex("^[A-Za-z0-9_.-]+$", k)) && !can(regex("[\"\\\\\n]", v))
     ])
-    error_message = "gvisor.runtime_handler must be a DNS-label-like name, and runsc_config keys must be [A-Za-z0-9_.-] with values free of quotes, backslashes and newlines."
+    error_message = "gvisor.runtime_handler must be an RFC 1123 label (lowercase letters, digits and '-', max 63 chars), and runsc_config keys must be [A-Za-z0-9_.-] with values free of quotes, backslashes and newlines."
   }
 }
 

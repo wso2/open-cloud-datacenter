@@ -94,8 +94,9 @@ write_files:
       RUNSC="$(command -v runsc)"
       command -v containerd-shim-runsc-v1 >/dev/null
       install -d -m 0755 /etc/containerd
-      cat > /etc/containerd/runsc.toml <<EOF
-      binary_name = "$${RUNSC}"
+      printf 'binary_name = "%s"\n' "$RUNSC" > /etc/containerd/runsc.toml
+      # Quoted delimiter: runsc_config values are written literally, never shell-expanded.
+      cat >> /etc/containerd/runsc.toml <<'EOF'
       [runsc_config]
 %{~ for k, v in gvisor.runsc_config }
         ${k} = "${v}"

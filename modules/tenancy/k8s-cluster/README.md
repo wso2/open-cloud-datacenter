@@ -219,8 +219,8 @@ onto any of them.
 | gVisor install | generated cloud-init → `/usr/local/sbin/install-gvisor.sh <release>` | Adds gVisor's signed apt repo **pinned to the dated suite**, installs the complete `runsc` package (runsc + `containerd-shim-runsc-v1` + `gvisor-bin/`), `apt-mark hold`s it, and writes `runsc.toml` with the real `binary_name`. The script stays on disk for manual re-runs. |
 | Node label | pool `machine_labels` | `sandbox.gvisor.dev/runtime=true` is merged in, and takes precedence over a clashing user label. |
 | Node taint | pool `taints` | `sandbox.gvisor.dev/runtime=true:NoSchedule` is appended, unless the pool already declares a taint with that key or `gvisor.taint = false`. |
-| RuntimeClass | `rke_config.additional_manifest` | `gvisor` → handler `runsc`, with `scheduling.nodeSelector` and the toleration for the taint. Optional `overhead.podFixed`. |
-| Harvester CSI tolerations | `rke_config.chart_values` | `harvester-csi-driver.tolerations` set to "any `NoSchedule`" plus the etcd `NoExecute` default, so the CSI node plugin runs on gVisor nodes and PVCs mount there. |
+| RuntimeClass | `rke_config.additional_manifest` | `gvisor` → handler `runsc`, with `scheduling.nodeSelector` and an `Exists` toleration on the gVisor taint key, so it matches whatever value or effect the pool's taint uses. Optional `overhead.podFixed`. |
+| Harvester CSI tolerations | `rke_config.chart_values` | `harvester-csi-driver.tolerations` set to "any `NoSchedule`", the etcd `NoExecute` default, and `Exists` on the gVisor taint key (any effect, including `NoExecute`), so the CSI node plugin runs on gVisor nodes and PVCs mount there. |
 
 Pools without `gvisor = true` render exactly the same cloud-init as before, so
 adding the feature never rolls existing pools.
@@ -238,11 +238,11 @@ instead of `release` (see [How the gVisor settings fit together](#how-the-gvisor
 | `apt_repo_url` | `https://storage.googleapis.com/gvisor/releases` | apt repository base, which you can point at an internal mirror |
 | `apt_key_url` | `https://gvisor.dev/archive.key` | Repository signing key URL |
 | `containerd_config_version` | `3` | `3` = containerd 2.x (`config-v3.toml.tmpl`, `io.containerd.cri.v1.runtime`); `2` = containerd 1.7 (`config.toml.tmpl`, `io.containerd.grpc.v1.cri`) |
-| `runtime_handler` | `"runsc"` | containerd runtime name, which the RuntimeClass `handler` uses |
+| `runtime_handler` | `"runsc"` | containerd runtime name, which the RuntimeClass `handler` uses. Must be an RFC 1123 label (lowercase letters, digits, `-`). |
 | `platform` | `"systrap"` | `systrap` works inside Harvester VMs; `kvm` needs nested virtualization |
 | `systemd_cgroup` | `true` | Must match `SystemdCgroup` in RKE2's rendered containerd config |
-| `runsc_config` | `{}` | Extra `[runsc_config]` flags (e.g. `{ debug = "true", "debug-log" = "/var/log/runsc/%ID%/gvisor.%COMMAND%.log" }`), which override `platform`/`systemd-cgroup` on a key clash |
-| `node_label_key` / `node_label_value` | `sandbox.gvisor.dev/runtime` / `true` | Label (and taint key/value) for gVisor nodes |
+| `runsc_config` | `{}` | Extra `[runsc_config]` flags, written literally (no shell expansion; quotes, backslashes and newlines are rejected) (e.g. `{ debug = "true", "debug-log" = "/var/log/runsc/%ID%/gvisor.%COMMAND%.log" }`), which override `platform`/`systemd-cgroup` on a key clash |
+| `node_label_key` / `node_label_value` | `sandbox.gvisor.dev/runtime` / `true` | Label (and taint key/value) for gVisor nodes. If a gVisor pool already declares a taint with this key, the module keeps yours and skips its own. The RuntimeClass and CSI tolerate any value or effect on the key. |
 | `taint` / `taint_effect` | `true` / `NoSchedule` | Taint that keeps ordinary pods off gVisor nodes |
 | `create_runtime_class` | `true` | Deliver the RuntimeClass via `additional_manifest` |
 | `runtime_class_name` | `"gvisor"` | Name workloads reference in `runtimeClassName` |

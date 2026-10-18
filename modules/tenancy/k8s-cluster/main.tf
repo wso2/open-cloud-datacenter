@@ -17,11 +17,9 @@ terraform {
 locals {
   pools_by_name = { for p in var.machine_pools : p.name => p }
 
-  # user_data (non-empty string) takes full precedence over template generation.
-  # When not set, cloud-init is generated per-pool so enable_storage_netplan
-  # reflects only that pool's storage_network field (not a cluster-wide flag).
-  _using_generated_user_data = var.user_data == null || var.user_data == ""
-
+  # A non-empty user_data (pool or module) takes full precedence over template
+  # generation. When not set, cloud-init is generated per-pool so
+  # enable_storage_netplan reflects only that pool's storage_network field.
   # Full cloud-init override per pool, resolved as: pool user_data → module
   # user_data → "" (generated template). Empty/whitespace values fall through.
   pool_user_data_override = {
@@ -80,6 +78,8 @@ EOF
       tolerations = [
         { operator = "Exists", effect = "NoSchedule" },
         { key = "node-role.kubernetes.io/etcd", operator = "Exists", effect = "NoExecute" },
+        # The gVisor taint with any value/effect (covers taint_effect = NoExecute).
+        { key = var.gvisor.node_label_key, operator = "Exists" },
       ]
     }
   } : {}
@@ -134,7 +134,9 @@ EOF
       scheduling = merge(
         { nodeSelector = local._gvisor_label },
         length(local._gvisor_taint) > 0 ? {
-          tolerations = [for t in local._gvisor_taint : merge(t, { operator = "Equal" })]
+          # Exists on the key alone: also matches a pool that declares its own
+          # taint on this key with a different value/effect (ours is then skipped).
+          tolerations = [{ key = var.gvisor.node_label_key, operator = "Exists" }]
         } : {}
       )
     },
@@ -198,7 +200,7 @@ resource "rancher2_machine_config_v2" "pool" {
     reserved_memory_size = "-1"
     ssh_user             = var.ssh_user
     user_data = local.pool_user_data_override[each.key] != "" ? local.pool_user_data_override[each.key] : (
-      (var.node_password != null || length(var.ssh_authorized_keys) > 0 || var.ntp_server != "" || (local._using_generated_user_data && each.value.storage_network != null) || each.value.gvisor) ? templatefile(
+      (var.node_password != null || length(var.ssh_authorized_keys) > 0 || var.ntp_server != "" || each.value.storage_network != null || each.value.gvisor) ? templatefile(
         "${path.module}/templates/node-cloud-init.tpl",
         {
           ssh_user               = var.ssh_user
