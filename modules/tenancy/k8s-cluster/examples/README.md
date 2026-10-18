@@ -26,6 +26,7 @@ The sample Terraform files in this directory are a working starting point — co
 10. [Managing Your Cluster](#10-managing-your-cluster)
 11. [Troubleshooting](#11-troubleshooting)
 12. [Backups](#12-backups)
+13. [gVisor Sandboxed Node Pools (optional)](#13-gvisor-sandboxed-node-pools-optional)
 
 ---
 
@@ -182,7 +183,7 @@ Replace every value marked with `# REPLACE` with your own values from sections 1
 
 ```hcl
 module "my_cluster" {
-  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.1.7"
+  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.2.2"
 
   # ── Cluster identity ────────────────────────────────────────────────────────
   cluster_name       = "my-cluster"        # REPLACE: your cluster name
@@ -370,6 +371,9 @@ machine_pools = [
 | `worker` | bool | Node runs workloads |
 | `machine_labels` | map(string) | Optional Kubernetes node labels |
 | `taints` | list(object) | Optional node taints (`key`, `value`, `effect`) |
+| `user_data` | string | Optional full cloud-init override for this pool only. Replaces the generated defaults. Not allowed on gVisor pools. |
+| `gvisor` | bool | Optional. `true` makes this a gVisor sandbox pool (see section 13) |
+| `gvisor_release` | string | Optional per-pool gVisor release override (see section 13) |
 
 ---
 
@@ -473,7 +477,7 @@ Update `kubernetes_version` in `main.tf` to the new version and apply. Rancher p
 
 ### Adding a node pool
 
-Add a new object to the `machine_pools` list and apply. Existing pools are not affected.
+Add a new object to the `machine_pools` list and apply. Existing pools are not affected. To add a gVisor sandbox pool, see [section 13](#13-gvisor-sandboxed-node-pools-optional).
 
 ### Destroying the cluster
 
@@ -523,3 +527,233 @@ using your own S3 buckets and the same Terraform directory:
 
 See **[BACKUPS.md](./BACKUPS.md)** for the full guide — bucket + IAM setup,
 Terraform, verification, and restore for both.
+
+---
+
+## 13. gVisor Sandboxed Node Pools (optional)
+
+[gVisor](https://gvisor.dev) runs pods inside a user-space kernel (`runsc`), which gives
+untrusted or multi-tenant workloads a much stronger isolation boundary than plain
+containers. The module can turn any machine pool into a gVisor pool. Your other pools
+are not affected.
+
+### 13.1 Before you start
+
+| Requirement | Detail |
+|-------------|--------|
+| Module version | `?ref=terraform/v0.2.2` or later |
+| Kubernetes version | RKE2 with embedded containerd 2.x. On Harvester 1.8 use `v1.35.4+rke2r1` or later. |
+| OS image | Ubuntu 24.04 (`images/ubuntu-24-04`) |
+| Egress from node VMs | `gvisor.dev` (signing key) and `storage.googleapis.com/gvisor/releases` (apt repo) |
+| A pinned gVisor release | The module pins `20261012` by default. To use another dated release from the [gVisor releases](https://gvisor.dev/docs/user_guide/install/), override it (section 13.3) and test that exact release first (July 2026 or later). |
+
+> **Why pin?** If you track the latest release instead, every new node (scale-up, auto-replaced
+> node, RKE2 upgrade) installs whatever is newest that day, and one pool ends up running
+> mixed, untested versions. A dated release gives every node the same version, today or in six months.
+
+### 13.2 Add the gVisor pool to `main.tf`
+
+Add a new pool with `gvisor = true`. That is the only required change; the module-level `gvisor` block is optional and only needed to override defaults (section 13.3):
+
+```hcl
+module "my_cluster" {
+  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.2.2"
+
+  # ... everything from section 5.4 ...
+  kubernetes_version = "v1.35.4+rke2r1"
+
+  # ── gVisor (optional) ───────────────────────────────────────────────────────
+  # Not needed for the defaults. Uncomment only to override, e.g. the release.
+  # gvisor = {
+  #   release = "20261012"
+  # }
+
+  machine_pools = [
+    {
+      name          = "control-plane"
+      vm_namespace  = "my-team"
+      quantity      = 3
+      cpu_count     = "4"
+      memory_size   = "8"
+      disk_size     = 50
+      image_name    = "images/ubuntu-24-04"
+      vm_network    = "my-team-net/my-team-vlan601"
+      control_plane = true
+      etcd          = true
+      worker        = false
+    },
+    {
+      name          = "worker"           # general workloads (runc)
+      vm_namespace  = "my-team"
+      quantity      = 2
+      cpu_count     = "4"
+      memory_size   = "8"
+      disk_size     = 80
+      image_name    = "images/ubuntu-24-04"
+      vm_network    = "my-team-net/my-team-vlan601"
+      control_plane = false
+      etcd          = false
+      worker        = true
+    },
+    {
+      name          = "gvisor"           # sandboxed workloads (runsc)
+      vm_namespace  = "my-team"
+      quantity      = 2
+      cpu_count     = "4"
+      memory_size   = "16"               # gVisor adds per-pod memory overhead
+      disk_size     = 80
+      image_name    = "images/ubuntu-24-04"
+      vm_network    = "my-team-net/my-team-vlan601"
+      control_plane = false
+      etcd          = false
+      worker        = true
+      gvisor        = true
+    },
+  ]
+}
+```
+
+Keep a general worker pool. The ingress controller, CoreDNS and other system pods
+do not tolerate the gVisor taint and need somewhere to run.
+
+Then plan and apply as in [section 8](#8-plan-and-apply). For a `gvisor = true` pool the
+module automatically:
+
+- installs the pinned gVisor release on every node from gVisor's signed apt repo, and holds it at that version
+- registers a `runsc` runtime with RKE2's containerd
+- labels the nodes `sandbox.gvisor.dev/runtime=true` and taints them `sandbox.gvisor.dev/runtime=true:NoSchedule`, so ordinary pods stay off
+- creates a `gvisor` RuntimeClass that steers sandboxed pods onto those nodes
+- lets the Harvester CSI driver run on gVisor nodes, so PVCs work there
+
+### 13.3 Optional settings
+
+| Setting | Where | Required | Purpose |
+|---------|-------|----------|---------|
+| `gvisor = true` | each pool | **yes** (the only thing you must set) | Turns that pool into a gVisor pool. Nothing gVisor-related happens without it. |
+| `gvisor = { ... }` | module | no (every field has a default) | Cluster-wide gVisor settings shared by **all** gVisor pools: the default release, apt mirror, containerd/runsc options, and the node label, taint and RuntimeClass. One RuntimeClass serves the whole cluster, so these must be consistent across pools. |
+| `gvisor_release` | each pool | no | Overrides the release for that one pool, e.g. to canary a newer release next to the stable pools. |
+
+The release for a pool is resolved as **pool `gvisor_release` → `gvisor.release` → `20261012`**.
+If the two are set to different values, there is no conflict: that pool installs its own
+`gvisor_release`, and every other gVisor pool uses `gvisor.release`. All pools still share the
+same handler, label, taint and RuntimeClass, so the same `runtimeClassName: gvisor` schedules
+onto any of them.
+
+Example: stable pools on the default release, plus a canary pool on a newer release.
+
+```hcl
+# gvisor block omitted → stable pools use 20261012
+{ name = "gvisor",        gvisor = true, ... }                               # 20261012
+{ name = "gvisor-canary", gvisor = true, gvisor_release = "20261101", ... }  # canary
+```
+
+Every module-level field can be overridden. Defaults follow the upstream recipe:
+
+```hcl
+gvisor = {
+  release                   = "20261012"  # module default
+  platform                  = "systrap"   # kvm needs nested virtualization on Harvester hosts
+  systemd_cgroup            = true        # must match SystemdCgroup in RKE2's containerd config
+  containerd_config_version = 3           # 2 only for older RKE2 with containerd 1.7
+  runtime_class_name        = "gvisor"
+  runtime_handler           = "runsc"
+  node_label_key            = "sandbox.gvisor.dev/runtime"
+  node_label_value          = "true"
+  taint                     = true
+  taint_effect              = "NoSchedule"
+  runtime_class_overhead    = { memory = "64Mi", cpu = "50m" }       # tune after measuring
+  apt_repo_url              = "https://storage.googleapis.com/gvisor/releases"  # or an internal mirror
+  runsc_config              = {}          # extra runsc flags, e.g. { debug = "true" }
+}
+```
+
+See the module [README](../README.md#gvisor-node-pools) for the full field reference.
+
+### 13.4 Run a workload under gVisor
+
+Add `runtimeClassName: gvisor` to the pod spec. You don't need node selectors or tolerations,
+because the RuntimeClass adds them:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: untrusted-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: untrusted-app }
+  template:
+    metadata:
+      labels: { app: untrusted-app }
+    spec:
+      runtimeClassName: gvisor
+      containers:
+        - name: app
+          image: nginx:1.27
+          resources:                      # always set limits — the sandbox counts against the pod
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "256Mi" }
+```
+
+Never set `runtimeClassName: gvisor` on CNI pods, the Harvester CSI/cloud provider, ingress
+controllers, node agents, or anything that uses `hostNetwork`, `hostPID`, privileged mode or host devices.
+
+### 13.5 Verify
+
+```bash
+kubectl get runtimeclass gvisor
+kubectl get nodes -l sandbox.gvisor.dev/runtime=true
+
+kubectl run gv-test --image=busybox:1.36 --restart=Never \
+  --overrides='{"spec":{"runtimeClassName":"gvisor"}}' -- dmesg
+kubectl logs gv-test          # first line: "Starting gVisor..."
+kubectl get pod gv-test -o wide   # NODE must be a gvisor-pool node
+kubectl delete pod gv-test
+```
+
+On a gVisor node (SSH as `ubuntu`):
+
+```bash
+runsc --version                          # matches your pinned release
+apt-mark showhold | grep runsc
+cat /etc/containerd/runsc.toml
+sudo grep -A4 "runtimes.runsc" /var/lib/rancher/rke2/agent/etc/containerd/config.toml
+sudo grep -i SystemdCgroup /var/lib/rancher/rke2/agent/etc/containerd/config.toml  # should be true
+cloud-init status --long
+```
+
+Check which DaemonSets cannot reach gVisor nodes. The ingress controller is expected in this list.
+Monitoring, logging or security agents need a toleration for the taint:
+
+```bash
+kubectl get ds -A -o json | jq -r '
+  .items[] | select([.spec.template.spec.tolerations[]?
+    | select(((.operator == "Exists" and (.key == null or .key == "sandbox.gvisor.dev/runtime"))
+              or .key == "sandbox.gvisor.dev/runtime") and (.effect == null or .effect == "NoSchedule"))
+  ] | length == 0) | "\(.metadata.namespace)/\(.metadata.name)"'
+```
+
+### 13.6 Upgrading gVisor
+
+1. Optional canary: add a second pool with `gvisor = true` and `gvisor_release = "<new-date>"`.
+2. Change `gvisor.release` to the new date.
+3. The pool's machine config changes, so apply in two phases:
+   ```bash
+   terraform apply -var-file="secret.tfvars" -target='module.my_cluster.rancher2_machine_config_v2.pool["gvisor"]'
+   terraform apply -var-file="secret.tfvars"
+   ```
+   Rancher replaces the gVisor nodes one at a time. Other pools are untouched.
+4. Re-run the checks in 13.5.
+
+### 13.7 Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| `no runtime for "runsc" is configured` | containerd template missing or wrong version | Check `/var/lib/rancher/rke2/agent/etc/containerd/config-v3.toml.tmpl` exists. For containerd 1.7 set `containerd_config_version = 2`. |
+| `containerd-shim-runsc-v1: not found` | gVisor install failed or not finished | `sudo grep -i gvisor /var/log/cloud-init-output.log`; re-run `sudo /usr/local/sbin/install-gvisor.sh <release>` |
+| `apt-get update` fails on the gVisor repo | Release not published as an apt suite, or no egress | Pick a newer dated release; check egress to `gvisor.dev` and `storage.googleapis.com` |
+| Sandbox errors mentioning cgroup paths / `.slice` | `systemd_cgroup` doesn't match RKE2 | Set `gvisor.systemd_cgroup` to match `SystemdCgroup` in the rendered `config.toml` |
+| gVisor pod stuck `Pending` | No labelled gVisor node | `kubectl get nodes -l sandbox.gvisor.dev/runtime=true` |
+| gVisor pod with a PVC stuck `ContainerCreating` | CSI node plugin not on gVisor nodes (e.g. gVisor added to an existing cluster) | Add the `harvester-csi-driver` tolerations via Rancher → cluster → **Edit YAML** (see module README) |
+| App fails only under gVisor | Unsupported syscall or `/proc` feature | Keep that workload on runc |

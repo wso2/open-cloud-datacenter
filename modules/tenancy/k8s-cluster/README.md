@@ -1,6 +1,6 @@
 # Module: workloads/k8s-cluster
 
-Provisions a tenant RKE2 Kubernetes cluster on Harvester HCI via Rancher's machine provisioning API. Supports multiple machine pools, etcd S3 backups, private registry authentication, and the Harvester cloud provider (CSI + load balancer).
+Provisions a tenant RKE2 Kubernetes cluster on Harvester HCI via Rancher's machine provisioning API. Supports multiple machine pools, etcd S3 backups, private registry authentication, the Harvester cloud provider (CSI + load balancer), and optional [gVisor-sandboxed node pools](#gvisor-node-pools).
 
 ## Requirements
 
@@ -13,7 +13,7 @@ Provisions a tenant RKE2 Kubernetes cluster on Harvester HCI via Rancher's machi
 
 ```hcl
 module "my_rke2_cluster" {
-  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.1.0"
+  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.2.2"
 
   cluster_name        = "my-cluster"
   kubernetes_version  = "v1.32.13+rke2r1"
@@ -65,12 +65,14 @@ module "my_rke2_cluster" {
 | `machine_config_overrides` | Existing machine config `kind`/`name` keyed by pool name, for brownfield pools that cannot be imported | `map(object)` | `{}` | no |
 | `cni` | CNI plugin for the cluster | `string` | `"cilium"` | no |
 | `machine_global_config` | Full `machine_global_config` YAML. When `null` the module generates a default from `cni`. | `string` | `null` | no |
-| `user_data` | cloud-init user-data applied to every node VM | `string` | `""` | no |
+| `user_data` | Full cloud-init override for every pool that does not set its own `user_data` (replaces the generated template) | `string` | `""` | no |
 | `ssh_user` | SSH username for the VM OS | `string` | `"ubuntu"` | no |
 | `enable_harvester_cloud_provider` | Configure `machine_selector_config` for the Harvester CSI/LB cloud provider | `bool` | `true` | no |
 | `cloud_provider_config_secret` | `harvesterconfig*` secret name in `fleet-default` for brownfield clusters | `string` | `""` | no |
 | `registries` | Private registry configuration (see below) | `object` | `null` | no |
 | `etcd_s3` | S3 etcd backup configuration (see below) | `object` | `null` | no |
+| `gvisor` | gVisor (runsc) settings shared by pools with `gvisor = true` (see [gVisor node pools](#gvisor-node-pools)) | `object` | `{}` (gVisor `20261012`) | no |
+| `additional_manifest` | Extra multi-document YAML applied via `rke_config.additional_manifest`. The gVisor RuntimeClass is appended automatically. | `string` | `""` | no |
 
 ### `machine_pools` entries
 
@@ -89,6 +91,9 @@ module "my_rke2_cluster" {
 | `worker` | Pool has worker role | `bool` | yes |
 | `machine_labels` | Labels applied to Kubernetes nodes | `map(string)` | no |
 | `taints` | Node taints (`key`, `value`, `effect`) | `list(object)` | no |
+| `user_data` | Full cloud-init override for this pool only (plain YAML or base64). Takes precedence over the module-level `user_data` and the generated template. Not allowed on `gvisor = true` pools. | `string` | no |
+| `gvisor` | Install gVisor on this pool and label/taint it as a sandbox pool | `bool` | no (default `false`) |
+| `gvisor_release` | Per-pool gVisor release override (falls back to `gvisor.release`) | `string` | no |
 
 ### `registries`
 
@@ -146,6 +151,147 @@ etcd_s3 = {
 }
 ```
 
+## gVisor node pools
+
+> **Requires `?ref=terraform/v0.2.2` or later.** Earlier releases do not have the
+> `gvisor` pool field or variable.
+
+Any pool can run pods under [gVisor](https://gvisor.dev) (`runsc`) by setting
+`gvisor = true`. Typical topology: a control-plane pool, a general worker pool
+(runc only) and a dedicated, tainted gVisor worker pool. Sandboxed pods then stay
+on their own nodes, and you can add or roll gVisor without touching the rest of
+the cluster.
+
+```hcl
+module "my_rke2_cluster" {
+  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.2.2"
+  # ...
+  kubernetes_version = "v1.35.4+rke2r1"
+
+  # Optional. Only needed to override defaults; the release is pinned to
+  # 20261012 by default.
+  # gvisor = {
+  #   release = "20261012"
+  # }
+
+  machine_pools = [
+    # ... control-plane and general worker pools ...
+    {
+      name          = "gvisor"
+      vm_namespace  = "my-namespace"
+      quantity      = 2
+      cpu_count     = "4"
+      memory_size   = "16" # Sentry/Gofer add per-pod memory overhead; size generously
+      disk_size     = 80
+      image_name    = "images/ubuntu-24-04"
+      vm_network    = "my-namespace-net/vm-vlan"
+      control_plane = false
+      etcd          = false
+      worker        = true
+      gvisor        = true
+    },
+  ]
+}
+```
+
+Workloads opt in with `runtimeClassName: gvisor`. Nothing else is needed, because the
+RuntimeClass carries the node selector and toleration.
+
+### How the gVisor settings fit together
+
+| Setting | Where | Required | Purpose |
+|---------|-------|----------|---------|
+| `gvisor = true` | each pool | **yes** (the only thing you must set) | Turns that pool into a gVisor pool. Nothing gVisor-related happens without it. |
+| `gvisor = { ... }` | module | no (every field has a default) | Cluster-wide gVisor settings shared by **all** gVisor pools: the default release, apt mirror, containerd/runsc options, and the node label, taint and RuntimeClass. One RuntimeClass serves the whole cluster, so these must be consistent across pools. |
+| `gvisor_release` | each pool | no | Overrides the release for that one pool, e.g. to canary a newer release next to the stable pools. |
+
+The release for a pool is resolved as **pool `gvisor_release` → `gvisor.release` → `20261012`**.
+If the two are set to different values, there is no conflict: that pool installs its own
+`gvisor_release`, and every other gVisor pool uses `gvisor.release`. All pools still share the
+same handler, label, taint and RuntimeClass, so the same `runtimeClassName: gvisor` schedules
+onto any of them.
+
+### What the module does for a `gvisor = true` pool
+
+| Piece | Where | Detail |
+|-------|-------|--------|
+| containerd runtime handler | generated cloud-init → `/var/lib/rancher/rke2/agent/etc/containerd/config-v3.toml.tmpl` | Extends `{{ template "base" . }}` (registries, CNI, runc stay as RKE2 renders them) and adds a `runsc` runtime pointing at `/etc/containerd/runsc.toml`. Written before RKE2 is installed. |
+| gVisor install | generated cloud-init → `/usr/local/sbin/install-gvisor.sh <release>` | Adds gVisor's signed apt repo **pinned to the dated suite**, installs the complete `runsc` package (runsc + `containerd-shim-runsc-v1` + `gvisor-bin/`), `apt-mark hold`s it, and writes `runsc.toml` with the real `binary_name`. The script stays on disk for manual re-runs. |
+| Node label | pool `machine_labels` | `sandbox.gvisor.dev/runtime=true` is merged in, and takes precedence over a clashing user label. |
+| Node taint | pool `taints` | `sandbox.gvisor.dev/runtime=true:NoSchedule` is appended, unless the pool already declares a taint with that key or `gvisor.taint = false`. |
+| RuntimeClass | `rke_config.additional_manifest` | `gvisor` → handler `runsc`, with `scheduling.nodeSelector` and the toleration for the taint. Optional `overhead.podFixed`. |
+| Harvester CSI tolerations | `rke_config.chart_values` | `harvester-csi-driver.tolerations` set to "any `NoSchedule`" plus the etcd `NoExecute` default, so the CSI node plugin runs on gVisor nodes and PVCs mount there. |
+
+Pools without `gvisor = true` render exactly the same cloud-init as before, so
+adding the feature never rolls existing pools.
+
+### `gvisor` settings
+
+Module-level settings shared by every `gvisor = true` pool. Every field is optional and
+overridable, and the defaults follow the upstream recipe. Leave out the whole block to take
+all defaults. To change the release for a single pool, use that pool's `gvisor_release`
+instead of `release` (see [How the gVisor settings fit together](#how-the-gvisor-settings-fit-together)).
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `release` | `"20261012"` | Dated apt suite installed on every gVisor pool that does not set its own `gvisor_release`. Use a July 2026 or later release (multi-file layout). Never use `release`/`latest` in production: every new node would install whatever is newest that day. |
+| `apt_repo_url` | `https://storage.googleapis.com/gvisor/releases` | apt repository base, which you can point at an internal mirror |
+| `apt_key_url` | `https://gvisor.dev/archive.key` | Repository signing key URL |
+| `containerd_config_version` | `3` | `3` = containerd 2.x (`config-v3.toml.tmpl`, `io.containerd.cri.v1.runtime`); `2` = containerd 1.7 (`config.toml.tmpl`, `io.containerd.grpc.v1.cri`) |
+| `runtime_handler` | `"runsc"` | containerd runtime name, which the RuntimeClass `handler` uses |
+| `platform` | `"systrap"` | `systrap` works inside Harvester VMs; `kvm` needs nested virtualization |
+| `systemd_cgroup` | `true` | Must match `SystemdCgroup` in RKE2's rendered containerd config |
+| `runsc_config` | `{}` | Extra `[runsc_config]` flags (e.g. `{ debug = "true", "debug-log" = "/var/log/runsc/%ID%/gvisor.%COMMAND%.log" }`), which override `platform`/`systemd-cgroup` on a key clash |
+| `node_label_key` / `node_label_value` | `sandbox.gvisor.dev/runtime` / `true` | Label (and taint key/value) for gVisor nodes |
+| `taint` / `taint_effect` | `true` / `NoSchedule` | Taint that keeps ordinary pods off gVisor nodes |
+| `create_runtime_class` | `true` | Deliver the RuntimeClass via `additional_manifest` |
+| `runtime_class_name` | `"gvisor"` | Name workloads reference in `runtimeClassName` |
+| `runtime_class_overhead` | `null` | `overhead.podFixed`, e.g. `{ memory = "64Mi", cpu = "50m" }` |
+| `harvester_csi_tolerations` | `true` | Add the CSI driver tolerations described above |
+
+**Constraints**
+- gVisor pools need the module-generated cloud-init: a `gvisor = true` pool must not set its own `user_data`, and `var.user_data` must be empty, because gVisor pools would otherwise fall back to it. A precondition enforces this. Non-gVisor pools can still use a per-pool `user_data`.
+- The CSI tolerations are merged into the module's `chart_values` on cluster create. If you
+  pass your own `chart_values`, a `harvester-csi-driver` key in it wins. Because
+  `chart_values` is in `ignore_changes`, adding gVisor to an **existing** cluster does not
+  update them. Add the tolerations once through Rancher → cluster → **Edit YAML**
+  (`spec.rkeConfig.chartValues.harvester-csi-driver.tolerations`).
+- The ingress controller DaemonSet has no tolerations and stays on general workers. That is expected.
+  Other node agents (monitoring, logging, security) need a toleration for the taint in their own chart values.
+- CNI pods, the Harvester CCM/CSI, ingress, and anything using `hostNetwork`/`hostPID`/privileged mode must stay on runc. Never give them `runtimeClassName: gvisor`.
+
+### Upgrading or canarying gVisor
+
+1. Add a second pool with `gvisor = true` and `gvisor_release = "<new-date>"` (or test on one node with
+   `sudo /usr/local/sbin/install-gvisor.sh <new-date>`).
+2. Once validated, bump `gvisor.release` (or the pool's `gvisor_release`). The pool's cloud-init
+   changes, which recreates its machine config. Use the two-phase apply described in Notes, and
+   Rancher then rolls the pool one node at a time.
+3. Check `runsc --version` on the new nodes and run a test pod (see `examples/README.md` §13).
+
+gVisor itself is customer-maintained; validate workloads in a test cluster first.
+
+## Cloud-init per pool
+
+Each pool's cloud-init is resolved in this order:
+
+1. **Pool `user_data`.** A full replacement for that pool only.
+2. **Module `user_data`.** A full replacement for every pool that doesn't set its own.
+3. **Generated template** (`templates/node-cloud-init.tpl`). Built from `node_password`,
+   `ssh_authorized_keys` and `ntp_server`, plus the pool's storage netplan and gVisor sections.
+
+`user_data` is a full replacement, not an addition. A pool that sets it does not get the
+generated defaults (NTP, inotify sysctls, IPVS modules, storage netplan, `qemu-guest-agent`),
+so include whatever it still needs. Changing a pool's `user_data` recreates its machine
+config, so use the two-phase apply described in Notes.
+
+```hcl
+machine_pools = [
+  { name = "control-plane", ... },                                     # generated template
+  { name = "special",       ..., user_data = file("cloud-init/special.yaml") },  # own cloud-init
+]
+```
+
 ## Outputs
 
 | Name | Description |
@@ -181,7 +327,7 @@ module (infra team only — requires direct Harvester kubeconfig):
 
 ```hcl
 module "cloud_credential" {
-  source = "github.com/wso2/open-cloud-datacenter//modules/addons/harvester-cloud-credential?ref=terraform/v0.1.0"
+  source = "github.com/wso2/open-cloud-datacenter//modules/addons/harvester-cloud-credential?ref=terraform/v0.2.2"
   # ...
 }
 module "my_rke2_cluster" {

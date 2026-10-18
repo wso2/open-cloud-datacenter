@@ -12,6 +12,11 @@ packages:
   - nfs-common
   - net-tools
   - ipvsadm
+%{~ if enable_gvisor }
+  - curl
+  - gnupg
+  - ca-certificates
+%{~ endif }
 write_files:
   - path: /etc/systemd/timesyncd.conf
     content: |
@@ -49,6 +54,55 @@ write_files:
               use-routes: false
               route-metric: 500
 %{~ endif }
+%{~ if enable_gvisor }
+  # RKE2 renders this into /var/lib/rancher/rke2/agent/etc/containerd/config.toml.
+  # Written before Rancher's system-agent installs RKE2; extends the base
+  # template so registries, CNI paths and runc settings are preserved.
+  - path: /var/lib/rancher/rke2/agent/etc/containerd/${gvisor.containerd_tmpl}
+    owner: root:root
+    permissions: '0644'
+    content: |
+      {{ template "base" . }}
+
+      [plugins.${gvisor.cri_plugin}.containerd.runtimes.${gvisor.runtime_handler}]
+        runtime_type = "io.containerd.runsc.v1"
+
+      [plugins.${gvisor.cri_plugin}.containerd.runtimes.${gvisor.runtime_handler}.options]
+        TypeUrl = "io.containerd.runsc.v1.options"
+        ConfigPath = "/etc/containerd/runsc.toml"
+  # Installs the pinned gVisor release from the signed apt repo and writes
+  # /etc/containerd/runsc.toml. Kept on disk for manual re-runs (upgrades/CVE
+  # patches); replacement nodes always get the release pinned in Terraform.
+  - path: /usr/local/sbin/install-gvisor.sh
+    owner: root:root
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      # Usage: install-gvisor.sh [release]
+      set -euo pipefail
+      GVISOR_RELEASE="$${1:-${gvisor.release}}"
+      KEYRING=/usr/share/keyrings/gvisor-archive-keyring.gpg
+
+      curl -fsSL --retry 5 "${gvisor.apt_key_url}" | gpg --dearmor --yes -o "$KEYRING"
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=$${KEYRING}] ${gvisor.apt_repo_url} $${GVISOR_RELEASE} main" \
+        > /etc/apt/sources.list.d/gvisor.list
+      apt-get update
+      apt-mark unhold runsc >/dev/null 2>&1 || true
+      DEBIAN_FRONTEND=noninteractive apt-get install -y runsc
+      apt-mark hold runsc
+
+      RUNSC="$(command -v runsc)"
+      command -v containerd-shim-runsc-v1 >/dev/null
+      install -d -m 0755 /etc/containerd
+      cat > /etc/containerd/runsc.toml <<EOF
+      binary_name = "$${RUNSC}"
+      [runsc_config]
+%{~ for k, v in gvisor.runsc_config }
+        ${k} = "${v}"
+%{~ endfor }
+      EOF
+      "$RUNSC" --version
+%{~ endif }
 runcmd:
   - - systemctl
     - enable
@@ -63,6 +117,9 @@ runcmd:
   - systemctl restart systemd-timesyncd
   - timedatectl set-ntp false
   - timedatectl set-ntp true
+%{~ if enable_gvisor }
+  - /usr/local/sbin/install-gvisor.sh ${gvisor.release}
+%{~ endif }
 %{~ if enable_storage_netplan }
   - netplan generate
   - netplan apply

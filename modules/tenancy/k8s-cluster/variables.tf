@@ -133,8 +133,11 @@ variable "machine_pools" {
       value  = string
       effect = string # NoSchedule | PreferNoSchedule | NoExecute
     })), [])
-    # Optional per-pool cloud-init override. When set and non-empty, takes
-    # precedence over the module-level user_data for VMs in this pool only.
+    # Optional per-pool cloud-init override (full replacement, plain YAML or
+    # base64). When set and non-empty, takes precedence over the module-level
+    # user_data and the generated template for VMs in this pool only.
+    # Resolution: pool user_data → var.user_data → generated template.
+    # Not allowed on gvisor = true pools (they need the generated cloud-init).
     # Required for HA control-plane setups where each node needs its own
     # static IP pinned at boot time.
     user_data = optional(string)
@@ -147,6 +150,16 @@ variable "machine_pools" {
     # disks. The StorageClass must already exist on the Harvester host
     # cluster — this module does NOT create it.
     storage_class_name = optional(string)
+    # Optional gVisor sandbox runtime for this pool. When true, the generated
+    # cloud-init installs the pinned gVisor release (see var.gvisor), registers
+    # the runsc handler with RKE2's containerd, and the pool is labelled and
+    # (by default) tainted so only RuntimeClass-selected pods land on it.
+    # Requires the module-generated cloud-init (var.user_data must be empty).
+    gvisor = optional(bool, false)
+    # Optional per-pool gVisor release override (apt suite, e.g. "20261012").
+    # Falls back to var.gvisor.release. Useful for canarying a new release on
+    # a second gVisor pool before rolling it everywhere.
+    gvisor_release = optional(string)
   }))
   # Defaults to empty for brownfield callers (manage_rke_config = false).
   # A precondition on the cluster resource enforces at least one pool when
@@ -184,6 +197,102 @@ variable "machine_pools" {
     ])
     error_message = "Each pool's network refs (vm_network, storage_network, and entries in networks) must be non-empty strings."
   }
+
+  validation {
+    condition = alltrue([
+      for p in var.machine_pools :
+      p.gvisor_release == null || can(regex("^[A-Za-z0-9._-]+$", p.gvisor_release))
+    ])
+    error_message = "gvisor_release must be an apt suite name such as \"20261012\" (letters, digits, '.', '_' or '-')."
+  }
+}
+
+# ── gVisor sandbox runtime ────────────────────────────────────────────────────
+# Shared settings for every pool with gvisor = true. Has no effect unless at
+# least one pool opts in. Follows the upstream recipe: gVisor is installed from
+# its signed apt repository pinned to a dated release suite (and apt-mark held),
+# RKE2's containerd template extends {{ template "base" . }} with a runsc
+# handler, and a RuntimeClass maps workloads to the labelled/tainted pool.
+variable "gvisor" {
+  type = object({
+    # Dated apt suite of the gVisor release every gVisor node installs. Pinned
+    # by default; override with the release you have tested. Never use
+    # "release"/"latest" in production — every new node would install whatever
+    # is newest that day.
+    release = optional(string, "20261012")
+
+    apt_repo_url = optional(string, "https://storage.googleapis.com/gvisor/releases")
+    apt_key_url  = optional(string, "https://gvisor.dev/archive.key")
+
+    # containerd config template version. 3 = containerd 2.x (RKE2 >= v1.31
+    # with embedded containerd 2.x) → config-v3.toml.tmpl + io.containerd.cri.v1.runtime.
+    # 2 = containerd 1.7 → config.toml.tmpl + io.containerd.grpc.v1.cri.
+    containerd_config_version = optional(number, 3)
+
+    # containerd runtime handler name; the RuntimeClass handler must match.
+    runtime_handler = optional(string, "runsc")
+
+    # runsc_config flags written to /etc/containerd/runsc.toml.
+    #   platform: systrap works inside Harvester VMs without nested virt; kvm needs nested virt.
+    #   systemd_cgroup: must match RKE2's containerd SystemdCgroup setting.
+    platform       = optional(string, "systrap")
+    systemd_cgroup = optional(bool, true)
+    # Extra runsc_config flags (e.g. { debug = "true" }). Overrides the two above on key clash.
+    runsc_config = optional(map(string), {})
+
+    # Node label applied to gVisor pools; the RuntimeClass nodeSelector uses it.
+    node_label_key   = optional(string, "sandbox.gvisor.dev/runtime")
+    node_label_value = optional(string, "true")
+    # Taint (key/value = node label) that keeps ordinary pods off gVisor nodes.
+    taint        = optional(bool, true)
+    taint_effect = optional(string, "NoSchedule")
+
+    # Deliver a cluster-scoped RuntimeClass through rke_config.additional_manifest.
+    create_runtime_class = optional(bool, true)
+    runtime_class_name   = optional(string, "gvisor")
+    # Optional RuntimeClass overhead.podFixed (e.g. { memory = "64Mi", cpu = "50m" }).
+    runtime_class_overhead = optional(map(string))
+
+    # Tolerate every NoSchedule taint on the harvester-csi-driver chart so its
+    # node plugin DaemonSet also runs on gVisor nodes (PVCs hang otherwise).
+    # Only applied when the module controls chart_values on cluster create.
+    harvester_csi_tolerations = optional(bool, true)
+  })
+  description = "gVisor (runsc) settings shared by machine pools with gvisor = true. See the module README §gVisor node pools."
+  default     = {}
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9._-]+$", var.gvisor.release))
+    error_message = "gvisor.release must be an apt suite name such as \"20261012\" (letters, digits, '.', '_' or '-')."
+  }
+
+  validation {
+    condition     = contains([2, 3], var.gvisor.containerd_config_version)
+    error_message = "gvisor.containerd_config_version must be 2 (containerd 1.7) or 3 (containerd 2.x)."
+  }
+
+  validation {
+    condition     = contains(["systrap", "kvm", "ptrace"], var.gvisor.platform)
+    error_message = "gvisor.platform must be one of: systrap, kvm, ptrace."
+  }
+
+  validation {
+    condition     = contains(["NoSchedule", "PreferNoSchedule", "NoExecute"], var.gvisor.taint_effect)
+    error_message = "gvisor.taint_effect must be one of: NoSchedule, PreferNoSchedule, NoExecute."
+  }
+
+  validation {
+    condition = can(regex("^[a-z0-9]([-a-z0-9_.]*[a-z0-9])?$", var.gvisor.runtime_handler)) && alltrue([
+      for k, v in var.gvisor.runsc_config : can(regex("^[A-Za-z0-9_.-]+$", k)) && !can(regex("[\"\\\\\n]", v))
+    ])
+    error_message = "gvisor.runtime_handler must be a DNS-label-like name, and runsc_config keys must be [A-Za-z0-9_.-] with values free of quotes, backslashes and newlines."
+  }
+}
+
+variable "additional_manifest" {
+  type        = string
+  description = "Extra Kubernetes manifests (multi-document YAML) Rancher applies to the cluster via rke_config.additional_manifest. The gVisor RuntimeClass is appended automatically when a gVisor pool exists."
+  default     = ""
 }
 
 # ── Node cloud-init ───────────────────────────────────────────────────────────
@@ -209,7 +318,7 @@ variable "ntp_server" {
 variable "user_data" {
   type        = string
   sensitive   = true
-  description = "Full cloud-init user-data override applied to every node VM (plain YAML or base64). When set, node_password/ssh_authorized_keys/ntp_server are ignored."
+  description = "Full cloud-init user-data override applied to every node VM (plain YAML or base64) whose pool does not set its own user_data. When set, node_password/ssh_authorized_keys/ntp_server are ignored for those pools."
   default     = ""
 }
 

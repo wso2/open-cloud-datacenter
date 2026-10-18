@@ -22,6 +22,16 @@ locals {
   # reflects only that pool's storage_network field (not a cluster-wide flag).
   _using_generated_user_data = var.user_data == null || var.user_data == ""
 
+  # Full cloud-init override per pool, resolved as: pool user_data → module
+  # user_data → "" (generated template). Empty/whitespace values fall through.
+  pool_user_data_override = {
+    for p in var.machine_pools : p.name => (
+      p.user_data != null && trimspace(p.user_data) != "" ? p.user_data : (
+        var.user_data != null && trimspace(var.user_data) != "" ? var.user_data : ""
+      )
+    )
+  }
+
   harvester_kubeconfig = (var.create_cloud_credential && length(data.http.harvester_cloud_provider_kubeconfig) > 0) ? (
     data.http.harvester_cloud_provider_kubeconfig[0].status_code == 200 ? jsondecode(data.http.harvester_cloud_provider_kubeconfig[0].response_body) : null
   ) : null
@@ -58,7 +68,26 @@ harvester-cloud-provider:
 EOF
   ) : ""
 
-  effective_chart_values = var.chart_values != "" ? var.chart_values : local.default_chart_values
+  _base_chart_values = var.chart_values != "" ? var.chart_values : local.default_chart_values
+
+  # gVisor pools are tainted, which would keep the harvester-csi-driver node
+  # plugin DaemonSet off them (PVCs then hang in ContainerCreating). Helm
+  # replaces lists, so use the broad NoSchedule toleration Canal uses rather
+  # than copying the chart defaults. A harvester-csi-driver key supplied in
+  # var.chart_values wins over this.
+  _gvisor_chart_values = (local.gvisor_enabled && var.gvisor.harvester_csi_tolerations && var.enable_harvester_cloud_provider) ? {
+    "harvester-csi-driver" = {
+      tolerations = [
+        { operator = "Exists", effect = "NoSchedule" },
+        { key = "node-role.kubernetes.io/etcd", operator = "Exists", effect = "NoExecute" },
+      ]
+    }
+  } : {}
+
+  effective_chart_values = length(local._gvisor_chart_values) == 0 ? local._base_chart_values : yamlencode(merge(
+    local._gvisor_chart_values,
+    local._base_chart_values != "" ? yamldecode(local._base_chart_values) : {}
+  ))
 
   # Generated machine_global_config. ingress-controller is omitted when using
   # the RKE2 default (ingress-nginx) to keep the config minimal.
@@ -69,6 +98,53 @@ EOF
     disable-kube-proxy: false
     etcd-expose-metrics: false${local._ingress_line}
   YAML
+
+  # ── gVisor ──────────────────────────────────────────────────────────────────
+  gvisor_pools   = { for p in var.machine_pools : p.name => p if p.gvisor }
+  gvisor_enabled = length(local.gvisor_pools) > 0
+
+  # Inputs to templates/node-cloud-init.tpl (per-pool release added there).
+  _gvisor_template = {
+    apt_repo_url    = var.gvisor.apt_repo_url
+    apt_key_url     = var.gvisor.apt_key_url
+    runtime_handler = var.gvisor.runtime_handler
+    containerd_tmpl = var.gvisor.containerd_config_version == 3 ? "config-v3.toml.tmpl" : "config.toml.tmpl"
+    cri_plugin      = var.gvisor.containerd_config_version == 3 ? "'io.containerd.cri.v1.runtime'" : "\"io.containerd.grpc.v1.cri\""
+    runsc_config = merge({
+      platform         = var.gvisor.platform
+      "systemd-cgroup" = tostring(var.gvisor.systemd_cgroup)
+    }, var.gvisor.runsc_config)
+  }
+
+  _gvisor_label = { (var.gvisor.node_label_key) = var.gvisor.node_label_value }
+  _gvisor_taint = var.gvisor.taint ? [{
+    key    = var.gvisor.node_label_key
+    value  = var.gvisor.node_label_value
+    effect = var.gvisor.taint_effect
+  }] : []
+
+  # Kubernetes merges scheduling into every pod that uses this RuntimeClass,
+  # so workloads only need runtimeClassName.
+  gvisor_runtime_class_manifest = (local.gvisor_enabled && var.gvisor.create_runtime_class) ? yamlencode(merge(
+    {
+      apiVersion = "node.k8s.io/v1"
+      kind       = "RuntimeClass"
+      metadata   = { name = var.gvisor.runtime_class_name }
+      handler    = var.gvisor.runtime_handler
+      scheduling = merge(
+        { nodeSelector = local._gvisor_label },
+        length(local._gvisor_taint) > 0 ? {
+          tolerations = [for t in local._gvisor_taint : merge(t, { operator = "Equal" })]
+        } : {}
+      )
+    },
+    var.gvisor.runtime_class_overhead != null ? { overhead = { podFixed = var.gvisor.runtime_class_overhead } } : {}
+  )) : ""
+
+  effective_additional_manifest = join("\n---\n", compact([
+    trimspace(var.additional_manifest),
+    trimspace(local.gvisor_runtime_class_manifest),
+  ]))
 }
 
 # Registry auth secrets — created only for configs that supply username/password.
@@ -121,8 +197,8 @@ resource "rancher2_machine_config_v2" "pool" {
     memory_size          = each.value.memory_size
     reserved_memory_size = "-1"
     ssh_user             = var.ssh_user
-    user_data = (var.user_data != null && trimspace(var.user_data) != "") ? var.user_data : (
-      (var.node_password != null || length(var.ssh_authorized_keys) > 0 || var.ntp_server != "" || (local._using_generated_user_data && each.value.storage_network != null)) ? templatefile(
+    user_data = local.pool_user_data_override[each.key] != "" ? local.pool_user_data_override[each.key] : (
+      (var.node_password != null || length(var.ssh_authorized_keys) > 0 || var.ntp_server != "" || (local._using_generated_user_data && each.value.storage_network != null) || each.value.gvisor) ? templatefile(
         "${path.module}/templates/node-cloud-init.tpl",
         {
           ssh_user               = var.ssh_user
@@ -130,6 +206,10 @@ resource "rancher2_machine_config_v2" "pool" {
           ssh_authorized_keys    = var.ssh_authorized_keys
           ntp_server             = var.ntp_server
           enable_storage_netplan = each.value.storage_network != null
+          enable_gvisor          = each.value.gvisor
+          gvisor = merge(local._gvisor_template, {
+            release = coalesce(each.value.gvisor_release, var.gvisor.release)
+          })
         }
       ) : ""
     )
@@ -210,6 +290,10 @@ resource "rancher2_cluster_v2" "this" {
       condition     = var.cloud_provider_config_secret == "" || var.enable_harvester_cloud_provider
       error_message = "cloud_provider_config_secret is set but enable_harvester_cloud_provider is false. Set enable_harvester_cloud_provider = true or clear cloud_provider_config_secret."
     }
+    precondition {
+      condition     = alltrue([for name, p in local.gvisor_pools : local.pool_user_data_override[name] == ""])
+      error_message = "gVisor pools need the module-generated cloud-init. A pool with gvisor = true must not set its own user_data, and var.user_data must be empty (gVisor pools would otherwise fall back to it)."
+    }
   }
 
   dynamic "rke_config" {
@@ -240,10 +324,11 @@ resource "rancher2_cluster_v2" "this" {
           worker_role                  = machine_pools.value.worker
           quantity                     = machine_pools.value.quantity
           drain_before_delete          = true
-          machine_labels               = machine_pools.value.machine_labels
+          machine_labels               = machine_pools.value.gvisor ? merge(machine_pools.value.machine_labels, local._gvisor_label) : machine_pools.value.machine_labels
 
           dynamic "taints" {
-            for_each = machine_pools.value.taints
+            # gVisor pools get the sandbox taint unless the caller already declares that key.
+            for_each = concat(machine_pools.value.taints, machine_pools.value.gvisor && !contains([for t in machine_pools.value.taints : t.key], var.gvisor.node_label_key) ? local._gvisor_taint : [])
             content {
               key    = taints.value.key
               value  = taints.value.value
@@ -304,6 +389,8 @@ resource "rancher2_cluster_v2" "this" {
       }
 
       chart_values = local.effective_chart_values != "" ? local.effective_chart_values : null
+
+      additional_manifest = local.effective_additional_manifest != "" ? local.effective_additional_manifest : null
     }
   }
 }

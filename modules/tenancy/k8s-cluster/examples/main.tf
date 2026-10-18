@@ -1,8 +1,8 @@
 module "my_cluster" {
-  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.1.7"
+  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.2.2"
 
   # ── Cluster identity ────────────────────────────────────────────────────────
-  cluster_name       = "my-cluster"        # REPLACE: your cluster name
+  cluster_name       = "my-cluster" # REPLACE: your cluster name
   kubernetes_version = "v1.34.9+rke2r1"
 
   # ── Rancher / Harvester connection ──────────────────────────────────────────
@@ -29,7 +29,7 @@ module "my_cluster" {
   machine_pools = [
     {
       name         = "controlplane-worker"
-      vm_namespace = "my-team"                               # REPLACE: VM namespace
+      vm_namespace = "my-team" # REPLACE: VM namespace
       quantity     = 3
       cpu_count    = "4"
       memory_size  = "8"
@@ -38,16 +38,37 @@ module "my_cluster" {
 
       # Primary NIC — gets the default route.
       # Format: "<network-namespace>/<nad-name>"
-      vm_network = "my-team-net/my-team-vlan601"            # REPLACE
+      vm_network = "my-team-net/my-team-vlan601" # REPLACE
 
       # Storage NIC — optional, remove if not allocated.
-      storage_network = "my-team-net/my-team-strg-vlan698"  # REPLACE or remove
+      storage_network = "my-team-net/my-team-strg-vlan698" # REPLACE or remove
 
       control_plane = true
       etcd          = true
       worker        = true
-    }
+    },
+
+    # Optional gVisor sandbox pool — uncomment to enable (gvisor block below is optional).
+    # See README section 13. Requires ?ref=terraform/v0.2.2 or later.
+    # {
+    #   name          = "gvisor"
+    #   vm_namespace  = "my-team"
+    #   quantity      = 2
+    #   cpu_count     = "4"
+    #   memory_size   = "16"
+    #   disk_size     = 80
+    #   image_name    = "images/ubuntu-24-04"
+    #   vm_network    = "my-team-net/my-team-vlan601"
+    #   control_plane = false
+    #   etcd          = false
+    #   worker        = true
+    #   gvisor        = true
+    # },
   ]
+
+  # gvisor = {
+  #   release = "20261012" # optional — module default; override to pin another release
+  # }
 }
 
 output "cluster_id" {
