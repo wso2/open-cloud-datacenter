@@ -183,7 +183,7 @@ Replace every value marked with `# REPLACE` with your own values from sections 1
 
 ```hcl
 module "my_cluster" {
-  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.2.2"
+  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.3.0"
 
   # ── Cluster identity ────────────────────────────────────────────────────────
   cluster_name       = "my-cluster"        # REPLACE: your cluster name
@@ -541,7 +541,7 @@ are not affected.
 
 | Requirement | Detail |
 |-------------|--------|
-| Module version | `?ref=terraform/v0.2.2` or later |
+| Module version | `?ref=terraform/v0.3.0` or later |
 | Kubernetes version | RKE2 with embedded containerd 2.x. On Harvester 1.8 use `v1.35.4+rke2r1` or later. |
 | OS image | Ubuntu 24.04 (`images/ubuntu-24-04`) |
 | Egress from node VMs | `gvisor.dev` (signing key) and `storage.googleapis.com/gvisor/releases` (apt repo) |
@@ -557,7 +557,7 @@ Add a new pool with `gvisor = true`. That is the only required change; the modul
 
 ```hcl
 module "my_cluster" {
-  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.2.2"
+  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.3.0"
 
   # ... everything from section 5.4 ...
   kubernetes_version = "v1.35.4+rke2r1"

@@ -1,5 +1,5 @@
 module "my_cluster" {
-  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.2.2"
+  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.3.0"
 
   # ── Cluster identity ────────────────────────────────────────────────────────
   cluster_name       = "my-cluster" # REPLACE: your cluster name
@@ -49,7 +49,7 @@ module "my_cluster" {
     },
 
     # Optional gVisor sandbox pool — uncomment to enable (gvisor block below is optional).
-    # See README section 13. Requires ?ref=terraform/v0.2.2 or later.
+    # See README section 13. Requires ?ref=terraform/v0.3.0 or later.
     # {
     #   name          = "gvisor"
     #   vm_namespace  = "my-team"

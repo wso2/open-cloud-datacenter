@@ -13,7 +13,7 @@ Provisions a tenant RKE2 Kubernetes cluster on Harvester HCI via Rancher's machi
 
 ```hcl
 module "my_rke2_cluster" {
-  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.2.2"
+  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.3.0"
 
   cluster_name        = "my-cluster"
   kubernetes_version  = "v1.32.13+rke2r1"
@@ -153,7 +153,7 @@ etcd_s3 = {
 
 ## gVisor node pools
 
-> **Requires `?ref=terraform/v0.2.2` or later.** Earlier releases do not have the
+> **Requires `?ref=terraform/v0.3.0` or later.** Earlier releases do not have the
 > `gvisor` pool field or variable.
 
 Any pool can run pods under [gVisor](https://gvisor.dev) (`runsc`) by setting
@@ -164,7 +164,7 @@ the cluster.
 
 ```hcl
 module "my_rke2_cluster" {
-  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.2.2"
+  source = "github.com/wso2/open-cloud-datacenter//modules/tenancy/k8s-cluster?ref=terraform/v0.3.0"
   # ...
   kubernetes_version = "v1.35.4+rke2r1"
 
@@ -327,7 +327,7 @@ module (infra team only — requires direct Harvester kubeconfig):
 
 ```hcl
 module "cloud_credential" {
-  source = "github.com/wso2/open-cloud-datacenter//modules/addons/harvester-cloud-credential?ref=terraform/v0.2.2"
+  source = "github.com/wso2/open-cloud-datacenter//modules/addons/harvester-cloud-credential?ref=terraform/v0.3.0"
   # ...
 }
 module "my_rke2_cluster" {
