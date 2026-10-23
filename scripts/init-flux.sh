@@ -32,12 +32,12 @@
 #                           init: regenerates the overlay (preserves
 #                                 flux-system/ + sealed-*.yaml from prior runs)
 #                           seal: regenerates sealed-*.yaml (preserves the rest)
-#   --no-git                Don't auto stage/commit/push the generated files.
-#                           By default both subcommands commit + push for you
-#                           to whatever branch your consumer repo is on, using
-#                           the upstream-safe `git push -u origin HEAD:<branch>`
-#                           form. Pass --no-git if you want to review the diff
-#                           or batch the push with other work.
+#   --no-git                Write into your checkout and leave committing and
+#                           pushing to you. By default both subcommands build
+#                           their files in a temporary worktree of the branch
+#                           Flux reads, commit there and push - your own
+#                           checkout is never touched. Pass --no-git to review
+#                           the diff or batch the push with other work.
 #   --consumer-dir <path>   Consumer repo. Default: git toplevel of $PWD, when
 #                           that repo has an environments/ directory.
 #   --env-name <name>       Environment under environments/. Default: the only
@@ -154,7 +154,7 @@ overlay_dir="$target_dir/platform-overlay"
 echo "── init-flux ($subcommand) ──────────────────────────────────"
 echo "  OCD template:  $template_dir"
 echo "  Consumer:      $consumer_dir"
-echo "  Target:        $target_dir"
+echo "  Target:        environments/$env_name/flux"
 echo
 
 # ── prereq checks ────────────────────────────────────────────────────────────
@@ -207,14 +207,6 @@ prereq_check() {
           fi
         fi
       fi
-    fi
-  fi
-
-  # seal additionally needs init to have run first
-  if [[ "$subcommand" == "seal" ]]; then
-    if [[ ! -f "$overlay_dir/kustomization.yaml" ]]; then
-      echo "  ✗ $overlay_dir/kustomization.yaml not found — run \`$0 init …\` first" >&2
-      fail=1
     fi
   fi
 
@@ -342,20 +334,6 @@ auto_or_ask_secret() {
   ask_secret "$var" "$prompt"
 }
 
-# ── git helper ───────────────────────────────────────────────────────────────
-# Stage + commit + push the wizard's output. Called at the end of both init
-# and seal so the operator doesn't have to remember the right invocation
-# (and so we avoid the upstream-branch-name trap that `git push` falls into
-# when push.default = simple sees a non-matching upstream).
-#
-# Pushes to whatever branch the consumer repo is currently on — never
-# hardcoded. Uses `git push -u origin HEAD:refs/heads/<branch>` so:
-#   - the first push from a fresh checkout sets the tracking ref (-u)
-#   - subsequent pushes don't depend on whatever push.default is configured
-#   - it works regardless of whether the upstream branch name matches
-#
-# Opt out with --no-git on the script invocation (the script then prints
-# the exact commands to run by hand).
 # ── Resolve where Flux actually reads from ───────────────────────────────────
 # The cluster is the source of truth. GitRepository/flux-system states the exact
 # URL and branch Flux reconciles; deriving from it means the seal cannot land on
@@ -383,9 +361,9 @@ resolve_flux_target() {
     want="$(printf '%s' "$url" | sed -E 's#^(https?://|ssh://)?(git@)?[^/]+[:/]##; s#\.git$##' | tr 'A-Z' 'a-z')"
     while read -r name; do
       [[ -z "$name" ]] && continue
-      me="$(git remote get-url "$name" 2>/dev/null | sed -E 's#^(https?://|ssh://)?(git@)?[^/]+[:/]##; s#\.git$##' | tr 'A-Z' 'a-z')"
+      me="$(git -C "$consumer_dir" remote get-url "$name" 2>/dev/null | sed -E 's#^(https?://|ssh://)?(git@)?[^/]+[:/]##; s#\.git$##' | tr 'A-Z' 'a-z')"
       [[ "$me" == "$want" ]] && { git_remote="$name"; break; }
-    done < <(git remote)
+    done < <(git -C "$consumer_dir" remote)
   fi
 
   if [[ -z "$git_remote" ]]; then
@@ -397,143 +375,108 @@ resolve_flux_target() {
   echo "  ✓ Flux reads $git_remote/$git_branch (from GitRepository/flux-system)"
 }
 
-# ── Refuse to touch git mid-operation ────────────────────────────────────────
-# A rebase, merge or cherry-pick in progress makes `git commit` mean something
-# other than "record the sealed files" - it can conclude the in-flight operation
-# instead. Fail early and legibly rather than corrupting someone's working state.
-assert_git_idle() {
-  local d; d="$(git rev-parse --git-dir 2>/dev/null)" || return 0
-  local op=""
-  [[ -d "$d/rebase-merge" || -d "$d/rebase-apply" ]] && op="rebase"
-  [[ -f "$d/MERGE_HEAD" ]]       && op="merge"
-  [[ -f "$d/CHERRY_PICK_HEAD" ]] && op="cherry-pick"
-  [[ -f "$d/BISECT_LOG" ]]       && op="bisect"
-  if [[ -n "$op" ]]; then
-    echo "  ✗ a $op is in progress in $consumer_dir." >&2
-    echo "    Finish or abort it first (git $op --abort), then re-run." >&2
-    echo "    Or pass --no-git and commit the sealed files yourself." >&2
-    return 1
-  fi
+# ── Build the output inside the branch Flux reads ────────────────────────────
+# Both subcommands edit files that already exist on that branch (seal rewrites
+# platform-overlay/kustomization.yaml), so they must start from ITS copy. The
+# operator's checkout can hold an older overlay - on another branch it usually
+# does - and a seal built on top of that would revert the live one when pushed.
+#
+# So everything is written into a throwaway worktree of <remote>/<branch>,
+# committed there and pushed from there. The operator's branch, working tree
+# and any rebase or merge in progress are never touched, and a failed run
+# leaves nothing behind: re-running starts again from the remote tip.
+work_tree=""
+cleanup_work_tree() {
+  [[ -n "$work_tree" ]] || return 0
+  git -C "$consumer_dir" worktree remove --force "$work_tree" >/dev/null 2>&1 || true
+}
+trap cleanup_work_tree EXIT
+
+prepare_work_tree() {
+  $no_git && return 0
+
+  echo "── git: target branch ──"
+  resolve_flux_target || exit 1
+
+  # Exit code 2 from ls-remote --exit-code means "reachable, no such branch".
+  # Anything else non-zero is a connectivity or auth failure worth surfacing.
+  local base rc=0
+  git -C "$consumer_dir" ls-remote --exit-code --heads "$git_remote" "$git_branch" >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0)
+      git -C "$consumer_dir" fetch -q "$git_remote" "$git_branch"
+      base="$(git -C "$consumer_dir" rev-parse FETCH_HEAD)"
+      ;;
+    2)
+      base="$(git -C "$consumer_dir" rev-parse HEAD)"
+      echo "  ! $git_remote/$git_branch does not exist yet; it will be created from your HEAD"
+      ;;
+    *)
+      echo "  ✗ cannot reach $git_remote ($(git -C "$consumer_dir" remote get-url "$git_remote"))." >&2
+      echo "    Check your access to it, or pass --no-git and push yourself." >&2
+      exit 1
+      ;;
+  esac
+
+  work_tree="$(mktemp -d)"
+  git -C "$consumer_dir" worktree add -q --detach "$work_tree" "$base"
+  target_dir="$work_tree/environments/$env_name/flux"
+  overlay_dir="$target_dir/platform-overlay"
+  echo "  ✓ writing into $git_remote/$git_branch @ ${base:0:7} (temporary worktree; your checkout is untouched)"
+  echo
 }
 
+# ── Commit + push ────────────────────────────────────────────────────────────
+# Called at the end of both init and seal. The explicit HEAD:refs/heads/<branch>
+# refspec needs no local branch, tracking ref or push.default setting.
 git_commit_push() {
   local path="$1" message="$2"
 
   echo
-  echo "── git: stage + commit + push ──"
+  echo "── git: commit + push ──"
+
+  if $no_git; then
+    echo "  --no-git given; do this yourself:"
+    echo "    cd $consumer_dir"
+    echo "    git add $path"
+    echo "    git commit -m \"$message\" -- $path"
+    echo "    git push <remote> HEAD:refs/heads/<branch Flux reads>"
+    return 0
+  fi
 
   (
-    cd "$consumer_dir"
-
-    if $no_git; then
-      echo "  --no-git given; do this yourself:"
-      echo "    cd $consumer_dir"
-      echo "    git add $path"
-      echo "    git commit -m \"$message\""
-      echo "    git push -u $git_remote HEAD"
-      return 0
+    cd "$work_tree"
+    git add -A -- "$path"
+    if git diff --cached --quiet; then
+      echo "  ✓ nothing changed under $path; nothing to push"
+      exit 0
     fi
+    git commit -q -m "$message"
+    echo "  ✓ committed: $message"
 
-    # Where Flux reads from, not where the operator happens to stand. Also
-    # refuse to run mid-rebase/merge/cherry-pick. A detached HEAD is fine:
-    # we push HEAD:refs/heads/<branch>, which needs no local branch at all.
-    assert_git_idle || return 1
-    resolve_flux_target || return 1
-    local branch="$git_branch"
-
-    # Stage + commit any new changes under $path.
-    if [[ -n "$(git status --porcelain -- "$path" 2>/dev/null)" ]]; then
-      git add -- "$path"
-      if git diff --cached --quiet -- "$path"; then
-        echo "  ✓ working tree under $path matches index — nothing to commit"
-      else
-        # `-- "$path"` is load-bearing: a bare `git commit` records the whole
-        # index, sweeping in any unrelated work the operator had staged.
-        git commit -m "$message" -- "$path" >/dev/null
-        echo "  ✓ committed: $message"
+    # A rejected push means the branch moved after we read it, most often
+    # Flux image automation bumping a tag. Our commit exists only in this
+    # worktree, so replaying it onto the new tip rewrites nothing shared.
+    local out=""
+    for _ in 1 2 3; do
+      if out="$(git push -q "$git_remote" "HEAD:refs/heads/$git_branch" 2>&1)"; then
+        echo "  ✓ pushed to $git_remote/$git_branch"
+        exit 0
       fi
-    else
-      echo "  ✓ no working-tree changes under $path"
-    fi
-
-    # Now check whether local is ahead of remote. This matters even when
-    # the wizard didn't make changes this run — a prior run may have
-    # committed locally but the operator never pushed. Flux then
-    # reconciles a stale remote SHA that's missing the overlay, and
-    # nothing deploys. We fetch the remote ref so the ahead-count is
-    # accurate (silently — a failed fetch shouldn't break the wizard).
-    git fetch "$git_remote" "$branch" >/dev/null 2>&1 || true
-
-    local ahead
-    if git rev-parse --verify --quiet "$git_remote/$branch" >/dev/null; then
-      ahead=$(git rev-list --count "$git_remote/$branch..HEAD" 2>/dev/null || echo 0)
-    else
-      ahead="new-branch"
-    fi
-
-    # Helper: try `git push`; if it fails because remote moved (fast-
-    # forward conflict — most often because flux_bootstrap_git's
-    # auto-commits landed between the operator's last fetch and now),
-    # auto-rebase onto the remote and try once more. Real conflicts
-    # (e.g. the operator hand-edited something that flux_bootstrap_git
-    # also touched) abort the rebase and tell the operator what to do.
-    try_push() {
-      if git push -u "$git_remote" "HEAD:refs/heads/$branch" >/dev/null 2>&1; then
-        return 0
+      [[ "$out" == *"[rejected]"* ]] || break
+      echo "  ! push rejected ($git_remote/$git_branch moved); replaying onto its new tip"
+      git fetch -q "$git_remote" "$git_branch" 2>/dev/null || break
+      if ! git rebase -q FETCH_HEAD >/dev/null 2>&1; then
+        git rebase --abort >/dev/null 2>&1 || true
+        out="replaying onto the new tip of $git_remote/$git_branch conflicted"
+        break
       fi
-      # Remote moved - most often Flux's own image-automation commits. Do NOT
-      # rebase: this branch is written by image-automation too, and rewriting
-      # shared history from a script is how an operator ends up with a
-      # committed-but-unpushed tree they did not ask for. Fetch, and only
-      # continue if the merge is a clean fast-forward.
-      echo "  ! push rejected (remote moved); fetching $git_remote/$branch"
-      git fetch "$git_remote" "$branch" >/dev/null 2>&1 || true
-      if ! git merge --ff-only "$git_remote/$branch" >/dev/null 2>&1; then
-        echo "  ✗ $git_remote/$branch has diverged from your HEAD." >&2
-        echo "    The sealed files are committed locally but not pushed." >&2
-        echo "    Reconcile it yourself, then push:" >&2
-        echo "      cd $consumer_dir" >&2
-        echo "      git fetch $git_remote $branch" >&2
-        echo "      git rebase $git_remote/$branch   # or merge" >&2
-        echo "      git push $git_remote HEAD:refs/heads/$branch" >&2
-        return 1
-      fi
-      if git push -u "$git_remote" "HEAD:refs/heads/$branch" >/dev/null 2>&1; then
-        return 0
-      fi
-      echo "  ✗ push still failed after rebase" >&2
-      return 1
-    }
-
-    case "$ahead" in
-      0)
-        echo "  ✓ $git_remote/$branch already at HEAD — nothing to push"
-        ;;
-      new-branch)
-        if try_push; then
-          echo "  ✓ pushed (created $git_remote/$branch)"
-        else
-          return 1
-        fi
-        ;;
-      *)
-        # Explicit refspec form. Bypasses push.default surprises (the
-        # 'upstream branch of your current branch does not match the
-        # name of your current branch' error happens when
-        # push.default=simple sees a tracking ref with a different name
-        # than local HEAD). HEAD:refs/heads/X tells git unambiguously:
-        # push my current commit to branch X on origin.
-        if try_push; then
-          # Re-count ahead after potential rebase + push (where the
-          # original local SHA may have been replayed).
-          local pushed
-          pushed=$(git rev-list --count "$git_remote/$branch@{1}..$git_remote/$branch" 2>/dev/null || echo "$ahead")
-          echo "  ✓ pushed $pushed commit(s) to $git_remote/$branch"
-        else
-          return 1
-        fi
-        ;;
-    esac
+    done
+    echo "  ✗ push to $git_remote/$git_branch failed:" >&2
+    printf '%s\n' "$out" | sed 's/^/      /' >&2
+    echo "    Nothing was pushed and your checkout is untouched. Re-run once the" >&2
+    echo "    cause is fixed; it starts again from the branch's latest tip." >&2
+    exit 1
   )
 }
 
@@ -667,7 +610,7 @@ README
 
   echo
   echo "── done (init) ──────────────────────────────────────────────"
-  echo "  Wrote: $target_dir/"
+  echo "  Wrote: environments/$env_name/flux/"
 
   git_commit_push "environments/$env_name/flux" \
     "Add Flux overlay for $env_name (init phase)"
@@ -785,7 +728,7 @@ cmd_seal() {
   echo "── sealing secrets ──"
 
   cert_pem="$(mktemp)"
-  trap 'rm -f "$cert_pem"' EXIT
+  trap 'rm -f "$cert_pem"; cleanup_work_tree' EXIT
   kubeseal \
     --controller-namespace=sealed-secrets \
     --controller-name=sealed-secrets-controller \
@@ -875,7 +818,7 @@ cmd_seal() {
   else
     echo "  generating self-signed cert (1yr) for $dcapi_hostname + $cloudui_hostname"
     tls_workdir="$(mktemp -d)"
-    trap 'rm -rf "$tls_workdir" "$cert_pem"' EXIT
+    trap 'rm -rf "$tls_workdir" "$cert_pem"; cleanup_work_tree' EXIT
     openssl req -x509 -nodes -newkey rsa:4096 \
       -keyout "$tls_workdir/tls.key" -out "$tls_workdir/tls.crt" \
       -days 365 \
@@ -920,7 +863,7 @@ cmd_seal() {
 
   echo
   echo "── done (seal) ──────────────────────────────────────────────"
-  echo "  Wrote: $overlay_dir/sealed-*.yaml + updated kustomization.yaml"
+  echo "  Wrote: environments/$env_name/flux/platform-overlay/sealed-*.yaml + updated kustomization.yaml"
 
   git_commit_push "environments/$env_name/flux" \
     "Seal $env_name secrets"
@@ -938,6 +881,15 @@ cmd_seal() {
 # doesn't match published tags yet), this is the place to re-add it.
 
 # ── dispatch ─────────────────────────────────────────────────────────────────
+prepare_work_tree
+
+# seal needs init to have run first - checked against the branch Flux reads.
+if [[ "$subcommand" == "seal" && ! -f "$overlay_dir/kustomization.yaml" ]]; then
+  echo "✗ environments/$env_name/flux/platform-overlay/kustomization.yaml not found${work_tree:+ on $git_remote/$git_branch}" >&2
+  echo "  run \`$0 init\` first" >&2
+  exit 1
+fi
+
 case "$subcommand" in
   init) cmd_init ;;
   seal) cmd_seal ;;
