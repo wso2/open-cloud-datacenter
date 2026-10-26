@@ -9,8 +9,8 @@ output "project_name" {
 }
 
 output "namespace_ids" {
-  value       = { for ns, r in rancher2_namespace.this : ns => r.id }
-  description = "Map of namespace name → Rancher namespace ID for each namespace in the project."
+  value       = one(rancher2_namespace.this[*].id)
+  description = "Rancher default namespace ID in the project."
 }
 
 output "network_namespace" {
