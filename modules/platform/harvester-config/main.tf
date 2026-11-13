@@ -9,10 +9,6 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.30"
     }
-    null = {
-      source  = "hashicorp/null"
-      version = "~> 3.0"
-    }
   }
 }
 
@@ -109,10 +105,12 @@ check "rwx_network_requires_storage_network" {
 # ── Storage network ───────────────────────────────────────────────────────────
 # Harvester's storage-network webhook rejects the setting until every VlanStatus
 # of the cluster network is ready; harvester_vlanconfig does not wait for that.
-resource "null_resource" "wait_storage_vlan_ready" {
+# kubectl wait fails at once while no VlanStatus exists yet, so it is retried
+# until the overall timeout.
+resource "terraform_data" "wait_storage_vlan_ready" {
   count = var.manage_storage_network && var.storage_network_cluster_network != "mgmt" ? 1 : 0
 
-  triggers = {
+  triggers_replace = {
     cluster_network = var.storage_network_cluster_network
     vlan_configs    = jsonencode(var.vlan_configs)
   }
@@ -124,26 +122,19 @@ resource "null_resource" "wait_storage_vlan_ready" {
       TIMEOUT         = tostring(var.network_wait_timeout_seconds)
     }
     command = <<-EOT
-      python3 -c "
-import subprocess, json, os, sys, time
-cn = os.environ['CLUSTER_NETWORK']
-deadline = time.time() + int(os.environ['TIMEOUT'])
-while True:
-  result = subprocess.run(
-    ['kubectl','get','vlanstatuses.network.harvesterhci.io','-l','network.harvesterhci.io/clusternetwork=' + cn,'-o','json'],
-    capture_output=True, text=True, env={**os.environ}, check=True)
-  items = json.loads(result.stdout)['items']
-  pending = [vs['metadata']['name'] for vs in items
-             if not any(c.get('type') == 'ready' and c.get('status') == 'True'
-                        for c in vs.get('status', {}).get('conditions', []))]
-  if items and not pending:
-    print('vlan status ready for cluster network', cn)
-    sys.exit(0)
-  if time.time() > deadline:
-    print('vlan status not ready for cluster network', cn, '- pending:', pending or 'no VlanStatus present', file=sys.stderr)
-    sys.exit(1)
-  time.sleep(10)
-"
+      deadline=$(( $(date +%s) + TIMEOUT ))
+      until kubectl wait vlanstatuses.network.harvesterhci.io \
+          -l "network.harvesterhci.io/clusternetwork=$CLUSTER_NETWORK" \
+          --for=condition=ready --timeout=10s >/dev/null 2>&1; do
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+          echo "vlan status not ready for cluster network $CLUSTER_NETWORK:" >&2
+          kubectl get vlanstatuses.network.harvesterhci.io \
+            -l "network.harvesterhci.io/clusternetwork=$CLUSTER_NETWORK" >&2
+          exit 1
+        fi
+        sleep 10
+      done
+      echo "vlan status ready for cluster network $CLUSTER_NETWORK"
     EOT
   }
 
@@ -164,46 +155,45 @@ resource "harvester_setting" "storage_network" {
     exclude        = var.storage_network_exclude_ranges
   })
 
-  depends_on = [null_resource.wait_storage_vlan_ready]
+  depends_on = [terraform_data.wait_storage_vlan_ready]
 }
 
 # The provider returns once the value is written; Harvester then reconfigures
 # Longhorn asynchronously. Pass only when the controller has processed THIS value
-# (hash annotation == sha1(value)) and reports Configured with reason Completed,
-# so a stale Completed from the previous value cannot satisfy the wait.
-resource "null_resource" "wait_storage_network" {
+# (hash annotation == sha1(value)) and then reports configured=True.
+# Harvester writes the new hash together with configured=False/In Progress, and
+# only sets True with reason Completed, so a stale Completed from the previous
+# value cannot satisfy the wait. The hash is taken from the value the provider
+# read back, and the annotation may not exist yet on a fresh cluster, so the
+# waits are retried until the overall timeout.
+resource "terraform_data" "wait_storage_network" {
   count = var.manage_storage_network ? 1 : 0
 
-  triggers = {
+  triggers_replace = {
     value = harvester_setting.storage_network[0].value
   }
 
   provisioner "local-exec" {
     environment = {
       KUBECONFIG = var.harvester_kubeconfig_path
+      VALUE_HASH = sha1(harvester_setting.storage_network[0].value)
       TIMEOUT    = tostring(var.storage_network_timeout_seconds)
     }
     command = <<-EOT
-      python3 -c "
-import subprocess, json, hashlib, os, sys, time
-deadline = time.time() + int(os.environ['TIMEOUT'])
-while True:
-  result = subprocess.run(
-    ['kubectl','get','setting','storage-network','-o','json'],
-    capture_output=True, text=True, env={**os.environ}, check=True)
-  setting = json.loads(result.stdout)
-  want = hashlib.sha1(setting.get('value', '').encode()).hexdigest()
-  got = setting['metadata'].get('annotations', {}).get('storage-network.settings.harvesterhci.io/hash')
-  cond = next((c for c in setting.get('status', {}).get('conditions', []) if c.get('type') == 'configured'), {})
-  if got == want and cond.get('status') == 'True' and cond.get('reason') == 'Completed':
-    print('storage-network applied')
-    sys.exit(0)
-  if time.time() > deadline:
-    print('storage-network not applied: hash_match=%s status=%s reason=%s message=%s'
-          % (got == want, cond.get('status'), cond.get('reason'), cond.get('message')), file=sys.stderr)
-    sys.exit(1)
-  time.sleep(15)
-"
+      deadline=$(( $(date +%s) + TIMEOUT ))
+      until kubectl wait setting storage-network \
+          --for=jsonpath='{.metadata.annotations.storage-network\.settings\.harvesterhci\.io/hash}'="$VALUE_HASH" \
+          --timeout=15s >/dev/null 2>&1 &&
+        kubectl wait setting storage-network \
+          --for=condition=configured --timeout=15s >/dev/null 2>&1; do
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+          echo "storage-network not applied:" >&2
+          kubectl get setting storage-network -o jsonpath='{range .status.conditions[?(@.type=="configured")]}status={.status} reason={.reason} message={.message}{"\n"}{end}' >&2
+          exit 1
+        fi
+        sleep 15
+      done
+      echo "storage-network applied"
     EOT
   }
 }
@@ -218,7 +208,7 @@ resource "harvester_setting" "rwx_network" {
   name  = "rwx-network"
   value = jsonencode({ "share-storage-network" = true })
 
-  depends_on = [null_resource.wait_storage_network]
+  depends_on = [terraform_data.wait_storage_network]
 }
 
 # ── Storage class ─────────────────────────────────────────────────────────────
