@@ -26,15 +26,10 @@ terraform {
 
 # ── Harvester namespace ───────────────────────────────────────────────────────
 # Creates a dedicated namespace when harvester_namespace is not "default".
-# Labelled as infrastructure so the namespace-credential-provisioner skips it
-# (it only provisions credentials for tenant namespaces).
 resource "kubernetes_namespace" "harvester_ns" {
   count = var.harvester_namespace != "default" ? 1 : 0
   metadata {
     name = var.harvester_namespace
-    labels = {
-      "platform.wso2.com/role" = "infrastructure"
-    }
   }
 
   lifecycle {
