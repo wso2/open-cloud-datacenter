@@ -16,10 +16,9 @@ Harvester stops workloads and requires every Longhorn volume to be detached.
 | terraform | >= 1.5 |
 | harvester/harvester | ~> 1.7 |
 | hashicorp/kubernetes | ~> 2.30 |
-| hashicorp/null | ~> 3.0 |
 
 If `manage_storage_network = true`, the machine running Terraform also needs
-`kubectl` and `python3`.
+`kubectl` 1.23 or newer (for `kubectl wait --for=jsonpath`).
 
 ## Usage
 
@@ -63,8 +62,10 @@ module "harvester_config" {
 3. Write the `storage-network` setting.
 4. **Wait** until Harvester has applied that value. The wait passes only when
    the setting's hash annotation equals the sha1 of the new value **and** the
-   `configured` condition is `True` with reason `Completed`. A stale
-   `Completed` from the previous value can't satisfy it.
+   `configured` condition is then `True`. Harvester writes the new hash
+   together with `configured=False` / `In Progress`, and sets `True` only with
+   reason `Completed`, so a stale `Completed` from the previous value can't
+   satisfy it.
 5. Write `rwx-network` = `{"share-storage-network":true}`. If the storage
    network fails, RWX is never enabled.
 
