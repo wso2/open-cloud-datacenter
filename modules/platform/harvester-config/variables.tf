@@ -6,7 +6,7 @@ variable "harvester_namespace" {
 
 variable "harvester_kubeconfig_path" {
   type        = string
-  description = "Filesystem path to the Harvester kubeconfig. Required when manage_storage_network = true — the readiness waits run kubectl."
+  description = "Filesystem path to the Harvester kubeconfig. Required when manage_storage_network = true (enforced at plan time) — the readiness waits run kubectl."
   default     = ""
 }
 
