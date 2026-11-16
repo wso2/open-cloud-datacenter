@@ -54,6 +54,12 @@ resource "harvester_vlanconfig" "uplink" {
     bond_mode = each.value.bond_mode
     mtu       = each.value.mtu
   }
+
+  # Harvester's webhook adds the clusternetwork label and defaults bond_miimon
+  # to -1; neither is set here, so ignore them to avoid a permanent diff.
+  lifecycle {
+    ignore_changes = [labels, uplink[0].bond_miimon]
+  }
 }
 
 # ── VM network ────────────────────────────────────────────────────────────────
