@@ -138,6 +138,15 @@ resource "terraform_data" "wait_storage_vlan_ready" {
     EOT
   }
 
+  # kubectl treats an empty KUBECONFIG as unset and falls back to the operator's
+  # current context, where the wait could pass against another Harvester cluster.
+  lifecycle {
+    precondition {
+      condition     = var.harvester_kubeconfig_path != ""
+      error_message = "harvester_kubeconfig_path is required when manage_storage_network = true: the readiness waits run kubectl against it."
+    }
+  }
+
   depends_on = [harvester_vlanconfig.uplink]
 }
 
@@ -154,6 +163,23 @@ resource "harvester_setting" "storage_network" {
     range          = var.storage_network_range
     exclude        = var.storage_network_exclude_ranges
   })
+
+  # Inputs are known at plan time, so a bad value fails the plan before the VLAN
+  # wait runs; otherwise an empty cluster network makes it wait out its timeout.
+  lifecycle {
+    precondition {
+      condition     = var.storage_network_cluster_network != ""
+      error_message = "storage_network_cluster_network is required when manage_storage_network = true."
+    }
+    precondition {
+      condition     = var.storage_network_vlan >= 1 && var.storage_network_vlan <= 4094
+      error_message = "storage_network_vlan must be a VLAN ID between 1 and 4094 when manage_storage_network = true."
+    }
+    precondition {
+      condition     = can(cidrhost(var.storage_network_range, 0))
+      error_message = "storage_network_range must be a valid CIDR (e.g. 172.23.0.0/19) when manage_storage_network = true."
+    }
+  }
 
   depends_on = [terraform_data.wait_storage_vlan_ready]
 }
@@ -195,6 +221,15 @@ resource "terraform_data" "wait_storage_network" {
       done
       echo "storage-network applied"
     EOT
+  }
+
+  # Same KUBECONFIG fallback risk as wait_storage_vlan_ready; also guards the
+  # mgmt path, where that wait is skipped.
+  lifecycle {
+    precondition {
+      condition     = var.harvester_kubeconfig_path != ""
+      error_message = "harvester_kubeconfig_path is required when manage_storage_network = true: the readiness waits run kubectl against it."
+    }
   }
 }
 

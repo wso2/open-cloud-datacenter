@@ -79,7 +79,7 @@ StorageClass.
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|----------|
 | harvester_namespace | Namespace for the VM network and image; created when not `default` | `string` | `"default"` | no |
-| harvester_kubeconfig_path | Harvester kubeconfig path. Required when `manage_storage_network = true`. | `string` | `""` | no |
+| harvester_kubeconfig_path | Harvester kubeconfig path. Required when `manage_storage_network = true`; the plan fails without it, since kubectl would otherwise fall back to the current context. | `string` | `""` | when storage network |
 | cluster_networks | Cluster networks to create (not `mgmt`) | `set(string)` | `[]` | no |
 | vlan_configs | Uplink per cluster network: `cluster_network`, `nics`, optional `bond_mode`, `mtu`, `node_selector` | `map(object)` | `{}` | no |
 | create_vm_network | Create the VM network | `bool` | `false` | no |
@@ -90,9 +90,9 @@ StorageClass.
 | vm_network_cidr | VM network route CIDR; required with a gateway | `string` | `""` | no |
 | vm_network_dhcp_server_ip | DHCP server Harvester queries for the route in auto mode; can't be combined with gateway/CIDR | `string` | `""` | no |
 | manage_storage_network | Configure the `storage-network` setting | `bool` | `false` | no |
-| storage_network_vlan | Storage VLAN ID | `number` | `0` | no |
-| storage_network_cluster_network | Storage cluster network | `string` | `""` | no |
-| storage_network_range | Storage IP range (CIDR) | `string` | `""` | no |
+| storage_network_vlan | Storage VLAN ID (1–4094) | `number` | `0` | when storage network |
+| storage_network_cluster_network | Storage cluster network | `string` | `""` | when storage network |
+| storage_network_range | Storage IP range (CIDR) | `string` | `""` | when storage network |
 | storage_network_exclude_ranges | Excluded CIDRs. With RWX sharing, include guest-cluster VM IPs. | `list(string)` | `[]` | no |
 | storage_network_timeout_seconds | Wait for the storage network to apply | `number` | `1200` | no |
 | network_wait_timeout_seconds | Wait for the storage VLAN status to be ready | `number` | `600` | no |
