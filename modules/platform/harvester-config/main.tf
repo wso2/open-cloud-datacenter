@@ -177,9 +177,15 @@ resource "harvester_setting" "storage_network" {
       condition     = var.storage_network_cluster_network != ""
       error_message = "storage_network_cluster_network is required when manage_storage_network = true."
     }
+    # Mirrors Harvester's checkNetworkVlanValid: 0 (untagged) is valid on custom
+    # cluster networks, but 0 and 1 are rejected on mgmt.
     precondition {
-      condition     = var.storage_network_vlan >= 1 && var.storage_network_vlan <= 4094
-      error_message = "storage_network_vlan must be a VLAN ID between 1 and 4094 when manage_storage_network = true."
+      condition     = var.storage_network_vlan >= 0 && var.storage_network_vlan <= 4094
+      error_message = "storage_network_vlan must be between 0 and 4094 (0 = untagged) when manage_storage_network = true."
+    }
+    precondition {
+      condition     = !(var.storage_network_cluster_network == "mgmt" && var.storage_network_vlan <= 1)
+      error_message = "storage_network_vlan 0 and 1 are not allowed on the mgmt cluster network."
     }
     precondition {
       condition     = can(cidrhost(var.storage_network_range, 0))
