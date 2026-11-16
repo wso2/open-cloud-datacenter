@@ -90,7 +90,7 @@ StorageClass.
 | vm_network_cidr | VM network route CIDR; required with a gateway | `string` | `""` | no |
 | vm_network_dhcp_server_ip | DHCP server Harvester queries for the route in auto mode; can't be combined with gateway/CIDR | `string` | `""` | no |
 | manage_storage_network | Configure the `storage-network` setting | `bool` | `false` | no |
-| storage_network_vlan | Storage VLAN ID (1–4094) | `number` | `0` | when storage network |
+| storage_network_vlan | Storage VLAN ID: 0–4094 (0 = untagged); 0 and 1 not allowed on `mgmt` | `number` | `0` | when storage network |
 | storage_network_cluster_network | Storage cluster network | `string` | `""` | when storage network |
 | storage_network_range | Storage IP range (CIDR) | `string` | `""` | when storage network |
 | storage_network_exclude_ranges | Excluded CIDRs. With RWX sharing, include guest-cluster VM IPs. | `list(string)` | `[]` | no |
