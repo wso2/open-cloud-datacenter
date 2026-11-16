@@ -90,7 +90,7 @@ variable "manage_storage_network" {
 
 variable "storage_network_vlan" {
   type        = number
-  description = "VLAN ID for the storage network (e.g. 699)."
+  description = "VLAN ID for the storage network (e.g. 699). 0 = untagged; 0 and 1 are not allowed on mgmt."
   default     = 0
 }
 
