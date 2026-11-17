@@ -45,10 +45,6 @@ variable "vm_network_name" {
   type        = string
   description = "Name of the VM network to create (without namespace). Required when create_vm_network = true."
   default     = ""
-  validation {
-    condition     = !var.create_vm_network || var.vm_network_name != ""
-    error_message = "vm_network_name is required when create_vm_network = true."
-  }
 }
 
 variable "vm_network_cluster_network" {
