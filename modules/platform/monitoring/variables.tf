@@ -97,3 +97,21 @@ variable "hp_volume_stuck_for" {
   default     = "3m"
   description = "Duration an hp-volume pod must be non-Running before alerting."
 }
+
+variable "virt_launcher_crashloop_for" {
+  type        = string
+  default     = "2m"
+  description = "Duration a virt-launcher pod must be crash-looping before alerting."
+}
+
+variable "hp_volume_map_device_for" {
+  type        = string
+  default     = "2m"
+  description = "Duration an hp-volume MapDevice failure must persist before alerting."
+}
+
+variable "stale_volume_attachment_for" {
+  type        = string
+  default     = "2m"
+  description = "Duration a stale VolumeAttachment must block before alerting."
+}
