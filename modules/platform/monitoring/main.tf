@@ -596,7 +596,7 @@ resource "kubernetes_manifest" "prometheus_rule_vm" {
             {
               alert  = "VirtLauncherCrashLoop"
               expr   = "increase(kube_pod_container_status_restarts_total{pod=~\"virt-launcher-.*\"}[15m]) > 3"
-              for    = "0m"
+              for    = var.virt_launcher_crashloop_for
               labels = { severity = "critical" }
               annotations = {
                 summary     = "VM pod {{ $labels.pod }} restarted {{ $value }} times in 15m"
@@ -618,7 +618,7 @@ resource "kubernetes_manifest" "prometheus_rule_vm" {
             {
               alert  = "HpVolumeMapDeviceFailed"
               expr   = "kube_event_count{involvedObject_kind=\"Pod\", involvedObject_namespace=\"cpd-dp\", reason=\"FailedMount\"} > 0"
-              for    = "0m"
+              for    = var.hp_volume_map_device_for
               labels = { severity = "critical" }
               annotations = {
                 summary     = "hp-volume pod reporting FailedMount (exit status 32)"
@@ -629,7 +629,7 @@ resource "kubernetes_manifest" "prometheus_rule_vm" {
             {
               alert  = "StaleVolumeAttachmentBlocking"
               expr   = "increase(kube_event_count{reason=\"FailedAttachVolume\", involvedObject_kind=\"Pod\"}[10m]) > 3"
-              for    = "0m"
+              for    = var.stale_volume_attachment_for
               labels = { severity = "critical" }
               annotations = {
                 summary     = "Pod {{ $labels.involvedObject_name }} has >3 FailedAttachVolume events in 10m"
