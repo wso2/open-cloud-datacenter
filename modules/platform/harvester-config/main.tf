@@ -79,6 +79,15 @@ resource "harvester_network" "vm_network" {
   # Auto mode only: which DHCP server Harvester asks for the route.
   route_dhcp_server_ip = var.vm_network_gateway == "" && var.vm_network_dhcp_server_ip != "" ? var.vm_network_dhcp_server_ip : null
 
+  # A precondition, not a variable validation: validations that reference
+  # another variable (create_vm_network) need Terraform 1.9, above our >= 1.5.
+  lifecycle {
+    precondition {
+      condition     = var.vm_network_name != ""
+      error_message = "vm_network_name is required when create_vm_network = true."
+    }
+  }
+
   # A VLAN network only becomes ready once its cluster network has an uplink.
   depends_on = [
     kubernetes_namespace.harvester_ns,
