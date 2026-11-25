@@ -143,16 +143,42 @@ StorageClass.
   **Changing a replica count means two different things, and only one of them
   involves this module:**
 
-  - *For volumes provisioned from now on* — `numberOfReplicas` is read when a
-    volume is created. Create a class carrying the new count and move
-    `storageclass.kubernetes.io/is-default-class=true` onto it. Harvester's
-    webhook rejects a second default class, so clear the annotation on the old
-    one first. Keep the old class as long as anything references it; nothing
-    needs migrating, and it can be retired later with `terraform state rm`
-    followed by a `kubectl delete`.
   - *For volumes that already exist* — the StorageClass has no say. Their
     replica count was fixed at provisioning and is changed per volume on the
-    Longhorn side, whatever this module's classes say.
+    Longhorn side, whatever this module's classes say. Nothing below affects
+    them.
+  - *For volumes provisioned from now on* — `numberOfReplicas` is read when a
+    volume is created, so a new class is needed. The procedure differs between
+    the two classes, because only the default class is selected by annotation.
+
+  **The default class** (`storage_class_name`, `storage_class_replicas`):
+
+  1. Point `storage_class_name` at a new name and `storage_class_replicas` at
+     the new count, in the same change. Terraform will refuse this while the
+     old class is still in state, so first `terraform state rm` the old
+     `harvester_storageclass.default[0]`. The live class is left alone.
+  2. Apply. Terraform creates the new class. The module clears
+     `is-default-class` on `harvester-longhorn` and sets it on the new class;
+     Harvester's webhook rejects two defaults, so the old class must lose the
+     annotation first — clear it by hand if the apply reports a conflict.
+  3. Once nothing references the old class, delete it with `kubectl`.
+
+  Doing step 3 before step 1 leaves the configuration still describing the old
+  class with `is_default = true`, and the next apply recreates it and fights the
+  new default. Change the configuration first, then delete.
+
+  **The RWX class** (`rwx_storage_class_replicas`) has no annotation to move —
+  workloads select `longhorn-rwx` by name — so it is repointed per workload:
+
+  1. Create a second RWX class under a different name, with the new replica
+     count and otherwise the same provisioner and parameters. The module's
+     `longhorn-rwx` name is not configurable, so this one lives outside the
+     module for now.
+  2. Update the workloads that need the new count to reference it. Existing
+     PVCs keep pointing at the old class; a StorageClass change never rewrites
+     them.
+  3. Keep the old class while any workload still references it. Once unused,
+     `terraform state rm` the resource and `kubectl delete` the class.
 
   **To tear the cluster down**, remember that `prevent_destroy` lives in the
   configuration, not in state. `terraform destroy` fails while the module is

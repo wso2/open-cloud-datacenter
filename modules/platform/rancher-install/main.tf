@@ -82,7 +82,8 @@ locals {
         }
       }
 
-      extraEnv = concat(var.extra_env, local._ca_rollout_env)
+      # coalesce: extra_env is nullable, and concat() rejects a null argument.
+      extraEnv = concat(coalesce(var.extra_env, []), local._ca_rollout_env)
 
       privateCA = local.publishes_private_ca
     }

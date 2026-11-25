@@ -180,6 +180,20 @@ server node that still means an etcd member is destroyed and rejoined, so do it
 one node at a time and let the cluster converge in between. Renumbering a whole
 cluster is a rebuild, not an edit.
 
+**Delete the old Node object before the replacement boots.** The replacement VM
+keeps its name, so RKE2 tries to register under a node name that already exists.
+The surviving server still holds that node's `<name>.node-password.rke2` secret
+in `kube-system`, the new VM has no `/etc/rancher/node/password` to match it, and
+registration is refused with *"Node password rejected, duplicate hostname"*. This
+applies to servers, agents, and a rebuilt cluster-init node. Terraform cannot do
+it — the cluster is not its to manage here — so it is a manual step in the
+procedure:
+
+```bash
+# After `terraform apply` destroys the VM, before the replacement finishes booting:
+kubectl delete node <vm-name>        # also removes its node-password secret
+```
+
 **The cluster-init node is handled specially.** `cluster-init` is correct
 exactly once, at the very first bootstrap. A rebuilt init node comes up with a
 fresh boot disk, so booting it with `cluster-init` again would start a second
@@ -187,21 +201,32 @@ empty datastore beside the surviving servers and split etcd irrecoverably.
 
 That node therefore receives two configs — `config.yaml` with `cluster-init`
 and `config.join.yaml` with `server: <kube_api_host>:9345` — and chooses
-between them at boot by probing the supervisor endpoint:
+between them at boot by probing the supervisor, both through the load balancer
+**and on each peer server's address directly**:
 
 | Probe result | Meaning | Config used |
 |---|---|---|
-| nothing answers | first bootstrap, no cluster yet | `cluster-init` |
-| supervisor answers | a cluster is already running | join it |
+| any server answers | a cluster is already running | join it |
+| nothing answers anywhere | no cluster reachable | `cluster-init`, with a warning |
 
-The probe is six attempts over ~30s and the choice is logged to
-`/var/log/rke2-bootstrap.log`. On a first bootstrap the load balancer has no
-healthy backend, so the probe fails and `cluster-init` stands.
+Peers are probed directly because a load-balancer outage would otherwise look
+exactly like a brand-new cluster. The probe is six rounds over ~30s and the
+choice is logged to `/var/log/rke2-bootstrap.log`.
 
-The remaining gap is disaster recovery: if **every** server is down and the init
-node is rebuilt, nothing answers the probe and it will start a new datastore.
-Restore etcd from a snapshot rather than rebuilding the init node into a dead
-cluster.
+**A failed probe is still not proof that no cluster exists.** A network
+partition, or an outage affecting every server, produces the same silence as a
+greenfield install, and the node would then initialise a second datastore. On a
+cluster that is already running, close that off for good:
+
+```hcl
+cluster_already_bootstrapped = true
+```
+
+That removes `cluster-init` from every node, so a rebuild can only ever join.
+Set it once the cluster is up and leave it set; the only reason to flip it back
+is building a new cluster from scratch. With it set, a node rebuilt during a
+full outage waits to join rather than splitting the cluster — which is the
+correct behaviour, since the fix there is restoring etcd from a snapshot.
 
 ## Key inputs
 
@@ -218,6 +243,7 @@ cluster.
 | node_subnet_prefix | CIDR prefix length of the node network | `number` | `24` | no |
 | extra_tls_sans | Additional apiserver certificate SANs | `list(string)` | `[]` | no |
 | ingress_controller | RKE2 ingress controllers; first is the default class | `list(string)` | `["traefik"]` | no |
+| cluster_already_bootstrapped | Forbid `cluster-init` on every node; set true once the cluster exists | `bool` | `false` | no |
 | vm_cpu / vm_memory / vm_disk_size | Per-node hardware | | `8` / `16Gi` / `40Gi` | no |
 | create_ssh_key | Generate and register an SSH key | `bool` | `true` | no |
 | ssh_public_keys | OpenSSH public key lines installed for `ubuntu`; required when `create_ssh_key = false` | `list(string)` | `[]` | no |
