@@ -90,8 +90,24 @@ module "harvester_integration" {
 
   Set `manage_coredns = false` when Rancher is on a publicly resolvable domain (the patch is
   pointless) or when the stock Corefile does not match. Set it at creation time — flipping
-  `true` → `false` later destroys the `kubernetes_config_map_v1_data`, which removes the `Corefile`
-  key and breaks cluster DNS; `terraform state rm` the resource instead.
+  `true` → `false` later destroys the `kubernetes_config_map_v1_data`, which removes the
+  `Corefile` key and breaks cluster DNS.
+
+  To stop managing the Corefile on a cluster where the resource already exists, do **both**,
+  in this order:
+
+  ```bash
+  # 1. Terraform forgets the object; the live Corefile is left untouched.
+  terraform state rm \
+    'module.<name>.kubernetes_config_map_v1_data.harvester_coredns_patch[0]'
+
+  # 2. Then set manage_coredns = false so the next plan does not recreate it.
+  ```
+
+  Neither step works alone: step 2 first *is* the destroy that breaks DNS, and step 1 alone
+  leaves `manage_coredns = true`, so the next apply recreates the resource and force-writes
+  the Corefile again. Confirm the following plan shows neither a create nor a destroy for
+  that address.
 - The supported RKE2 mechanism for changing this Corefile is a `HelmChartConfig` for `rke2-coredns`
   in `kube-system` with `valuesContent`, which lets the chart keep rendering it. The k3s-style
   `*-custom` ConfigMap with `.override`/`.server` keys does **not** exist in `rke2-coredns`.

@@ -24,6 +24,13 @@ locals {
   # ingress.tls.source = "secret" the certificate is supplied here instead.
   tls_from_secret = var.tls_source == "secret"
 
+  # Whether this module publishes a private CA bundle as the tls-ca secret.
+  # Drives both that secret's count and the chart's privateCA value: with
+  # privateCA = false the chart passes --no-cacerts and never mounts tls-ca, so
+  # creating the secret without the flag leaves it inert and Rancher clears its
+  # CA certs instead of serving the bundle to downstream agents.
+  publishes_private_ca = var.tls_source == "secret" && var.tls_ca_cert != ""
+
   # Rendered as a single values document rather than many set{} blocks: nested
   # structures and lists survive intact and the whole thing stays diffable.
   rancher_values = merge(
@@ -58,8 +65,25 @@ locals {
       }
 
       extraEnv = var.extra_env
-    },
-    var.additional_values,
+
+      privateCA = local.publishes_private_ca
+    }
+  )
+
+  # additional_values is NOT merged in above. Terraform's merge() is shallow, so
+  # { ingress = { pathType = "Prefix" } } would replace the whole ingress object
+  # and silently drop ingressClassName, extraAnnotations and tls.source — the
+  # chart would then default to a Rancher-issued certificate and demand
+  # cert-manager, while the preconditions below still passed because they read
+  # var.tls_source rather than the effective values.
+  #
+  # Handing Helm a second values document instead gets a deep merge, so a nested
+  # override replaces only the leaf it names. Note Helm still replaces lists
+  # wholesale (extraEnv, for example) — that is normal chart behaviour.
+  additional_values_yaml = (
+    try(length(var.additional_values), 0) > 0
+    ? [yamlencode(var.additional_values)]
+    : []
   )
 }
 
@@ -110,7 +134,7 @@ resource "kubernetes_secret_v1" "tls_rancher_ingress" {
 # The private CA bundle Rancher serves to agents, when the ingress certificate
 # is signed by a CA the agents do not already trust.
 resource "kubernetes_secret_v1" "tls_ca" {
-  count = local.tls_from_secret && var.tls_ca_cert != "" ? 1 : 0
+  count = local.publishes_private_ca ? 1 : 0
 
   metadata {
     name      = "tls-ca"
@@ -153,15 +177,29 @@ resource "helm_release" "rancher" {
   version    = var.rancher_version
   namespace  = kubernetes_namespace_v1.cattle_system.metadata[0].name
 
-  values = [yamlencode(local.rancher_values)]
+  # Two documents, merged deeply by Helm in order. See additional_values_yaml.
+  values = concat([yamlencode(local.rancher_values)], local.additional_values_yaml)
 
   # Kept out of the values document so it is not rendered into plan output.
   # Only read by the chart on first install; later changes do not rotate the
   # admin password, which is why a change here must not force a replacement.
+  # type = "literal" + jsonencode, because neither alone is safe:
+  #   "auto"    — strvals parsing; a comma splits the password into a second
+  #               entry with no "=", failing the release, and a digits-only
+  #               password becomes an integer.
+  #   "string"  — forces a string but still splits on commas.
+  #   "literal" — the provider YAML-parses "name: value", so commas survive but
+  #               a digits-only password is still read as a number.
+  # jsonencode emits a quoted YAML scalar, so the unmarshal always yields the
+  # exact string, commas, quotes, digits and all.
+  #
+  # "literal" is accepted by the provider's validator but the registry docs list
+  # only "auto" and "string"; verified against helm ~> 3.3.
   set_sensitive = [
     {
       name  = "bootstrapPassword"
-      value = var.bootstrap_password
+      type  = "literal"
+      value = jsonencode(var.bootstrap_password)
     },
   ]
 
@@ -173,6 +211,24 @@ resource "helm_release" "rancher" {
     precondition {
       condition     = !local.tls_from_secret || (var.tls_cert != "" && var.tls_key != "")
       error_message = "tls_cert and tls_key are required when tls_source = \"secret\"."
+    }
+
+    # The module owns the TLS wiring: tls_source decides whether the
+    # tls-rancher-ingress secret is created and which preconditions apply.
+    # Overriding it from additional_values would desync the chart from those
+    # decisions, so reject it rather than silently disagreeing.
+    precondition {
+      condition     = try(var.additional_values.ingress.tls.source, null) == null
+      error_message = "Set the TLS source with the tls_source variable, not additional_values.ingress.tls.source — the module keys secret creation and validation off it."
+    }
+
+    # Likewise the hostname. It is the module's identity: the rancher_url and
+    # rancher_hostname outputs are built from it and read by downstream layers
+    # over remote state, and tls_cert/tls_key are issued for it. An override
+    # here would point those outputs and that certificate at the wrong name.
+    precondition {
+      condition     = try(var.additional_values.hostname, null) == null
+      error_message = "Set the hostname with the rancher_hostname variable, not additional_values.hostname — the module's outputs and TLS secret are derived from it."
     }
 
     # Rancher issues its own certificate through cert-manager unless one is

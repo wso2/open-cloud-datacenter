@@ -96,24 +96,35 @@ resource "harvester_network" "vm_network" {
 }
 
 # ── Input validation ──────────────────────────────────────────────────────────
-check "vm_network_route_cidr_required" {
-  assert {
-    condition     = !var.create_vm_network || var.vm_network_gateway == "" || var.vm_network_cidr != ""
-    error_message = "vm_network_cidr is required when vm_network_gateway is set."
-  }
-}
+# These are preconditions, not check blocks: each describes an input combination
+# that is always a mistake, and a check block only warns — the apply would still
+# succeed having quietly built something other than what was asked for. The worst
+# case is manage_rwx_network = true with manage_storage_network = false, which
+# zeroes the count on harvester_setting.rwx_network and configures no RWX at all.
+#
+# They hang off a resource of their own because every other resource here is
+# conditional, so none of them is a reliable anchor — in particular the skipped
+# RWX resource cannot enforce its own prerequisite. terraform_data costs nothing
+# at apply time and is never replaced (no triggers_replace).
+#
+# Variable validation blocks would be the lighter mechanism, but all three span
+# more than one variable, which needs Terraform >= 1.9; this module supports 1.5.
+resource "terraform_data" "input_validation" {
+  lifecycle {
+    precondition {
+      condition     = !var.create_vm_network || var.vm_network_gateway == "" || var.vm_network_cidr != ""
+      error_message = "vm_network_cidr is required when vm_network_gateway is set."
+    }
 
-check "vm_network_dhcp_server_ip_auto_only" {
-  assert {
-    condition     = var.vm_network_dhcp_server_ip == "" || (var.vm_network_gateway == "" && var.vm_network_cidr == "")
-    error_message = "vm_network_dhcp_server_ip is for auto route mode; leave vm_network_gateway and vm_network_cidr empty."
-  }
-}
+    precondition {
+      condition     = var.vm_network_dhcp_server_ip == "" || (var.vm_network_gateway == "" && var.vm_network_cidr == "")
+      error_message = "vm_network_dhcp_server_ip is for auto route mode; leave vm_network_gateway and vm_network_cidr empty."
+    }
 
-check "rwx_network_requires_storage_network" {
-  assert {
-    condition     = !var.manage_rwx_network || var.manage_storage_network
-    error_message = "manage_rwx_network shares the storage network, so manage_storage_network must be true."
+    precondition {
+      condition     = !var.manage_rwx_network || var.manage_storage_network
+      error_message = "manage_rwx_network shares the storage network, so manage_storage_network must be true."
+    }
   }
 }
 
@@ -132,7 +143,10 @@ resource "terraform_data" "wait_storage_vlan_ready" {
 
   provisioner "local-exec" {
     environment = {
-      KUBECONFIG      = var.harvester_kubeconfig_path
+      # pathexpand: harvester_bootstrap writes the kubeconfig to the expanded
+      # path, but kubectl does not expand a leading ~ itself. No-op for
+      # absolute and relative paths.
+      KUBECONFIG      = pathexpand(var.harvester_kubeconfig_path)
       CLUSTER_NETWORK = var.storage_network_cluster_network
       TIMEOUT         = tostring(var.network_wait_timeout_seconds)
     }
@@ -216,13 +230,9 @@ resource "harvester_setting" "storage_network" {
 resource "terraform_data" "wait_storage_network" {
   count = var.manage_storage_network ? 1 : 0
 
-  triggers_replace = {
-    value = harvester_setting.storage_network[0].value
-  }
-
   provisioner "local-exec" {
     environment = {
-      KUBECONFIG = var.harvester_kubeconfig_path
+      KUBECONFIG = pathexpand(var.harvester_kubeconfig_path)
       VALUE_HASH = sha1(harvester_setting.storage_network[0].value)
       TIMEOUT    = tostring(var.storage_network_timeout_seconds)
     }
@@ -247,6 +257,15 @@ resource "terraform_data" "wait_storage_network" {
   # Same KUBECONFIG fallback risk as wait_storage_vlan_ready; also guards the
   # mgmt path, where that wait is skipped.
   lifecycle {
+    # Re-run after ANY apply of the setting, not just when its final value
+    # differs. Keying on harvester_setting.storage_network[0].value missed drift
+    # repair: value is a configured argument, so when Terraform pushes the
+    # setting back to the configured value the trigger is identical before and
+    # after, no replacement is planned, and the wait is skipped — while Harvester
+    # is still rolling the change out. The next setting is then liable to be
+    # rejected for arriving while this one is "In Progress".
+    replace_triggered_by = [harvester_setting.storage_network[0]]
+
     precondition {
       condition     = var.harvester_kubeconfig_path != ""
       error_message = "harvester_kubeconfig_path is required when manage_storage_network = true: the readiness waits run kubectl against it."
@@ -309,7 +328,10 @@ resource "harvester_storageclass" "default" {
   }
 
   # Parameters are immutable, so a replica change would delete + recreate the
-  # class. Fail the plan instead; create a new class under a new name.
+  # class, taking every PVC bound to it. Fail the plan instead. Note this also
+  # blocks changing storage_class_name (it is this resource's name), setting
+  # manage_storage_class = false, and terraform destroy. See README.md §Notes
+  # for the out-of-band replacement procedure.
   lifecycle {
     prevent_destroy = true
   }

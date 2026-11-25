@@ -29,8 +29,11 @@ locals {
   # everything else joins as an agent.
   _servers = [for n in local._nodes_flat : n if n.control_plane || n.etcd]
 
-  # The first server bootstraps etcd (cluster-init); the rest join it.
-  _init_key = length(local._servers) > 0 ? local._servers[0].key : ""
+  # The first etcd-bearing server bootstraps the datastore (cluster-init); the
+  # rest join it. It has to carry etcd — cluster-init initialises the embedded
+  # etcd, so electing a control-plane-only node would be incoherent.
+  _etcd_nodes = [for n in local._nodes_flat : n if n.etcd]
+  _init_key   = length(local._etcd_nodes) > 0 ? local._etcd_nodes[0].key : ""
 
   node_map = {
     for n in local._nodes_flat : n.key => merge(n, {
@@ -53,8 +56,15 @@ locals {
     var.extra_tls_sans,
   ))
 
-  ssh_key_ids    = var.create_ssh_key ? [harvester_ssh_key.bootstrap_key[0].id] : var.ssh_key_ids
-  ssh_public_key = var.create_ssh_key ? tls_private_key.bootstrap_key[0].public_key_openssh : ""
+  ssh_key_ids = var.create_ssh_key ? [harvester_ssh_key.bootstrap_key[0].id] : var.ssh_key_ids
+  # The generated key when we make one, otherwise whatever the caller supplied.
+  # ssh_key_ids does not feed this: the provider does not inject VM ssh_keys into
+  # cloud-init once user_data_secret_name is set, which this module always sets.
+  ssh_public_keys = compact(
+    var.create_ssh_key
+    ? [tls_private_key.bootstrap_key[0].public_key_openssh]
+    : var.ssh_public_keys
+  )
 
   # RKE2 config per node, built as data and serialised — never string-assembled.
   #
@@ -81,6 +91,18 @@ locals {
         },
         node.is_init ? { cluster-init = true } : {},
         node.is_init ? {} : { server = local.join_url },
+
+        # RKE2 runs every server component unless told otherwise, so the pool
+        # role flags have to be expressed as explicit disables. Without these a
+        # pool declared etcd-only would still serve the API, and one declared
+        # control-plane-only would still join the etcd quorum.
+        node.control_plane ? {} : {
+          disable-apiserver          = true
+          disable-controller-manager = true
+          disable-scheduler          = true
+        },
+        node.etcd ? {} : { disable-etcd = true },
+
         var.extra_server_config,
       )) if node.is_server
     },
@@ -176,7 +198,7 @@ resource "harvester_cloudinit_secret" "node" {
 
   user_data = templatefile("${path.module}/templates/cloud-init.yaml.tpl", {
     password        = var.vm_password
-    ssh_public_key  = local.ssh_public_key
+    ssh_public_keys = local.ssh_public_keys
     rke2_version    = var.rke2_version
     is_server       = each.value.is_server
     kube_api_host   = var.kube_api_host
@@ -191,6 +213,39 @@ resource "harvester_cloudinit_secret" "node" {
     subnet_prefix = var.node_subnet_prefix
     dns_servers   = length(var.dns_servers) > 0 ? var.dns_servers : ["8.8.8.8"]
   })
+}
+
+# ── Input validation ──────────────────────────────────────────────────────────
+# A precondition rather than a variable validation block: the condition spans
+# two variables, which inside a validation needs Terraform >= 1.9, and this
+# module supports >= 1.5 (see versions.tf). A dedicated resource because every
+# other resource here is conditional or keyed per node.
+resource "terraform_data" "input_validation" {
+  lifecycle {
+    precondition {
+      condition     = var.create_ssh_key || length(var.ssh_public_keys) > 0
+      error_message = "ssh_public_keys is required when create_ssh_key = false, otherwise no key reaches the nodes and only password login works."
+    }
+  }
+}
+
+# ── Node address identity ─────────────────────────────────────────────────────
+# A node's static IP reaches the guest only through the cloud-init secret, and
+# the VM references that secret by name — a name keyed on the pool and index,
+# not on the address. So changing an IP rewrites the secret in place and leaves
+# every VM argument identical: no update, so restart_after_update never fires.
+# A restart would not be enough anyway, since cloud-init renders network
+# configuration on an instance's first boot only. The guest would keep the old
+# address while node_ips and the other outputs reported the new one, and
+# anything built from those outputs would point at an IP that node does not hold.
+#
+# Carrying the address as its own object gives the VM something to key
+# replacement off. Adding this to an already-applied cluster is a no-op: the
+# object is created, and a creation does not trigger replace_triggered_by.
+resource "terraform_data" "node_address" {
+  for_each = local.node_map
+
+  input = each.value.ip
 }
 
 # ── Node VMs ──────────────────────────────────────────────────────────────────
@@ -238,5 +293,11 @@ resource "harvester_virtualmachine" "node" {
   cloudinit {
     user_data_secret_name    = harvester_cloudinit_secret.node[each.key].name
     network_data_secret_name = harvester_cloudinit_secret.node[each.key].name
+  }
+
+  lifecycle {
+    # Rebuild the node when its static IP changes; see terraform_data
+    # .node_address above for why an in-place update cannot deliver it.
+    replace_triggered_by = [terraform_data.node_address[each.key]]
   }
 }

@@ -58,7 +58,33 @@ installed version depends on the day the apply ran.
 ## Values
 
 Typed variables cover the values that normally get changed; everything else goes
-through `additional_values`, which is merged over them. The defaults render to:
+through `additional_values`, which is passed to Helm as a **second values
+document** rather than merged in Terraform. Helm merges values documents deeply,
+so a nested override replaces only the leaf it names:
+
+```hcl
+additional_values = { ingress = { pathType = "Prefix" } }
+# -> ingress.pathType is added; ingressClassName, extraAnnotations and
+#    tls.source all survive.
+```
+
+Terraform's `merge()` is shallow and would have replaced the whole `ingress`
+object, dropping the TLS source and leaving the chart to demand cert-manager.
+Lists are still replaced wholesale (`extraEnv`, for instance) — that is how Helm
+merges, not a module choice.
+
+Two keys cannot be set this way, and a precondition rejects each:
+
+- **`ingress.tls.source`** — the module keys secret creation and its own TLS
+  preconditions off `tls_source`.
+- **`hostname`** — the `rancher_url` and `rancher_hostname` outputs are built
+  from `rancher_hostname`, downstream layers read them over remote state, and
+  `tls_cert`/`tls_key` are issued for that name. An override would leave the
+  outputs and the certificate pointing at a different host than the chart serves.
+
+Use the typed `tls_source` and `rancher_hostname` variables instead.
+
+The defaults render to:
 
 ```yaml
 hostname: <rancher_hostname>
@@ -132,6 +158,17 @@ release fails the plan if cert-manager is missing when it is needed, or if
 `tls-ca` secret, needed only when the certificate is signed by a CA downstream
 agents do not already trust.
 
+### Private CA
+
+Setting `tls_ca_cert` alongside `tls_source = "secret"` creates the `tls-ca`
+secret **and** sets the chart's `privateCA = true`. Both are driven by one
+local, because the chart only mounts `tls-ca` and omits `--no-cacerts` when
+that flag is set — publishing the secret without it leaves the bundle unused
+and Rancher clearing its CA certificates, so downstream agents never receive it.
+
+Leave `tls_ca_cert` empty for a publicly trusted certificate; `privateCA` stays
+`false` and the chart passes `--no-cacerts`, which is correct there.
+
 ## A note on `helm_release`
 
 The rest of this catalog installs charts with the helm CLI through
@@ -153,7 +190,7 @@ RKE2 apiserver through the load balancer, with no Rancher proxy in the path.
 | ingress_extra_annotations | `ingress.extraAnnotations` on the Rancher Ingress | `map(string)` | `{}` | no |
 | tls_source | `secret`, `rancher` or `letsEncrypt` | `string` | `"secret"` | no |
 | tls_cert / tls_key | Certificate material for `tls_source = "secret"` | `string` | `""` | no |
-| tls_ca_cert | CA bundle published as the `tls-ca` secret | `string` | `""` | no |
+| tls_ca_cert | CA bundle published as the `tls-ca` secret; also sets the chart's `privateCA` | `string` | `""` | no |
 | install_cert_manager | Install cert-manager alongside Rancher | `bool` | `false` | no |
 | psp_enabled | `global.cattle.psp.enabled` | `bool` | `false` | no |
 | extra_env | `extraEnv` list | `list(object)` | `GODEBUG=x509negativeserial=1` | no |

@@ -145,13 +145,28 @@ variable "create_ssh_key" {
 
 variable "ssh_key_ids" {
   type        = list(string)
-  description = "Existing Harvester SSH key IDs to attach when create_ssh_key = false."
-  default     = []
+  description = <<-EOT
+    Existing Harvester SSH key IDs to attach to the VMs when
+    create_ssh_key = false.
 
-  validation {
-    condition     = var.create_ssh_key || length(var.ssh_key_ids) > 0
-    error_message = "ssh_key_ids is required when create_ssh_key = false, otherwise the nodes are unreachable."
-  }
+    These are attached to the VirtualMachine object, which is useful for
+    visibility in Harvester, but they do NOT reach the guest: the provider does
+    not inject ssh_keys into cloud-init when user_data_secret_name is set, and
+    this module always sets it. Supply ssh_public_keys for key-based access.
+  EOT
+  default     = []
+}
+
+variable "ssh_public_keys" {
+  type        = list(string)
+  description = <<-EOT
+    OpenSSH public key lines to install for the 'ubuntu' user, used when
+    create_ssh_key = false. This is the only path by which a key reaches the
+    guest — see ssh_key_ids.
+
+    Ignored when create_ssh_key = true, which generates its own key pair.
+  EOT
+  default     = []
 }
 
 # ── RKE2 ──────────────────────────────────────────────────────────────────────

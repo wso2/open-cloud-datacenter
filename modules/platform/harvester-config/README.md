@@ -118,13 +118,47 @@ StorageClass.
 ## Notes
 
 - **The StorageClasses are protected with `prevent_destroy`.** StorageClass
-  parameters can't be changed after creation, so changing a replica count
-  would recreate the class. The plan fails instead. To change the replica
-  count, create a new class under a new name.
+  parameters are immutable, so a replica change would delete and recreate the
+  class — taking every PVC bound to it with it. The plan fails instead.
+
+  This blocks more than the replica count. Any of these is rejected while the
+  resources stay configured:
+
+  | Change | Why it is a destroy |
+  |---|---|
+  | `storage_class_replicas` / `rwx_storage_class_replicas` | immutable `parameters` → replace |
+  | `storage_class_name` | it *is* the resource's `name` → replace |
+  | `manage_storage_class = false` | `count` drops to 0 → destroy |
+  | `terraform destroy` | destroy |
+
+  Note the second row: you cannot "rename to a new class" through this module,
+  because the rename replaces the same resource address rather than adding a
+  second one.
+
+  **To change a replica count**, the class has to be replaced out of band:
+
+  1. Create the replacement class on the cluster yourself, under a new name and
+     with the replica count you want.
+  2. Move `storageclass.kubernetes.io/is-default-class=true` to it, and clear
+     the annotation on the old class.
+  3. Migrate volumes onto the new class. Existing PVCs keep referencing the old
+     one — a StorageClass change does not rewrite them.
+  4. Only once nothing is bound to it, retire the old class:
+     `terraform state rm` the resource, then delete it with `kubectl`. Adopting
+     the new class into this module afterwards means `terraform import`.
+
+  **To tear the cluster down**, remember that `prevent_destroy` lives in the
+  configuration, not in state. `terraform destroy` fails while the module is
+  still called, but removing the `module` block leaves the StorageClasses as
+  orphans with no lifecycle rule — the next apply deletes them without
+  complaint. The protection is against an accidental replace, not against
+  deliberate removal.
 - **The default flag isn't restored automatically.** Removing the module
   doesn't set `harvester-longhorn` back to default. Do it by hand if needed:
   `kubectl annotate sc harvester-longhorn storageclass.kubernetes.io/is-default-class=true --overwrite`.
 - **`rwx-network` changes need RWX volumes detached.** Harvester also blocks a
   new change while the previous one is still `In Progress`.
 - **The storage network can't be cleared while `rwx-network` shares it.**
-  Terraform destroys `rwx-network` first, so destroying the module works.
+  Terraform destroys `rwx-network` first, so the ordering within a destroy is
+  correct — but see the `prevent_destroy` note above for why a plain
+  `terraform destroy` still fails on the StorageClasses.

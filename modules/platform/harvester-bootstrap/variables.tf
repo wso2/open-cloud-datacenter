@@ -18,5 +18,6 @@ variable "password" {
 
 variable "kubeconfig_path" {
   type        = string
+  nullable    = false
   description = "File path the generated admin kubeconfig is written to. Deliberately has no default: the provider's own default (~/.kube/config) would overwrite the operator's kubeconfig."
 }

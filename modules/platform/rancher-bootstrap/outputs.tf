@@ -33,9 +33,14 @@ output "ssh_key_id" {
   description = "Harvester SSH key ID attached to the nodes"
 }
 
+output "ssh_public_keys" {
+  value       = local.ssh_public_keys
+  description = "OpenSSH public key lines installed on the nodes — pass to platform/nginx-lb-vm so the LB accepts the same keys"
+}
+
 output "ssh_public_key" {
-  value       = local.ssh_public_key
-  description = "OpenSSH public key text — pass to platform/nginx-lb-vm so Harvester can match it against ssh_key_ids"
+  value       = try(local.ssh_public_keys[0], "")
+  description = "First entry of ssh_public_keys. Kept for callers that expect a single key; prefer ssh_public_keys, which carries all of them."
 }
 
 output "ssh_private_key" {
