@@ -119,9 +119,14 @@ StorageClass.
 
 - **The StorageClasses are protected with `prevent_destroy`.** StorageClass
   parameters are immutable, so a replica change would delete and recreate the
-  class — taking every PVC bound to it with it. The plan fails instead.
+  class. That is not data loss — deleting a StorageClass leaves existing PVCs,
+  PVs and Longhorn volumes untouched, since a PV just records the class name as
+  a string and reclamation follows claim release, not class deletion. What it
+  does cause is a window with no cluster-default class, during which any PVC
+  created without an explicit `storageClassName` fails. `prevent_destroy` turns
+  that into a failed plan instead.
 
-  This blocks more than the replica count. Any of these is rejected while the
+  It blocks more than the replica count. Any of these is rejected while the
   resources stay configured:
 
   | Change | Why it is a destroy |
@@ -135,17 +140,19 @@ StorageClass.
   because the rename replaces the same resource address rather than adding a
   second one.
 
-  **To change a replica count**, the class has to be replaced out of band:
+  **Changing a replica count means two different things, and only one of them
+  involves this module:**
 
-  1. Create the replacement class on the cluster yourself, under a new name and
-     with the replica count you want.
-  2. Move `storageclass.kubernetes.io/is-default-class=true` to it, and clear
-     the annotation on the old class.
-  3. Migrate volumes onto the new class. Existing PVCs keep referencing the old
-     one — a StorageClass change does not rewrite them.
-  4. Only once nothing is bound to it, retire the old class:
-     `terraform state rm` the resource, then delete it with `kubectl`. Adopting
-     the new class into this module afterwards means `terraform import`.
+  - *For volumes provisioned from now on* — `numberOfReplicas` is read when a
+    volume is created. Create a class carrying the new count and move
+    `storageclass.kubernetes.io/is-default-class=true` onto it. Harvester's
+    webhook rejects a second default class, so clear the annotation on the old
+    one first. Keep the old class as long as anything references it; nothing
+    needs migrating, and it can be retired later with `terraform state rm`
+    followed by a `kubectl delete`.
+  - *For volumes that already exist* — the StorageClass has no say. Their
+    replica count was fixed at provisioning and is changed per volume on the
+    Longhorn side, whatever this module's classes say.
 
   **To tear the cluster down**, remember that `prevent_destroy` lives in the
   configuration, not in state. `terraform destroy` fails while the module is

@@ -328,10 +328,12 @@ resource "harvester_storageclass" "default" {
   }
 
   # Parameters are immutable, so a replica change would delete + recreate the
-  # class, taking every PVC bound to it. Fail the plan instead. Note this also
-  # blocks changing storage_class_name (it is this resource's name), setting
-  # manage_storage_class = false, and terraform destroy. See README.md §Notes
-  # for the out-of-band replacement procedure.
+  # class. Existing PVCs, PVs and Longhorn volumes survive that — a PV only
+  # records the class name as a string — but the recreate leaves a window with
+  # no cluster-default class, where a PVC without an explicit storageClassName
+  # fails. Fail the plan instead. This also blocks changing storage_class_name
+  # (it is this resource's name), setting manage_storage_class = false, and
+  # terraform destroy. See README.md §Notes.
   lifecycle {
     prevent_destroy = true
   }

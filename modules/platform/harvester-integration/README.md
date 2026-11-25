@@ -98,8 +98,11 @@ module "harvester_integration" {
 
   ```bash
   # 1. Terraform forgets the object; the live Corefile is left untouched.
+  # No index: this removes every instance of the resource, matching both the
+  # counted address and the unindexed one left by module versions predating
+  # manage_coredns. Confirm the address first with: terraform state list
   terraform state rm \
-    'module.<name>.kubernetes_config_map_v1_data.harvester_coredns_patch[0]'
+    'module.<name>.kubernetes_config_map_v1_data.harvester_coredns_patch'
 
   # 2. Then set manage_coredns = false so the next plan does not recreate it.
   ```

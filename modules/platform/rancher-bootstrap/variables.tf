@@ -48,9 +48,24 @@ variable "node_pools" {
     error_message = "Every node pool must list at least one IP."
   }
 
+  # Each role is required independently. "control_plane OR etcd somewhere" is not
+  # enough: the roles are rendered as RKE2 component disables, so a cluster with
+  # no etcd node gets disable-etcd on every server and no cluster-init, and one
+  # with no control-plane node gets disable-apiserver everywhere. Both plan
+  # cleanly and boot into something unusable. Pools carrying a single role each
+  # remain valid — only the totals across pools are checked.
   validation {
-    condition     = anytrue([for p in var.node_pools : coalesce(p.control_plane, true) || coalesce(p.etcd, true)])
-    error_message = "At least one node must carry control_plane or etcd; otherwise no node runs rke2-server and the cluster has no API."
+    condition = anytrue([
+      for p in var.node_pools : coalesce(p.etcd, true) && length(p.ips) > 0
+    ])
+    error_message = "At least one node must carry etcd; without it every server is given disable-etcd and the cluster has no datastore."
+  }
+
+  validation {
+    condition = anytrue([
+      for p in var.node_pools : coalesce(p.control_plane, true) && length(p.ips) > 0
+    ])
+    error_message = "At least one node must carry control_plane; without it every server is given disable-apiserver and the cluster has no API server."
   }
 
   validation {

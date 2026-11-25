@@ -78,32 +78,45 @@ locals {
   #
   # yamlencode() is applied inside each comprehension so every value of the
   # resulting map is a string — the map itself needs a consistent value type.
+  # Shared by both server variants below so the role disables cannot drift
+  # between them.
+  _server_common = {
+    for key, node in local.node_map : key => merge(
+      {
+        token   = random_password.rke2_token.result
+        tls-san = local.tls_sans
+
+        # First entry becomes the cluster's default ingress class. Only valid
+        # on server nodes; agents inherit the controllers from the cluster.
+        ingress-controller = var.ingress_controller
+      },
+
+      # RKE2 runs every server component unless told otherwise, so the pool
+      # role flags have to be expressed as explicit disables. Without these a
+      # pool declared etcd-only would still serve the API, and one declared
+      # control-plane-only would still join the etcd quorum.
+      node.control_plane ? {} : {
+        disable-apiserver          = true
+        disable-controller-manager = true
+        disable-scheduler          = true
+      },
+      node.etcd ? {} : { disable-etcd = true },
+
+      var.extra_server_config,
+    ) if node.is_server
+  }
+
   rke2_config_yaml = merge(
     {
       for key, node in local.node_map : key => yamlencode(merge(
-        {
-          token   = random_password.rke2_token.result
-          tls-san = local.tls_sans
+        local._server_common[key],
 
-          # First entry becomes the cluster's default ingress class. Only valid
-          # on server nodes; agents inherit the controllers from the cluster.
-          ingress-controller = var.ingress_controller
-        },
+        # Two conditionals, each against {}, NOT one ternary between
+        # {cluster-init=true} and {server=...}. Terraform unifies mismatched
+        # conditional branches by converting both to map(string), which would
+        # render cluster-init as the string "true".
         node.is_init ? { cluster-init = true } : {},
         node.is_init ? {} : { server = local.join_url },
-
-        # RKE2 runs every server component unless told otherwise, so the pool
-        # role flags have to be expressed as explicit disables. Without these a
-        # pool declared etcd-only would still serve the API, and one declared
-        # control-plane-only would still join the etcd quorum.
-        node.control_plane ? {} : {
-          disable-apiserver          = true
-          disable-controller-manager = true
-          disable-scheduler          = true
-        },
-        node.etcd ? {} : { disable-etcd = true },
-
-        var.extra_server_config,
       )) if node.is_server
     },
     {
@@ -116,6 +129,20 @@ locals {
       )) if !node.is_server
     },
   )
+
+  # The init node's alternative config: identical but joining rather than
+  # initialising. cluster-init is only ever correct for the very first
+  # bootstrap. If that node is later rebuilt — a static IP change replaces the
+  # VM, and the replacement gets a fresh boot disk — booting it with
+  # cluster-init again would start a SECOND empty datastore alongside the
+  # surviving servers and split etcd. The node picks between the two at boot;
+  # see the bootstrap script.
+  rke2_config_join_yaml = {
+    for key, node in local.node_map : key => yamlencode(merge(
+      local._server_common[key],
+      { server = local.join_url },
+    )) if node.is_server && node.is_init
+  }
 }
 
 # ── Input validation ──────────────────────────────────────────────────────────
@@ -205,6 +232,9 @@ resource "harvester_cloudinit_secret" "node" {
     node_ip         = each.value.ip
     dns_servers     = var.dns_servers
     rke2_config_b64 = base64encode(local.rke2_config_yaml[each.key])
+    rke2_config_join_b64 = try(
+      base64encode(local.rke2_config_join_yaml[each.key]), ""
+    )
   })
 
   network_data = templatefile("${path.module}/templates/network-config.yaml.tpl", {

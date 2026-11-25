@@ -166,8 +166,39 @@ local, because the chart only mounts `tls-ca` and omits `--no-cacerts` when
 that flag is set — publishing the secret without it leaves the bundle unused
 and Rancher clearing its CA certificates, so downstream agents never receive it.
 
-Leave `tls_ca_cert` empty for a publicly trusted certificate; `privateCA` stays
-`false` and the chart passes `--no-cacerts`, which is correct there.
+Leave `tls_ca_cert` empty for a publicly trusted certificate: `privateCA` stays
+`false` and the chart passes `--no-cacerts`, so Rancher serves no CA bundle.
+
+**That is not sufficient on its own.** The chart's `agentTLSMode` defaults to
+empty, which its own values file documents as meaning `strict` for new installs
+on Rancher 2.9+. A strict agent verifies Rancher against `cacerts`, and
+`--no-cacerts` leaves that empty — so downstream clusters can sit indefinitely
+at *"Waiting for Agent to check in"* and `cattle-cluster-agent` crash-loops.
+This module does not set `agentTLSMode`, so a public-certificate install needs
+one of:
+
+- **Public trust stores.** `additional_values = { agentTLSMode = "system-store" }`,
+  which sets it at install time. Correct when the certificate chains to a
+  public CA, as with Let's Encrypt or a commercial issuer.
+- **Strict mode with a bundle.** Supply `tls_ca_cert`, which publishes `tls-ca`
+  and flips `privateCA` to `true` so agents have a trust root to verify against.
+
+The setting can also be changed after install through the Rancher
+`agent-tls-mode` setting rather than the chart value — which is what
+`environments/*/05-management` does in this repo, via
+`rancher2_setting.agent_tls_mode`. Either route works; doing both means two
+places disagree about the same value, so pick one.
+
+**Rotating the bundle rolls the Rancher pods.** Changing `tls_ca_cert` between
+two non-empty values updates the `tls-ca` secret but changes nothing else the
+chart renders, so Helm would leave the Deployment alone and the running pods
+would keep serving the old bundle — the chart mounts `cacerts.pem` with
+`subPath`, and subPath mounts never pick up secret updates. The module therefore
+adds `OCDC_TLS_CA_CHECKSUM` to `extraEnv`, carrying a sha256 of the bundle, so a
+rotation changes the pod template and Helm rolls the Deployment. Only the digest
+is in the values; the bundle itself stays in the secret.
+
+Expect a rolling restart on any `tls_ca_cert` change.
 
 ## A note on `helm_release`
 

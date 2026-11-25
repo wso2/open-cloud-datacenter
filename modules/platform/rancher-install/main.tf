@@ -31,6 +31,24 @@ locals {
   # CA certs instead of serving the bundle to downstream agents.
   publishes_private_ca = var.tls_source == "secret" && var.tls_ca_cert != ""
 
+  # Rotating the CA bundle updates the tls-ca secret but changes nothing the
+  # chart renders: privateCA stays true, so Helm sees identical values and the
+  # Deployment is left alone. The pods then keep serving the OLD bundle while
+  # the apply reports success — and they would even without Rancher's
+  # read-at-startup behaviour, because the chart mounts cacerts.pem with
+  # subPath, and subPath mounts never receive secret updates from kubelet.
+  #
+  # So the bundle's digest is carried in the pod template. The chart exposes no
+  # podAnnotations hook; extraEnv is the supported value that lands there, and
+  # Rancher ignores an env var it does not know. Only the digest travels, never
+  # the bundle.
+  _ca_rollout_env = local.publishes_private_ca ? [
+    {
+      name  = "OCDC_TLS_CA_CHECKSUM"
+      value = sha256(var.tls_ca_cert)
+    },
+  ] : []
+
   # Rendered as a single values document rather than many set{} blocks: nested
   # structures and lists survive intact and the whole thing stays diffable.
   rancher_values = merge(
@@ -64,7 +82,7 @@ locals {
         }
       }
 
-      extraEnv = var.extra_env
+      extraEnv = concat(var.extra_env, local._ca_rollout_env)
 
       privateCA = local.publishes_private_ca
     }
@@ -217,9 +235,26 @@ resource "helm_release" "rancher" {
     # tls-rancher-ingress secret is created and which preconditions apply.
     # Overriding it from additional_values would desync the chart from those
     # decisions, so reject it rather than silently disagreeing.
+    # can() rather than try(): try() returns null both for an absent key and for
+    # one explicitly set to null, and the two are not equivalent. Helm replaces
+    # an explicit null, so { ingress = { tls = null } } would wipe the module's
+    # TLS block rather than leave it alone. can() is true whenever the path
+    # resolves, null included.
     precondition {
-      condition     = try(var.additional_values.ingress.tls.source, null) == null
+      condition     = !can(var.additional_values.ingress.tls.source)
       error_message = "Set the TLS source with the tls_source variable, not additional_values.ingress.tls.source — the module keys secret creation and validation off it."
+    }
+
+    # Nulling a parent object replaces the whole block, so guard those too. The
+    # sentinel distinguishes absent (fine) from null (not fine).
+    precondition {
+      condition     = try(var.additional_values.ingress, "absent") != null
+      error_message = "additional_values.ingress must not be null — Helm would replace the module's whole ingress block, including ingressClassName and the TLS source."
+    }
+
+    precondition {
+      condition     = try(var.additional_values.ingress.tls, "absent") != null
+      error_message = "additional_values.ingress.tls must not be null — Helm would replace the module's TLS block and the chart would lose ingress.tls.source."
     }
 
     # Likewise the hostname. It is the module's identity: the rancher_url and
@@ -227,8 +262,8 @@ resource "helm_release" "rancher" {
     # over remote state, and tls_cert/tls_key are issued for it. An override
     # here would point those outputs and that certificate at the wrong name.
     precondition {
-      condition     = try(var.additional_values.hostname, null) == null
-      error_message = "Set the hostname with the rancher_hostname variable, not additional_values.hostname — the module's outputs and TLS secret are derived from it."
+      condition     = !can(var.additional_values.hostname)
+      error_message = "Set the hostname with the rancher_hostname variable, not additional_values.hostname — the module's outputs and TLS secret are derived from it. This covers hostname = null, which would blank it."
     }
 
     # Rancher issues its own certificate through cert-manager unless one is

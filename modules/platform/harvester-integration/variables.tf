@@ -79,8 +79,11 @@ variable "manage_coredns" {
     To stop managing an existing one, take both steps, in this order:
 
       1. terraform state rm \
-           'module.<name>.kubernetes_config_map_v1_data.harvester_coredns_patch[0]'
+           'module.<name>.kubernetes_config_map_v1_data.harvester_coredns_patch'
          Terraform forgets the object; the live Corefile is left untouched.
+         No index: that form removes every instance of the resource, so it
+         matches both the counted address and the unindexed one left by module
+         versions predating manage_coredns. Confirm with terraform state list.
       2. Set manage_coredns = false, so the next plan does not recreate it.
 
     The order is the point. Step 2 on its own is the destroy described above,
