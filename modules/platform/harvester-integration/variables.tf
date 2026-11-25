@@ -74,8 +74,19 @@ variable "manage_coredns" {
 
     Set this at creation time. Flipping true -> false on a cluster where the
     resource already exists destroys a kubernetes_config_map_v1_data, which
-    removes the Corefile key it manages and breaks cluster DNS. To stop managing
-    an existing one, `terraform state rm` the resource instead of toggling this.
+    removes the Corefile key it manages and breaks cluster DNS.
+
+    To stop managing an existing one, take both steps, in this order:
+
+      1. terraform state rm \
+           'module.<name>.kubernetes_config_map_v1_data.harvester_coredns_patch[0]'
+         Terraform forgets the object; the live Corefile is left untouched.
+      2. Set manage_coredns = false, so the next plan does not recreate it.
+
+    The order is the point. Step 2 on its own is the destroy described above,
+    and step 1 on its own leaves manage_coredns = true, so the next apply
+    recreates the resource and force-writes the Corefile again. Confirm the
+    following plan shows neither a create nor a destroy for that address.
   EOT
   default     = true
 }

@@ -125,6 +125,58 @@ Two caveats:
   installs need raised for large chart Secrets — has to be re-expressed as a
   Traefik Middleware.
 
+### Bootstrap failures
+
+The RKE2 install runs from `/usr/local/bin/rke2-bootstrap.sh`, written by
+cloud-init and launched in the background. It logs to
+`/var/log/rke2-bootstrap.log` and is **safe to re-run**:
+
+```bash
+sudo /usr/local/bin/rke2-bootstrap.sh
+```
+
+It returns immediately if the service is already active, retries the installer
+download ten times, refuses to start a unit the installer did not produce, and
+gives up on the kubeconfig wait after 900s rather than hanging forever. Every
+failure path logs `FATAL:` and exits non-zero.
+
+A node that never joins is therefore diagnosable from the log rather than from
+a VM that looks healthy but is doing nothing.
+
+### Node roles
+
+Each pool's `control_plane` / `etcd` flags decide both whether a node runs
+`rke2-server` and which server components it runs. RKE2 starts every component
+unless disabled, so the flags are rendered as explicit disables:
+
+| Pool roles | Rendered into `config.yaml` |
+|---|---|
+| `control_plane = true`, `etcd = true` | nothing extra — the full server |
+| `control_plane = false`, `etcd = true` | `disable-apiserver`, `disable-controller-manager`, `disable-scheduler` |
+| `control_plane = true`, `etcd = false` | `disable-etcd` |
+| both `false` | joins as an agent |
+
+`cluster-init` is placed on the first node carrying `etcd`, regardless of the
+order the pools are declared in — it initialises the embedded datastore, so a
+control-plane-only node cannot hold it.
+
+`worker` is currently descriptive only: server nodes remain schedulable whether
+or not it is set. Use `extra_server_config` with `node-taint` to keep workloads
+off them.
+
+### Changing a node's IP rebuilds that node
+
+A static IP reaches the guest only through cloud-init, which renders network
+configuration on an instance's first boot. Editing an address in `node_pools`
+therefore **replaces that VM** — `replace_triggered_by` on a per-node
+`terraform_data.node_address` makes this explicit rather than letting the secret
+drift away from the running guest.
+
+Only the affected node is replaced; the rest of the pool is untouched. On a
+server node that still means an etcd member is destroyed and rejoined, so do it
+one node at a time and let the cluster converge in between. Renumbering a whole
+cluster is a rebuild, not an edit.
+
 ## Key inputs
 
 | Name | Description | Type | Default | Required |
@@ -142,6 +194,8 @@ Two caveats:
 | ingress_controller | RKE2 ingress controllers; first is the default class | `list(string)` | `["traefik"]` | no |
 | vm_cpu / vm_memory / vm_disk_size | Per-node hardware | | `8` / `16Gi` / `40Gi` | no |
 | create_ssh_key | Generate and register an SSH key | `bool` | `true` | no |
+| ssh_public_keys | OpenSSH public key lines installed for `ubuntu`; required when `create_ssh_key = false` | `list(string)` | `[]` | no |
+| ssh_key_ids | Harvester SSH key IDs attached to the VM object — these do **not** reach the guest | `list(string)` | `[]` | no |
 
 ## Outputs
 
