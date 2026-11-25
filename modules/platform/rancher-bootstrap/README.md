@@ -135,10 +135,13 @@ cloud-init and launched in the background. It logs to
 sudo /usr/local/bin/rke2-bootstrap.sh
 ```
 
-It returns immediately if the service is already active, retries the installer
-download ten times, refuses to start a unit the installer did not produce, and
-gives up on the kubeconfig wait after 900s rather than hanging forever. Every
-failure path logs `FATAL:` and exits non-zero.
+If the service is already active it skips the install and start and goes
+straight to publishing the kubeconfig, so a run interrupted between those two
+steps finishes on the next invocation rather than reporting success with no
+`/home/ubuntu/.kube/config`. It retries the installer download ten times,
+refuses to start a unit the installer did not produce, bounds service
+activation at 600s and the kubeconfig wait at 900s. Every failure path logs
+`FATAL:` and exits non-zero.
 
 A node that never joins is therefore diagnosable from the log rather than from
 a VM that looks healthy but is doing nothing.
@@ -176,6 +179,29 @@ Only the affected node is replaced; the rest of the pool is untouched. On a
 server node that still means an etcd member is destroyed and rejoined, so do it
 one node at a time and let the cluster converge in between. Renumbering a whole
 cluster is a rebuild, not an edit.
+
+**The cluster-init node is handled specially.** `cluster-init` is correct
+exactly once, at the very first bootstrap. A rebuilt init node comes up with a
+fresh boot disk, so booting it with `cluster-init` again would start a second
+empty datastore beside the surviving servers and split etcd irrecoverably.
+
+That node therefore receives two configs — `config.yaml` with `cluster-init`
+and `config.join.yaml` with `server: <kube_api_host>:9345` — and chooses
+between them at boot by probing the supervisor endpoint:
+
+| Probe result | Meaning | Config used |
+|---|---|---|
+| nothing answers | first bootstrap, no cluster yet | `cluster-init` |
+| supervisor answers | a cluster is already running | join it |
+
+The probe is six attempts over ~30s and the choice is logged to
+`/var/log/rke2-bootstrap.log`. On a first bootstrap the load balancer has no
+healthy backend, so the probe fails and `cluster-init` stands.
+
+The remaining gap is disaster recovery: if **every** server is down and the init
+node is rebuilt, nothing answers the probe and it will start a new datastore.
+Restore etcd from a snapshot rather than rebuilding the init node into a dead
+cluster.
 
 ## Key inputs
 
