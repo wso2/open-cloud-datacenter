@@ -9,7 +9,7 @@ What this module does, in order:
 1. Enables the Harvester feature flag in Rancher settings
 2. Installs the Harvester UI extension (Helm chart from the harvester-ui-extension catalog)
 3. Creates a cloud credential for Harvester — used later when provisioning RKE2 workload clusters
-4. Patches Harvester's CoreDNS so that Harvester nodes can resolve the internal Rancher hostname
+4. Optionally patches Harvester's CoreDNS so that Harvester nodes can resolve an internal Rancher hostname (off by default)
 5. Applies the Rancher registration manifest to Harvester via `kubectl`
 6. Sets the `cluster-registration-url` and `rancher-cluster` settings in Harvester
 
@@ -64,6 +64,8 @@ module "harvester_integration" {
 | `harvester_cluster_name` | Display name for the cluster in Rancher | `string` | `"harvester-hci"` | no |
 | `rancher_hostname` | FQDN of the Rancher server (must resolve from Harvester nodes) | `string` | — | yes |
 | `rancher_lb_ip` | IP address of the Rancher LoadBalancer (added to Harvester CoreDNS hosts) | `string` | — | yes |
+| `manage_coredns` | Whether the module manages the Harvester Corefile at all. Set `false` to leave it to the `rke2-coredns` chart. | `bool` | `true` | no |
+| `patch_coredns` | Add a `hosts` block mapping `rancher_lb_ip` → `rancher_hostname`. Requires `manage_coredns = true`. | `bool` | `false` | no |
 
 ## Outputs
 
@@ -74,9 +76,25 @@ module "harvester_integration" {
 
 ## Notes
 
-- CoreDNS in Harvester is patched directly so Harvester nodes can resolve `rancher_hostname`
-  (an internal name not in public DNS). This must happen before the registration manifest is
-  applied — the module handles the ordering via `depends_on`.
+- **CoreDNS.** When `patch_coredns = true`, the Corefile gets a `hosts` block so Harvester nodes
+  can resolve `rancher_hostname` (an internal name not in public DNS). This must happen before the
+  registration manifest is applied — the module handles the ordering via `depends_on`.
+- The Corefile is written with `kubernetes_config_map_v1_data` and `force = true`, seizing the field
+  from the `rke2-coredns` chart, and the "unpatched" content is a **verbatim copy of one chart
+  version's output**. Harvester releases ship different `rke2-coredns` versions, so on a cluster
+  whose stock Corefile differs this silently overwrites the difference. Diff before enabling:
+
+  ```bash
+  kubectl -n kube-system get cm rke2-coredns-rke2-coredns -o jsonpath='{.data.Corefile}'
+  ```
+
+  Set `manage_coredns = false` when Rancher is on a publicly resolvable domain (the patch is
+  pointless) or when the stock Corefile does not match. Set it at creation time — flipping
+  `true` → `false` later destroys the `kubernetes_config_map_v1_data`, which removes the `Corefile`
+  key and breaks cluster DNS; `terraform state rm` the resource instead.
+- The supported RKE2 mechanism for changing this Corefile is a `HelmChartConfig` for `rke2-coredns`
+  in `kube-system` with `valuesContent`, which lets the chart keep rendering it. The k3s-style
+  `*-custom` ConfigMap with `.override`/`.server` keys does **not** exist in `rke2-coredns`.
 - The registration manifest is applied via a `local-exec` provisioner using `kubectl`.
   The kubeconfig is written to a temp file and cleaned up via `trap EXIT`.
 - The Harvester UI extension chart version is pinned in `main.tf`. Update it when upgrading Harvester.
