@@ -218,6 +218,14 @@ check "coredns_patch_vars_set" {
   }
 }
 
+# Guard: patch_coredns is a no-op unless the Corefile is managed at all.
+check "coredns_patch_requires_management" {
+  assert {
+    condition     = !var.patch_coredns || var.manage_coredns
+    error_message = "patch_coredns = true has no effect while manage_coredns = false; the Corefile is left to the rke2-coredns chart."
+  }
+}
+
 # Validate that the kubeconfig contains embedded CA data (certificate-authority file paths
 # are not supported when building a portable SA kubeconfig for Rancher).
 check "harvester_kubeconfig_has_embedded_ca" {
@@ -322,10 +330,27 @@ resource "harvester_setting" "registration_url" {
 # rancher_lb_ip → rancher_hostname, allowing nodes to reach Rancher during bootstrap.
 # Set patch_coredns = false (default) when using a publicly resolvable domain.
 #
-# The resource is always present so that toggling patch_coredns from true → false
-# restores the standard Corefile rather than destroying the key entirely (which
-# would leave CoreDNS with an empty config and break cluster DNS).
+# When manage_coredns = true the resource is always present so that toggling
+# patch_coredns from true → false restores the standard Corefile rather than
+# destroying the key entirely (which would leave CoreDNS with an empty config and
+# break cluster DNS).
+#
+# manage_coredns = false opts out entirely — nothing is created, the chart keeps
+# ownership of the Corefile. Use it when Rancher is publicly resolvable (the patch
+# is pointless) or when the cluster's stock Corefile does not match
+# _coredns_corefile_default below. That default is a verbatim copy of one
+# rke2-coredns chart version's output; later Harvester releases ship different
+# chart versions, and force = true would silently overwrite the difference.
+#
+# Note for a future refactor: the supported RKE2 way to change this Corefile is a
+# HelmChartConfig for rke2-coredns in kube-system with valuesContent, which lets
+# the chart keep rendering it. (The k3s-style *-custom ConfigMap with .override /
+# .server keys does NOT exist in rke2-coredns.) That would replace the force-write
+# below entirely; left as-is here because no environment currently sets
+# patch_coredns = true.
 resource "kubernetes_config_map_v1_data" "harvester_coredns_patch" {
+  count = var.manage_coredns ? 1 : 0
+
   metadata {
     name      = "rke2-coredns-rke2-coredns"
     namespace = "kube-system"

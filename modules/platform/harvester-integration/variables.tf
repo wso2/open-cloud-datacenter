@@ -64,6 +64,22 @@ variable "harvester_chart_version" {
 }
 
 # ── Optional: CoreDNS patching for private Rancher hostname ──────────────────
+variable "manage_coredns" {
+  type        = bool
+  description = <<-EOT
+    Whether this module manages the Harvester cluster's CoreDNS Corefile at all.
+    Set false when the cluster's stock Corefile differs from this module's
+    hardcoded default (chart versions drift between Harvester releases) and no
+    hosts patch is needed — e.g. Rancher is on a publicly resolvable domain.
+
+    Set this at creation time. Flipping true -> false on a cluster where the
+    resource already exists destroys a kubernetes_config_map_v1_data, which
+    removes the Corefile key it manages and breaks cluster DNS. To stop managing
+    an existing one, `terraform state rm` the resource instead of toggling this.
+  EOT
+  default     = true
+}
+
 variable "patch_coredns" {
   type        = bool
   description = "Patch Harvester CoreDNS to resolve a private Rancher hostname. Set true when Rancher has no public DNS record (IP-only setup). Requires rancher_lb_ip and rancher_hostname."
