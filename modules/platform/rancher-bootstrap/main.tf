@@ -38,7 +38,11 @@ locals {
   node_map = {
     for n in local._nodes_flat : n.key => merge(n, {
       is_server = n.control_plane || n.etcd
-      is_init   = n.key == local._init_key
+
+      # cluster_already_bootstrapped removes cluster-init entirely: on an
+      # existing cluster every server joins, and no rebuild can start a second
+      # datastore.
+      is_init = n.key == local._init_key && !var.cluster_already_bootstrapped
     })
   }
 
@@ -235,6 +239,13 @@ resource "harvester_cloudinit_secret" "node" {
     rke2_config_join_b64 = try(
       base64encode(local.rke2_config_join_yaml[each.key]), ""
     )
+
+    # Probed directly, so a load balancer outage alone cannot make a rebuilt
+    # init node believe the cluster is gone.
+    peer_server_ips = join(" ", [
+      for n in local._nodes_flat : n.ip
+      if(n.control_plane || n.etcd) && n.ip != each.value.ip
+    ])
   })
 
   network_data = templatefile("${path.module}/templates/network-config.yaml.tpl", {

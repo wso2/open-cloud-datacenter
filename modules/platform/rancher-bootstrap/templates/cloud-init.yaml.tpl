@@ -52,6 +52,7 @@ write_files:
 
       SERVICE=%{ if is_server }rke2-server%{ else }rke2-agent%{ endif }
       JOIN_URL="https://${kube_api_host}:9345"
+      PEER_IPS="${peer_server_ips}"
       INSTALL_TYPE=%{ if is_server }%{ else }agent%{ endif }
       VERSION=${rke2_version}
 
@@ -83,21 +84,38 @@ write_files:
         # yet, so the probe fails and cluster-init stands. On a rebuild the
         # surviving servers answer, and this node joins them instead.
         if [ -f /etc/rancher/rke2/config.join.yaml ]; then
+          # Every server is probed directly as well as through the load
+          # balancer. A failed probe is weak evidence on its own: if only the
+          # LB were checked, an LB outage during a rebuild would look identical
+          # to a brand-new cluster, and this node would start a second
+          # datastore beside healthy peers. Asking the peers themselves narrows
+          # that to "no server is reachable at all".
           joined=no
           for attempt in 1 2 3 4 5 6; do
-            if curl -sfk --connect-timeout 5 --max-time 15 "$JOIN_URL/cacerts" >/dev/null 2>&1; then
-              joined=yes
-              break
-            fi
-            log "no cluster answering at $JOIN_URL (probe $attempt/6)"
+            for target in "$JOIN_URL" $(for ip in $PEER_IPS; do echo "https://$ip:9345"; done); do
+              if curl -sfk --connect-timeout 5 --max-time 15 "$target/cacerts" >/dev/null 2>&1; then
+                log "existing cluster answered at $target"
+                joined=yes
+                break 2
+              fi
+            done
+            log "no server answering via $JOIN_URL or peers [$PEER_IPS] (probe $attempt/6)"
             sleep 5
           done
 
           if [ "$joined" = yes ]; then
-            log "an existing cluster answered at $JOIN_URL: joining it, NOT running cluster-init"
-            mv /etc/rancher/rke2/config.join.yaml /etc/rancher/rke2/config.yaml
+            log "joining the existing cluster, NOT running cluster-init"
+            mv /etc/rancher/rke2/config.join.yaml /etc/rancher/rke2/config.yaml \
+              || die "could not install the join config"
           else
-            log "nothing answered at $JOIN_URL: treating this as the first bootstrap and running cluster-init"
+            # No server reachable anywhere. On a genuinely new cluster that is
+            # expected. On an existing one it means a partition or a full
+            # outage, and running cluster-init here would split etcd — so set
+            # cluster_already_bootstrapped = true on a live cluster, which
+            # removes this branch entirely and makes the node wait to join.
+            log "WARNING: no server answered at $JOIN_URL or peers [$PEER_IPS]"
+            log "treating this as the FIRST bootstrap and running cluster-init"
+            log "if this cluster already exists, stop now: this will start a second datastore"
             rm -f /etc/rancher/rke2/config.join.yaml
           fi
         fi
@@ -179,11 +197,25 @@ write_files:
         waited=$((waited + 5))
       done
 
-      mkdir -p /home/ubuntu/.kube
+      # Every step checked: the script runs under `set -uo pipefail` without
+      # -e, so an unchecked failure here would fall through to "bootstrap
+      # complete" and report success with no kubeconfig.
+      mkdir -p /home/ubuntu/.kube || die "could not create /home/ubuntu/.kube"
+
+      # Written to a temp file first so a failed rewrite cannot leave a
+      # truncated or empty config in place.
       sed 's|https://127.0.0.1:6443|https://${kube_api_host}:6443|' \
-        /etc/rancher/rke2/rke2.yaml > /home/ubuntu/.kube/config
-      chown -R ubuntu:ubuntu /home/ubuntu/.kube
-      chmod 600 /home/ubuntu/.kube/config
+        /etc/rancher/rke2/rke2.yaml > /home/ubuntu/.kube/config.tmp \
+        || die "could not rewrite the apiserver address in rke2.yaml"
+      [ -s /home/ubuntu/.kube/config.tmp ] \
+        || die "rewritten kubeconfig is empty"
+      grep -q "https://${kube_api_host}:6443" /home/ubuntu/.kube/config.tmp \
+        || die "rewritten kubeconfig does not point at ${kube_api_host}:6443"
+
+      mv /home/ubuntu/.kube/config.tmp /home/ubuntu/.kube/config \
+        || die "could not install the kubeconfig"
+      chown -R ubuntu:ubuntu /home/ubuntu/.kube || die "could not chown /home/ubuntu/.kube"
+      chmod 600 /home/ubuntu/.kube/config || die "could not chmod the kubeconfig"
       log "admin kubeconfig published to /home/ubuntu/.kube/config"
 %{~ endif }
       log "bootstrap complete"

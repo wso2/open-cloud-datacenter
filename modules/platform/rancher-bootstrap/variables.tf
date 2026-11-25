@@ -236,6 +236,21 @@ variable "ingress_controller" {
   }
 }
 
+variable "cluster_already_bootstrapped" {
+  type        = bool
+  description = <<-EOT
+    Declares that the RKE2 cluster already exists, so no node may ever run
+    cluster-init. Every server then joins through kube_api_host instead.
+
+    Leave false for a greenfield cluster. Set it true once the cluster is up —
+    it removes the last path by which a rebuilt node could start a second
+    datastore and split etcd. With it false, a node being rebuilt falls back to
+    cluster-init if it cannot reach ANY existing server, which is the right
+    call on a genuinely new cluster and the wrong one during an outage.
+  EOT
+  default     = false
+}
+
 variable "extra_server_config" {
   type        = any
   description = "Additional keys merged into /etc/rancher/rke2/config.yaml on server nodes (e.g. { disable = [\"rke2-ingress-nginx\"] })."
