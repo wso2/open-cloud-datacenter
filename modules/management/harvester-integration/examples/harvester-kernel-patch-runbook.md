@@ -76,7 +76,7 @@ For a kernel change, inspect the release's `os2` configuration and the main Harv
 The configured base is:
 
 ```text
-registry.opensuse.org/isv/rancher/harvester/os/dev/main/baseos-headers:latest
+registry.opensuse.org/isv/rancher/harvester/os/dev/main/baseos-headers:v1.8
 ```
 
 This is a build/base image used as an input to OS construction. The `headers` variant indicates that it supplies header/build-related content in addition to the base OS environment. It gives downstream build stages a consistent package-manager and repository context. Its exact package contents and purpose should be confirmed from the matching release's image definition; the mutable `latest` tag can change independently of a Harvester release.
@@ -125,46 +125,95 @@ The kernel RPM set must be internally consistent. Depending on the kernel packag
 
 ## Patch Workflow
 
-### 1. Establish the Release Baseline
-
-1. Select the exact Harvester release tag that the custom build will extend.
-2. Record the installer reference, OS/`os2` input, kernel package version, architecture, and add-on/component image versions resolved by that release.
-3. Inspect the release's scripts and package definitions for the OS artifact and component pins. The main repository's `scripts/` directory and `package/` tree are useful starting points, but the authoritative path is the checked-out release itself.
-4. Save the original source revision, package versions, base image digest, and build logs so the custom result can be reproduced and compared.
-
-Do not assume that changing a kernel repository or `os2` checkout alone changes the final ISO. Trace the selected artifact forward from its pin to the ISO assembly input.
-
-### 2. Patch the Kernel Source
+### 1. Patch the Kernel Source
 
 1. Check out the SUSE kernel source package/branch corresponding to the Harvester release's kernel baseline.
 2. Add the source patch and any necessary kernel configuration change using that source package's conventions.
 3. Keep the patch minimal and record its upstream status, rationale, affected architectures, and known hardware dependencies.
-4. Build and test the source package in the required OBS project. Resolve build failures and warnings before publishing.
-5. Confirm the resulting RPMs have the expected version-release, architecture, dependencies, signatures, and repository metadata.
+4. Build and publish the artifacts using the [Suse Build Service](https://build.opensuse.org)
 
-Kernel configuration is part of the change: a source patch may compile but remain inactive if the relevant option is disabled. Conversely, enabling a driver can change module dependencies and initramfs contents, so validate boot-critical storage and network devices as well as the reported kernel version.
+You may need to create a account in the suse build service account and create a branch of the kernal source repository. Following commands will help you to commit and push the changes to that branch
 
-### 3. Publish and Select the Custom RPMs
+## Suse Build Service Commands
+1. Login to the account
 
-1. Publish the successful RPM build to a controlled repository or OBS project that the OS build can reach.
-2. Confirm repository metadata is generated and that the exact custom package versions are installable for the target architecture.
-3. Update the release-specific OS build configuration to select that repository and package version. Prefer immutable versioned package references over a moving `latest` source.
-4. Review the resolved package transaction or build logs to prove that the custom kernel RPMs, rather than the official baseline RPMs, were selected.
+```bash
+osc whois
+```
 
-Do not rely on a repository name alone as proof. Check the resolved package version/release and the source repository in the build output.
+2. Branch kernel-source and check it out in one step
 
-### 4. Rebuild the Harvester OS Artifact
+```bash
+osc branch -c <SOURCE_PROJECT> kernel-source
+```
 
-Run the OS build using the exact command and configuration documented by the selected release's `os2` project. The command is deliberately not hard-coded here because targets and variables are release-dependent.
+This creates home:sathindud:branches:<SOURCE_PROJECT>/kernel-source and checks it out into the current directory.
 
-The build should start from the configured base image, install the Harvester package layer and selected kernel RPMs, and assemble the OS filesystem and boot assets. Record the resulting artifact name, tag/digest, package manifest, and build logs. Confirm the artifact contains the custom kernel package versions before moving on.
+To put it in your existing project instead, give a target project:
 
-### 5. Integrate with the Harvester ISO Build
+```bash
+osc branch -c <SOURCE_PROJECT> kernel-source home:sathindud:harvester-kernel
+```
+
+Pick <SOURCE_PROJECT> from whatever your Harvester base uses. For example:
+- openSUSE:Factory or openSUSE:Leap:16.0 (openSUSE kernels)
+- Kernel:stable (upstream-tracking kernels)
+- SUSE:SLFO:Main (SUSE Linux Micro / Framework One)
+
+You can check that the package exists first with osc ls <SOURCE_PROJECT> | grep kernel.
+
+3. Or branch and check out separately
+
+```bash
+osc branch <SOURCE_PROJECT> kernel-source
+osc co home"username:branches:<SOURCE_PROJECT> kernel-source
+cd home:username:branches:<SOURCE_PROJECT>/kernel-source
+```
+4. Edit, commit, build
+
+```bash
+osc status
+osc commit -m ""
+osc results
+osc buildlog <repo> <arch>
+```
+
+### 2. Build the baseos using those published RPMs
+Baseos can be found in the following link https://build.opensuse.org/project/show/isv:Rancher:Harvester:OS:Dev. You may need to create a branch and clone it your local machine and do this changes to install the custom RPMs.
+
+```docker
+RUN cp -a /etc/zypp/zypp.conf /etc/zypp/zypp.conf.bak && \
+    sed -i '/^multiversion =.*$/d' /etc/zypp/zypp.conf && \
+    zypper in -y --force --oldpackage --allow-vendor-change 'kernel-default = put the rpm build versoin' && \
+    mv /etc/zypp/zypp.conf.bak /etc/zypp/zypp.conf
+```
+
+and also update the osc project meta data setting the rpms.
+
+```bash
+> osc meta prj -e
+<project name="home:username:branches:isv:Rancher:Harvester:OS:Dev">
+...
+  <repository name="main">
+    <path project="home:username:harvester-kernel" repository="Leap_16.0"/>
+  </repository>
+</project>
+
+```
+
+### 3. Rebuild the Harvester OS Artifact
+
+Update the Dockerfile base os to use your published base os
+```docker
+FROM registry.opensuse.org/home/username/branches/isv/rancher/harvester/os/dev/main/baseos:latest AS base
+```
+Run the OS build using the exact command and configuration documented by the selected release's `os2` project with your custom release tag. 
+
+### 4. Integrate with the Harvester ISO Build
 
 1. In the Harvester release checkout, update the OS artifact reference using that release's supported build configuration.
 2. Build the versioned Harvester component images as described in the [custom patch ISO runbook](harvester-custom-patch-runbook.md). These images are distinct from the OS artifact.
-3. Use the installer reference matching the Harvester release. Keep `HARVESTER_INSTALLER_REF` aligned with the release unless there is a specific, validated reason to change it.
-4. Build the ISO with the release's documented target. Set `USE_LOCAL_IMAGES` for locally built Harvester component images where applicable, but do not treat it as the OS/kernel selector.
+3. Build the ISO with the release's documented target. Set `USE_LOCAL_IMAGES` for locally built Harvester component images where applicable, but do not treat it as the OS/kernel selector.
 5. Inspect build logs and packaged manifests/artifacts to confirm both the custom component image tags and the custom OS artifact were selected.
 6. Produce and retain the ISO checksum and the build provenance: source revisions, package versions, base-image digest, OBS build links/IDs, image references, and build logs.
 
