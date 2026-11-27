@@ -169,6 +169,8 @@ Expected images:
 - `rancher/harvester-webhook:v1.8.2-patch1` (and `v1.8.2-patch1-amd64`)
 - `rancher/harvester-upgrade:v1.8.2-patch1` (and `v1.8.2-patch1-amd64`)
 
+> **Kernel or Base OS changes:** Building these local Harvester container images does not patch the node kernel. Kernel changes must be built as release-compatible RPMs, included in a rebuilt Harvester OS artifact, and selected by the ISO build. Follow the [Harvester Kernel and Base OS Patch Runbook](harvester-kernel-patch-runbook.md) for that separate dependency chain.
+
 ---
 
 ### Step 6: Build the ISO image
